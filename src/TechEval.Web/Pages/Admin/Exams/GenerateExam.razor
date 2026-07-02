@@ -1,0 +1,142 @@
+@page "/admin/exams/generate"
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Generar examen — TechEval</PageTitle>
+
+<div class="container py-4" style="max-width: 700px;">
+    <div class="d-flex align-items-center mb-4 gap-3">
+        <a href="/admin/exams" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0">Generar examen automático</h1>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Título del examen *</label>
+                <input class="form-control" @bind="_title" placeholder="Ej: Evaluación técnica SQL — Junio 2024" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Descripción</label>
+                <textarea class="form-control" rows="2" @bind="_description"></textarea>
+            </div>
+
+            <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Número de preguntas *</label>
+                    <input type="number" class="form-control" @bind="_questionCount" min="1" max="50" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Tiempo límite (min) *</label>
+                    <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">% mínimo para aprobar</label>
+                    <input type="number" class="form-control" @bind="_passingScore" min="50" max="100" />
+                </div>
+            </div>
+
+            <div class="row g-3 mb-4">
+                <div class="col-md-8">
+                    <label class="form-label fw-semibold">
+                        Categorías
+                        @if (_selectedCategoryIds.Count > 0)
+                        {
+                            <span class="badge bg-primary ms-2">@_selectedCategoryIds.Count seleccionada@(_selectedCategoryIds.Count != 1 ? "s" : "")</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted fw-normal small ms-1">(todas)</span>
+                        }
+                    </label>
+                    <div class="border rounded p-3" style="max-height:180px;overflow-y:auto;background:#fafafa;">
+                        @foreach (var c in _categories)
+                        {
+                            var catId = c.Id;
+                            var isChecked = _selectedCategoryIds.Contains(catId);
+                            <div class="form-check mb-1">
+                                <input class="form-check-input" type="checkbox"
+                                       id="cat_@c.Id"
+                                       checked="@isChecked"
+                                       @onchange="() => ToggleCategory(catId)" />
+                                <label class="form-check-label" for="cat_@c.Id">@c.Name</label>
+                            </div>
+                        }
+                    </div>
+                    @if (_selectedCategoryIds.Count > 0)
+                    {
+                        <button class="btn btn-link btn-sm p-0 mt-1 text-muted"
+                                @onclick="() => _selectedCategoryIds.Clear()">
+                            Limpiar selección
+                        </button>
+                    }
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Dificultad (opcional)</label>
+                    <select class="form-select" @bind="_difficulty">
+                        <option value="">Todos los niveles</option>
+                        <option value="@DifficultyLevel.Basic">Básico</option>
+                        <option value="@DifficultyLevel.Intermediate">Intermedio</option>
+                        <option value="@DifficultyLevel.Advanced">Avanzado</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2">
+                <a href="/admin/exams" class="btn btn-outline-secondary">Cancelar</a>
+                <button class="btn btn-primary" @onclick="GenerateAsync" disabled="@_loading">
+                    @if (_loading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-magic me-1"></i> Generar examen
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _title = string.Empty, _description = string.Empty, _error = string.Empty;
+    private int _questionCount = 10, _timeLimitMinutes = 60, _passingScore = 70;
+    private HashSet<int> _selectedCategoryIds = new();
+    private DifficultyLevel? _difficulty;
+    private List<CategoryDto> _categories = new();
+    private bool _loading;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        _categories = await Api.GetCategoriesAsync() ?? new();
+    }
+
+    private void ToggleCategory(int id)
+    {
+        if (_selectedCategoryIds.Contains(id)) _selectedCategoryIds.Remove(id);
+        else _selectedCategoryIds.Add(id);
+    }
+
+    private async Task GenerateAsync()
+    {
+        _error = string.Empty;
+        if (string.IsNullOrWhiteSpace(_title)) { _error = "El título es obligatorio."; return; }
+
+        _loading = true;
+        var categoryIds = _selectedCategoryIds.Count > 0 ? _selectedCategoryIds.ToList() : null;
+        var result = await Api.GenerateExamAsync(new GenerateExamDto(
+            _title, _description, _timeLimitMinutes, _passingScore,
+            _questionCount, categoryIds, _difficulty));
+        _loading = false;
+
+        if (result is not null) Nav.NavigateTo("/admin/exams");
+        else _error = "No hay suficientes preguntas con los filtros seleccionados. Prueba cambiando los filtros.";
+    }
+}

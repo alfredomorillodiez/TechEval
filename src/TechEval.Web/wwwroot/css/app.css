@@ -1,0 +1,44 @@
+/* ──────────────────────────────────────────────────────────
+   TechEval — Estilos globales de la aplicación
+   ────────────────────────────────────────────────────────── */
+
+/* Error de Blazor */
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    background: #fff3cd;
+    border-top: 1px solid #ffc107;
+    padding: .75rem 1.25rem;
+    font-size: .875rem;
+}
+
+#blazor-error-ui .reload {
+    margin-left: .5rem;
+    font-weight: 600;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    float: right;
+    font-size: 1.1rem;
+    line-height: 1;
+    opacity: .7;
+}
+
+#blazor-error-ui .dismiss:hover {
+    opacity: 1;
+}
+
+/* Cursor pointer en elementos interactivos dentro de labels */
+.cursor-pointer {
+    cursor: pointer;
+}
+
+/* Animación de carga suave */
+.spinner-border {
+    animation-duration: .75s;
+}

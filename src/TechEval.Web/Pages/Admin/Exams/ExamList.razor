@@ -1,0 +1,419 @@
+@page "/admin/exams"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Exámenes — TechEval</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">Exámenes</h1>
+        <div class="d-flex gap-2">
+            <a href="/admin/exams/new" class="btn btn-outline-primary">
+                <i class="bi bi-plus-lg me-1"></i> Manual
+            </a>
+            <a href="/admin/exams/generate" class="btn btn-primary">
+                <i class="bi bi-magic me-1"></i> Generar automático
+            </a>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else
+    {
+        <div class="row g-4">
+            @foreach (var exam in _exams)
+            {
+                <div class="col-md-6 col-xl-4">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <h5 class="card-title mb-0">@exam.Title</h5>
+                                <span class="badge @(exam.IsActive ? "bg-success" : "bg-secondary")">
+                                    @(exam.IsActive ? "Activo" : "Inactivo")
+                                </span>
+                            </div>
+                            <div class="row text-center g-2 mb-3">
+                                <div class="col-4">
+                                    <div class="bg-light rounded p-2">
+                                        <div class="h5 mb-0">@exam.QuestionCount</div>
+                                        <div class="text-muted small">Preguntas</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="bg-light rounded p-2">
+                                        <div class="h5 mb-0">@exam.TimeLimitMinutes'</div>
+                                        <div class="text-muted small">Tiempo</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="bg-light rounded p-2">
+                                        <div class="h5 mb-0">@exam.ResultsCount</div>
+                                        <div class="text-muted small">Resultados</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-primary flex-grow-1"
+                                        @onclick="() => SendExam(exam.Id)">
+                                    <i class="bi bi-send me-1"></i> Enviar
+                                </button>
+                                <a href="/admin/exams/@exam.Id" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <a href="/admin/results?examId=@exam.Id" class="btn btn-sm btn-outline-secondary">
+                                    <i class="bi bi-bar-chart"></i>
+                                </a>
+                                <button class="btn btn-sm btn-outline-danger"
+                                        @onclick="() => DeleteAsync(exam.Id)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+        @if (!_exams.Any())
+        {
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-journal-x fs-1"></i>
+                <p class="mt-2">No hay exámenes creados aún.</p>
+            </div>
+        }
+    }
+</div>
+
+<!-- Modal envío -->
+@if (_sendingExamId.HasValue)
+{
+    <div class="modal d-block" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered @(_isBulkMode ? "modal-lg" : "")">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Enviar examen</h5>
+                    <button class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+
+                    <!-- Selector de modo -->
+                    @if (_bulkResult is null && !_sendSuccess)
+                    {
+                        <div class="btn-group w-100 mb-4" role="group">
+                            <button type="button"
+                                    class="btn @(_isBulkMode ? "btn-outline-primary" : "btn-primary")"
+                                    @onclick="() => { _isBulkMode = false; _sendError = string.Empty; }">
+                                <i class="bi bi-person me-1"></i> Individual
+                            </button>
+                            <button type="button"
+                                    class="btn @(_isBulkMode ? "btn-primary" : "btn-outline-primary")"
+                                    @onclick="() => { _isBulkMode = true; _sendError = string.Empty; }">
+                                <i class="bi bi-people me-1"></i> Masivo
+                            </button>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_sendError))
+                    {
+                        <div class="alert alert-danger">@_sendError</div>
+                    }
+
+                    @if (!_isBulkMode)
+                    {
+                        <!-- MODO INDIVIDUAL -->
+                        @if (_sendSuccess)
+                        {
+                            <div class="alert alert-success">
+                                <i class="bi bi-check-circle me-1"></i> Examen enviado correctamente a <strong>@_candidateEmail</strong>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mb-3">
+                                <label class="form-label">Nombre del candidato</label>
+                                <input class="form-control" @bind="_candidateName" placeholder="Juan García" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Email del candidato</label>
+                                <input type="email" class="form-control" @bind="_candidateEmail" placeholder="juan@empresa.com" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Expiración (horas)</label>
+                                <input type="number" class="form-control" @bind="_expirationHours" min="1" max="168" />
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <!-- MODO MASIVO -->
+                        @if (_bulkResult is not null)
+                        {
+                            <!-- Resultado del envío masivo -->
+                            <div class="alert @(_bulkResult.Failed == 0 ? "alert-success" : "alert-warning")">
+                                <i class="bi bi-check-circle me-1"></i>
+                                <strong>@_bulkResult.Sent</strong> enviados correctamente
+                                @if (_bulkResult.Failed > 0)
+                                {
+                                    <span> · <strong>@_bulkResult.Failed</strong> fallidos</span>
+                                }
+                            </div>
+                            @if (_bulkResult.Failed > 0)
+                            {
+                                <h6 class="text-danger mb-2">Candidatos con error:</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Nombre</th>
+                                                <th>Email</th>
+                                                <th>Error</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var r in _bulkResult.Results.Where(r => !r.Success))
+                                            {
+                                                <tr>
+                                                    <td>@r.CandidateName</td>
+                                                    <td>@r.CandidateEmail</td>
+                                                    <td class="text-danger small">@r.Error</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <!-- Selector de método de entrada -->
+                            <ul class="nav nav-tabs mb-3">
+                                <li class="nav-item">
+                                    <button class="nav-link @(_bulkInputMode == "manual" ? "active" : "")"
+                                            @onclick='() => _bulkInputMode = "manual"'>
+                                        <i class="bi bi-table me-1"></i> Manual
+                                    </button>
+                                </li>
+                                <li class="nav-item">
+                                    <button class="nav-link @(_bulkInputMode == "csv" ? "active" : "")"
+                                            @onclick='() => _bulkInputMode = "csv"'>
+                                        <i class="bi bi-filetype-csv me-1"></i> Pegar CSV
+                                    </button>
+                                </li>
+                            </ul>
+
+                            @if (_bulkInputMode == "manual")
+                            {
+                                <!-- Lista manual de candidatos -->
+                                @if (_bulkCandidates.Any())
+                                {
+                                    <div class="table-responsive mb-3">
+                                        <table class="table table-sm table-bordered align-middle">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Nombre</th>
+                                                    <th>Email</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @for (int i = 0; i < _bulkCandidates.Count; i++)
+                                                {
+                                                    var idx = i;
+                                                    <tr>
+                                                        <td>@_bulkCandidates[idx].Name</td>
+                                                        <td>@_bulkCandidates[idx].Email</td>
+                                                        <td class="text-center">
+                                                            <button class="btn btn-sm btn-outline-danger"
+                                                                    @onclick="() => _bulkCandidates.RemoveAt(idx)">
+                                                                <i class="bi bi-trash"></i>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                <div class="row g-2 align-items-end mb-3">
+                                    <div class="col">
+                                        <label class="form-label small">Nombre</label>
+                                        <input class="form-control form-control-sm" @bind="_newBulkName"
+                                               placeholder="Juan García" />
+                                    </div>
+                                    <div class="col">
+                                        <label class="form-label small">Email</label>
+                                        <input type="email" class="form-control form-control-sm" @bind="_newBulkEmail"
+                                               placeholder="juan@empresa.com" />
+                                    </div>
+                                    <div class="col-auto">
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="AddBulkCandidate">
+                                            <i class="bi bi-plus-lg"></i> Añadir
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <!-- Entrada CSV -->
+                                <div class="mb-2 text-muted small">
+                                    Una línea por candidato con formato: <code>Nombre,Email</code>
+                                </div>
+                                <textarea class="form-control font-monospace mb-2" rows="6"
+                                          @bind="_csvInput"
+                                          placeholder="Juan García,juan@empresa.com&#10;Ana López,ana@empresa.com&#10;Pedro Ruiz,pedro@empresa.com"></textarea>
+                                <button class="btn btn-sm btn-outline-secondary mb-3" @onclick="ParseCsv">
+                                    <i class="bi bi-arrow-repeat me-1"></i> Importar
+                                </button>
+                                @if (_bulkCandidates.Any())
+                                {
+                                    <div class="alert alert-info py-2 small">
+                                        <i class="bi bi-people me-1"></i>
+                                        <strong>@_bulkCandidates.Count</strong> candidatos importados correctamente.
+                                    </div>
+                                }
+                            }
+
+                            <div class="mb-1">
+                                <label class="form-label">Expiración (horas)</label>
+                                <input type="number" class="form-control" @bind="_expirationHours" min="1" max="168" />
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CloseModal">
+                        @((_sendSuccess || _bulkResult is not null) ? "Cerrar" : "Cancelar")
+                    </button>
+                    @if (!_sendSuccess && _bulkResult is null)
+                    {
+                        @if (!_isBulkMode)
+                        {
+                            <button class="btn btn-primary" @onclick="ConfirmSendAsync" disabled="@_sendLoading">
+                                @if (_sendLoading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                Enviar
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-primary" @onclick="ConfirmBulkSendAsync"
+                                    disabled="@(_sendLoading || !_bulkCandidates.Any())">
+                                @if (_sendLoading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                Enviar a @_bulkCandidates.Count candidato@(_bulkCandidates.Count == 1 ? "" : "s")
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ExamSummaryDto> _exams = new();
+    private bool _loading = true;
+
+    // Estado individual
+    private int? _sendingExamId;
+    private string _candidateName = string.Empty;
+    private string _candidateEmail = string.Empty;
+    private int _expirationHours = 72;
+    private bool _sendLoading, _sendSuccess;
+    private string _sendError = string.Empty;
+
+    // Estado masivo
+    private bool _isBulkMode;
+    private string _bulkInputMode = "manual";
+    private string _csvInput = string.Empty;
+    private List<BulkCandidateDto> _bulkCandidates = new();
+    private string _newBulkName = string.Empty;
+    private string _newBulkEmail = string.Empty;
+    private BulkSendResultDto? _bulkResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        _exams = await Api.GetExamsAsync() ?? new();
+        _loading = false;
+    }
+
+    private void SendExam(int id)
+    {
+        _sendingExamId = id;
+        _candidateName = _candidateEmail = _sendError = string.Empty;
+        _sendSuccess = _sendLoading = false;
+        _expirationHours = 72;
+        _isBulkMode = false;
+        _bulkInputMode = "manual";
+        _bulkCandidates = new();
+        _newBulkName = _newBulkEmail = _csvInput = string.Empty;
+        _bulkResult = null;
+    }
+
+    private void CloseModal() => _sendingExamId = null;
+
+    private async Task ConfirmSendAsync()
+    {
+        _sendError = string.Empty;
+        if (string.IsNullOrWhiteSpace(_candidateName) || string.IsNullOrWhiteSpace(_candidateEmail))
+        { _sendError = "Nombre y email son obligatorios."; return; }
+
+        _sendLoading = true;
+        var token = await Api.SendExamAsync(new SendExamDto(
+            _sendingExamId!.Value, _candidateName, _candidateEmail, _expirationHours));
+        _sendLoading = false;
+
+        if (token is not null) _sendSuccess = true;
+        else _sendError = "Error al enviar el examen. Verifica la configuración de email.";
+    }
+
+    private void AddBulkCandidate()
+    {
+        if (string.IsNullOrWhiteSpace(_newBulkName) || string.IsNullOrWhiteSpace(_newBulkEmail))
+            return;
+        _bulkCandidates.Add(new BulkCandidateDto(_newBulkName.Trim(), _newBulkEmail.Trim()));
+        _newBulkName = _newBulkEmail = string.Empty;
+    }
+
+    private void ParseCsv()
+    {
+        _bulkCandidates.Clear();
+        var lines = _csvInput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            var parts = line.Split(',', 2);
+            if (parts.Length == 2)
+            {
+                var name = parts[0].Trim().Trim('"');
+                var email = parts[1].Trim().Trim('"');
+                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(email))
+                    _bulkCandidates.Add(new BulkCandidateDto(name, email));
+            }
+        }
+    }
+
+    private async Task ConfirmBulkSendAsync()
+    {
+        _sendError = string.Empty;
+        if (!_bulkCandidates.Any())
+        { _sendError = "Añade al menos un candidato antes de enviar."; return; }
+
+        _sendLoading = true;
+        _bulkResult = await Api.SendExamBulkAsync(new BulkSendExamDto(
+            _sendingExamId!.Value, _bulkCandidates, _expirationHours));
+        _sendLoading = false;
+
+        if (_bulkResult is null)
+            _sendError = "Error al conectar con la API. Verifica la configuración.";
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        if (await Api.DeleteExamAsync(id))
+            _exams.RemoveAll(e => e.Id == id);
+    }
+}

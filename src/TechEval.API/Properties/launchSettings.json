@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "TechEval.API": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:60807;http://localhost:60808"
+    }
+  }
+}

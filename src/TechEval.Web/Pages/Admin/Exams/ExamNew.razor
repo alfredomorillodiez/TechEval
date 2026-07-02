@@ -1,0 +1,236 @@
+@page "/admin/exams/new"
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Nuevo examen — TechEval</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <a href="/admin/exams" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0">Nuevo examen manual</h1>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    <div class="row g-4">
+        <!-- Columna izquierda: configuración -->
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-0 pt-3">
+                    <h5 class="mb-0">Configuración</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Título *</label>
+                        <input class="form-control" @bind="_title" placeholder="Evaluación técnica SQL" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Descripción</label>
+                        <textarea class="form-control" rows="2" @bind="_description"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Tiempo límite (min)</label>
+                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">% mínimo para aprobar</label>
+                        <input type="number" class="form-control" @bind="_passingScore" min="0" max="100" />
+                    </div>
+
+                    <hr />
+
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-semibold">Preguntas seleccionadas</span>
+                        <span class="badge bg-primary fs-6">@_selectedIds.Count</span>
+                    </div>
+                    @if (_selectedIds.Count > 0)
+                    {
+                        <div class="small text-muted mb-3">
+                            @TotalPoints pts totales
+                        </div>
+                    }
+
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" @onclick="SaveAsync"
+                                disabled="@(_saving || _selectedIds.Count == 0)">
+                            @if (_saving)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            <i class="bi bi-floppy me-1"></i> Crear examen
+                        </button>
+                        <a href="/admin/exams" class="btn btn-outline-secondary">Cancelar</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Columna derecha: banco de preguntas -->
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-0 pt-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="mb-0">Banco de preguntas</h5>
+                        <span class="text-muted small">@_filtered.Count disponibles</span>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-5">
+                            <input class="form-control form-control-sm" placeholder="Buscar..."
+                                   value="@_search"
+                                   @oninput="e => { _search = e.Value?.ToString() ?? string.Empty; ApplyFilter(); }" />
+                        </div>
+                        <div class="col-md-4">
+                            <select class="form-select form-select-sm" @bind="_filterCategory" @bind:after="ApplyFilter">
+                                <option value="">Todas las categorías</option>
+                                @foreach (var c in _categories)
+                                {
+                                    <option value="@c.Name">@c.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm" @bind="_filterDifficulty" @bind:after="ApplyFilter">
+                                <option value="">Todos los niveles</option>
+                                <option value="@DifficultyLevel.Basic">Básico</option>
+                                <option value="@DifficultyLevel.Intermediate">Intermedio</option>
+                                <option value="@DifficultyLevel.Advanced">Avanzado</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                @if (_loading)
+                {
+                    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+                }
+                else if (!_filtered.Any())
+                {
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-inbox fs-1"></i>
+                        <p class="mt-2">No hay preguntas que coincidan con los filtros.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="card-body p-0">
+                        @foreach (var q in _filtered)
+                        {
+                            var selected = _selectedIds.Contains(q.Id);
+                            <div class="border-bottom px-4 py-3 @(selected ? "bg-primary bg-opacity-10" : "")"
+                                 style="cursor:pointer;" @onclick="() => ToggleQuestion(q.Id)">
+                                <div class="d-flex align-items-start gap-3">
+                                    <div class="form-check mt-1 flex-shrink-0">
+                                        <input class="form-check-input" type="checkbox"
+                                               checked="@selected"
+                                               @onclick:stopPropagation="true"
+                                               @onchange="() => ToggleQuestion(q.Id)" />
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <p class="mb-1 fw-semibold">@q.Text</p>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <span class="badge bg-light text-dark border small">@q.CategoryName</span>
+                                            <span class="badge @DifficultyClass(q.Difficulty) small">@DifficultyLabel(q.Difficulty)</span>
+                                            <span class="badge bg-light text-dark border small">
+                                                @(q.Type == QuestionType.MultipleChoice ? "Test" : "Abierta")
+                                            </span>
+                                            <span class="badge bg-primary small">@q.Points pt@(q.Points != 1 ? "s" : "")</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _title = string.Empty, _description = string.Empty, _error = string.Empty;
+    private int _timeLimitMinutes = 60, _passingScore = 70;
+    private bool _loading = true, _saving;
+
+    private List<QuestionSummaryDto> _allQuestions = new();
+    private List<QuestionSummaryDto> _filtered = new();
+    private List<CategoryDto> _categories = new();
+    private HashSet<int> _selectedIds = new();
+
+    private string _search = string.Empty;
+    private string _filterCategory = string.Empty;
+    private DifficultyLevel? _filterDifficulty;
+
+    private int TotalPoints => _allQuestions
+        .Where(q => _selectedIds.Contains(q.Id))
+        .Sum(q => q.Points);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+
+        var (questions, categories) = (
+            await Api.GetQuestionsAsync(),
+            await Api.GetCategoriesAsync());
+
+        _allQuestions = questions?.Where(q => q.IsActive).ToList() ?? new();
+        _categories = categories ?? new();
+        _filtered = _allQuestions;
+        _loading = false;
+    }
+
+    private void ToggleQuestion(int id)
+    {
+        if (_selectedIds.Contains(id)) _selectedIds.Remove(id);
+        else _selectedIds.Add(id);
+    }
+
+    private void ApplyFilter()
+    {
+        _filtered = _allQuestions.Where(q =>
+            (string.IsNullOrEmpty(_search) || q.Text.Contains(_search, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(_filterCategory) || q.CategoryName == _filterCategory) &&
+            (_filterDifficulty is null || q.Difficulty == _filterDifficulty)
+        ).ToList();
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = string.Empty;
+        if (string.IsNullOrWhiteSpace(_title)) { _error = "El título es obligatorio."; return; }
+        if (_selectedIds.Count == 0) { _error = "Selecciona al menos una pregunta."; return; }
+
+        _saving = true;
+        var result = await Api.CreateExamAsync(new CreateExamDto(
+            _title, _description, _timeLimitMinutes, _passingScore,
+            _selectedIds.ToList()));
+        _saving = false;
+
+        if (result is not null) Nav.NavigateTo($"/admin/exams/{result.Id}");
+        else _error = "Error al crear el examen. Inténtalo de nuevo.";
+    }
+
+    private static string DifficultyClass(DifficultyLevel d) => d switch
+    {
+        DifficultyLevel.Basic => "bg-success",
+        DifficultyLevel.Intermediate => "bg-warning text-dark",
+        DifficultyLevel.Advanced => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private static string DifficultyLabel(DifficultyLevel d) => d switch
+    {
+        DifficultyLevel.Basic => "Básico",
+        DifficultyLevel.Intermediate => "Intermedio",
+        DifficultyLevel.Advanced => "Avanzado",
+        _ => d.ToString()
+    };
+}

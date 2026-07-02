@@ -1,0 +1,174 @@
+@page "/admin"
+@page "/admin/dashboard"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Dashboard — TechEval</PageTitle>
+
+<div class="container-fluid py-4">
+    <h1 class="h3 mb-4">Dashboard</h1>
+
+    @if (_loading)
+    {
+        <div class="d-flex justify-content-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+        </div>
+    }
+    else if (_stats is not null)
+    {
+        <div class="row g-4 mb-4">
+            <div class="col-sm-6 col-xl-3">
+                <a href="/admin/exams" class="text-decoration-none">
+                    <div class="card border-0 shadow-sm h-100" style="cursor:pointer;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-primary bg-opacity-10 rounded-3 p-3 me-3">
+                                    <i class="bi bi-file-earmark-text text-primary fs-4"></i>
+                                </div>
+                                <div>
+                                    <div class="text-muted small">Exámenes activos</div>
+                                    <div class="h4 mb-0 text-dark">@_stats.TotalExams</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+                <a href="/admin/questions" class="text-decoration-none">
+                    <div class="card border-0 shadow-sm h-100" style="cursor:pointer;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-success bg-opacity-10 rounded-3 p-3 me-3">
+                                    <i class="bi bi-question-circle text-success fs-4"></i>
+                                </div>
+                                <div>
+                                    <div class="text-muted small">Preguntas</div>
+                                    <div class="h4 mb-0 text-dark">@_stats.TotalQuestions</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+                <a href="/admin/results" class="text-decoration-none">
+                    <div class="card border-0 shadow-sm h-100" style="cursor:pointer;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-warning bg-opacity-10 rounded-3 p-3 me-3">
+                                    <i class="bi bi-people text-warning fs-4"></i>
+                                </div>
+                                <div>
+                                    <div class="text-muted small">Evaluaciones este mes</div>
+                                    <div class="h4 mb-0 text-dark">@_stats.TotalResultsThisMonth</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+                <a href="/admin/results" class="text-decoration-none">
+                    <div class="card border-0 shadow-sm h-100" style="cursor:pointer;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-info bg-opacity-10 rounded-3 p-3 me-3">
+                                    <i class="bi bi-graph-up text-info fs-4"></i>
+                                </div>
+                                <div>
+                                    <div class="text-muted small">Tasa de aprobados</div>
+                                    <div class="h4 mb-0 text-dark">@_stats.PassRateThisMonth%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-0 pt-3">
+                <h5 class="mb-0">Últimas evaluaciones</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Candidato</th>
+                                <th>Email</th>
+                                <th>Examen</th>
+                                <th>Puntuación</th>
+                                <th>Resultado</th>
+                                <th>Fecha</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _stats.RecentResults)
+                            {
+                                <tr>
+                                    <td>@r.CandidateName</td>
+                                    <td class="text-muted">@r.CandidateEmail</td>
+                                    <td>@r.ExamTitle</td>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="progress flex-grow-1" style="height: 6px; min-width: 80px;">
+                                                <div class="progress-bar @(r.Passed ? "bg-success" : "bg-danger")"
+                                                     style="width: @r.ScorePercentage%"></div>
+                                            </div>
+                                            <span class="small">@r.ScorePercentage%</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge @(r.Passed ? "bg-success" : "bg-danger")">
+                                            @(r.Passed ? "Aprobado" : "Reprobado")
+                                        </span>
+                                    </td>
+                                    <td class="text-muted small">@r.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>
+                                        <a href="/admin/results/@r.Id" class="btn btn-sm btn-outline-primary">Ver</a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-warning d-flex align-items-center gap-2">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <span>No se pudieron cargar las estadísticas. Verifica que la API esté activa y que tu sesión sea válida.</span>
+            <button class="btn btn-sm btn-outline-warning ms-auto" @onclick="ReloadAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    private DashboardStatsDto? _stats;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _stats = await Api.GetDashboardAsync();
+        _loading = false;
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+}

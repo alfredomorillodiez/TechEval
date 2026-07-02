@@ -1,0 +1,335 @@
+@page "/exam/{Token}"
+@implements IDisposable
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+@inject ApiService Api
+@inject NavigationManager Nav
+
+<PageTitle>Examen técnico — TechEval</PageTitle>
+
+@if (_state == ExamState.Validating)
+{
+    <div class="d-flex justify-content-center align-items-center vh-100">
+        <div class="text-center">
+            <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem;"></div>
+            <p class="text-muted">Validando enlace de examen...</p>
+        </div>
+    </div>
+}
+else if (_state == ExamState.Invalid)
+{
+    <div class="d-flex justify-content-center align-items-center vh-100">
+        <div class="text-center" style="max-width:450px;">
+            <div class="display-1 text-danger mb-3">⚠️</div>
+            <h2>Enlace no válido</h2>
+            <p class="text-muted">@_errorMessage</p>
+        </div>
+    </div>
+}
+else if (_state == ExamState.Welcome)
+{
+    <div class="d-flex justify-content-center align-items-center min-vh-100 bg-light">
+        <div class="card border-0 shadow-lg p-4" style="max-width:500px;width:100%;">
+            <div class="text-center mb-4">
+                <div class="bg-primary bg-opacity-10 rounded-circle d-inline-flex p-3 mb-3">
+                    <i class="bi bi-file-earmark-check text-primary" style="font-size:2rem;"></i>
+                </div>
+                <h2 class="h4">@_sessionInfo!.ExamTitle</h2>
+                <p class="text-muted mb-0">Hola, <strong>@_sessionInfo.CandidateName</strong></p>
+            </div>
+            <ul class="list-unstyled mb-4">
+                <li class="d-flex align-items-center gap-2 mb-2">
+                    <i class="bi bi-list-check text-primary"></i>
+                    <span><strong>@_sessionInfo.Questions.Count</strong> preguntas</span>
+                </li>
+                <li class="d-flex align-items-center gap-2 mb-2">
+                    <i class="bi bi-clock text-primary"></i>
+                    <span>Tiempo límite: <strong>@_sessionInfo.TimeLimitMinutes minutos</strong></span>
+                </li>
+                <li class="d-flex align-items-center gap-2">
+                    <i class="bi bi-exclamation-triangle text-warning"></i>
+                    <span>Una vez iniciado no puedes pausar el examen.</span>
+                </li>
+            </ul>
+            <button class="btn btn-primary btn-lg w-100" @onclick="StartExam">
+                Comenzar examen <i class="bi bi-arrow-right ms-1"></i>
+            </button>
+        </div>
+    </div>
+}
+else if (_state == ExamState.InProgress)
+{
+    <div class="min-vh-100 bg-light">
+        <!-- Header con temporizador -->
+        <div class="bg-white shadow-sm sticky-top">
+            <div class="container-fluid py-2 px-4 d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>@_sessionInfo!.ExamTitle</strong>
+                    <span class="text-muted ms-2">@_sessionInfo.CandidateName</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="text-muted small">@(_currentQuestion + 1)/@_sessionInfo.Questions.Count</span>
+                    <div class="badge @TimerClass() fs-6 px-3 py-2">
+                        <i class="bi bi-clock me-1"></i> @FormatTimer()
+                    </div>
+                </div>
+            </div>
+            <!-- Progress bar -->
+            <div class="progress" style="height:4px;border-radius:0;">
+                <div class="progress-bar bg-primary" style="width:@((_currentQuestion + 1.0) / _sessionInfo!.Questions.Count * 100)%"></div>
+            </div>
+        </div>
+
+        <div class="container py-4" style="max-width:750px;">
+            @{
+                var q = _sessionInfo!.Questions[_currentQuestion];
+                var draft = GetDraft(q.QuestionId);
+            }
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body p-4">
+                    <div class="d-flex gap-2 mb-3">
+                        <span class="badge bg-primary">@(_currentQuestion + 1)</span>
+                        <span class="badge @(q.Type == QuestionType.MultipleChoice ? "bg-info" : "bg-warning text-dark")">
+                            @(q.Type == QuestionType.MultipleChoice ? "Test" : "Abierta")
+                        </span>
+                        <span class="badge bg-secondary">@q.Points @(q.Points == 1 ? "punto" : "puntos")</span>
+                    </div>
+                    <p class="fs-5 mb-4">@q.Text</p>
+
+                    @if (q.Type == QuestionType.MultipleChoice)
+                    {
+                        @foreach (var answer in q.Answers)
+                        {
+                            <div class="mb-2">
+                                <label class="d-flex align-items-center p-3 rounded border cursor-pointer @(draft?.SelectedAnswerId == answer.Id ? "border-primary bg-primary bg-opacity-10" : "border-light bg-white")"
+                                       style="cursor:pointer;">
+                                    <input type="radio" name="q@(q.QuestionId)" class="form-check-input me-3"
+                                           value="@answer.Id"
+                                           checked="@(draft?.SelectedAnswerId == answer.Id)"
+                                           @onchange="() => SelectAnswer(q.QuestionId, answer.Id)" />
+                                    @answer.Text
+                                </label>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <textarea class="form-control" rows="6"
+                                  placeholder="Escribe tu respuesta aquí..."
+                                  value="@draft?.OpenAnswer"
+                                  @oninput="e => UpdateOpenAnswer(q.QuestionId, e.Value?.ToString())"
+                                  @onblur="() => AutoSave(q.QuestionId)"></textarea>
+                        <div class="text-muted small mt-1">El campo se guarda automáticamente.</div>
+                    }
+                </div>
+            </div>
+
+            <!-- Navegación -->
+            <div class="d-flex justify-content-between">
+                <button class="btn btn-outline-secondary" @onclick="PrevQuestion"
+                        disabled="@(_currentQuestion == 0)">
+                    <i class="bi bi-chevron-left me-1"></i> Anterior
+                </button>
+
+                @if (_currentQuestion < _sessionInfo!.Questions.Count - 1)
+                {
+                    <button class="btn btn-primary" @onclick="NextQuestion">
+                        Siguiente <i class="bi bi-chevron-right ms-1"></i>
+                    </button>
+                }
+                else
+                {
+                    <button class="btn btn-success" @onclick="() => _showConfirm = true">
+                        <i class="bi bi-check-lg me-1"></i> Finalizar examen
+                    </button>
+                }
+            </div>
+
+            <!-- Mini mapa de preguntas -->
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-body p-3">
+                    <p class="small text-muted mb-2">Navegación rápida</p>
+                    <div class="d-flex flex-wrap gap-1">
+                        @for (int i = 0; i < _sessionInfo!.Questions.Count; i++)
+                        {
+                            var idx = i;
+                            var answered = GetDraft(_sessionInfo.Questions[i].QuestionId) is { } d
+                                && (d.SelectedAnswerId.HasValue || !string.IsNullOrEmpty(d.OpenAnswer));
+                            <button class="btn btn-sm @(idx == _currentQuestion ? "btn-primary" : answered ? "btn-success" : "btn-outline-secondary")"
+                                    style="min-width:36px;"
+                                    @onclick="() => _currentQuestion = idx">
+                                @(idx + 1)
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_showConfirm)
+    {
+        <div class="modal d-block" style="background:rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-body text-center p-4">
+                        <i class="bi bi-question-circle text-warning" style="font-size:3rem;"></i>
+                        <h4 class="mt-3">¿Finalizar el examen?</h4>
+                        <p class="text-muted">
+                            Has respondido <strong>@_drafts.Count(d => d.SelectedAnswerId.HasValue || !string.IsNullOrEmpty(d.OpenAnswer))</strong>
+                            de <strong>@_sessionInfo!.Questions.Count</strong> preguntas.
+                        </p>
+                        <p class="text-muted small">Esta acción no se puede deshacer.</p>
+                    </div>
+                    <div class="modal-footer justify-content-center gap-2">
+                        <button class="btn btn-outline-secondary" @onclick="() => _showConfirm = false">
+                            Continuar examen
+                        </button>
+                        <button class="btn btn-success" @onclick="SubmitExamAsync" disabled="@_submitting">
+                            @if (_submitting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Sí, finalizar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+else if (_state == ExamState.Completed)
+{
+    <div class="d-flex justify-content-center align-items-center min-vh-100 bg-light">
+        <div class="card border-0 shadow-lg p-4 text-center" style="max-width:500px;width:100%;">
+            <div class="display-1 mb-3">@(_result!.Passed ? "🎉" : "😔")</div>
+            <h2 class="h4 mb-1">@(_result.Passed ? "¡Aprobado!" : "No aprobado")</h2>
+            <p class="text-muted mb-4">@_result.ExamTitle</p>
+
+            <div class="p-4 rounded-3 mb-4 @(_result.Passed ? "bg-success bg-opacity-10" : "bg-danger bg-opacity-10")">
+                <div class="display-4 fw-bold @(_result.Passed ? "text-success" : "text-danger")">
+                    @_result.ScorePercentage%
+                </div>
+                <div class="text-muted">@_result.ObtainedPoints / @_result.TotalPoints puntos</div>
+            </div>
+
+            <p class="text-muted small">
+                Recibirás un email con los resultados. Gracias por participar.
+            </p>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    private enum ExamState { Validating, Invalid, Welcome, InProgress, Completed }
+    private ExamState _state = ExamState.Validating;
+
+    private ExamSessionInfoDto? _sessionInfo;
+    private ExamResultDto? _result;
+    private string _errorMessage = string.Empty;
+    private int _currentQuestion = 0;
+    private bool _showConfirm, _submitting;
+
+    private List<DraftAnswer> _drafts = new();
+    private System.Timers.Timer? _timer;
+    private int _remainingSeconds;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var validation = await Api.ValidateTokenAsync(Token);
+        if (validation is null || !validation.IsValid)
+        {
+            _errorMessage = validation?.Error ?? "Token inválido.";
+            _state = ExamState.Invalid;
+            return;
+        }
+
+        var session = await Api.StartSessionAsync(Token);
+        if (session is null) { _state = ExamState.Invalid; _errorMessage = "Error al iniciar sesión."; return; }
+
+        _sessionInfo = session;
+        _remainingSeconds = session.TimeLimitMinutes * 60;
+        _drafts = session.Questions.Select(q => new DraftAnswer { QuestionId = q.QuestionId }).ToList();
+        _state = ExamState.Welcome;
+    }
+
+    private void StartExam()
+    {
+        _state = ExamState.InProgress;
+        _timer = new System.Timers.Timer(1000);
+        _timer.Elapsed += async (_, _) =>
+        {
+            _remainingSeconds--;
+            if (_remainingSeconds <= 0)
+            {
+                _timer?.Stop();
+                await SubmitExamAsync();
+            }
+            await InvokeAsync(StateHasChanged);
+        };
+        _timer.Start();
+    }
+
+    private void NextQuestion() { if (_currentQuestion < _sessionInfo!.Questions.Count - 1) _currentQuestion++; }
+    private void PrevQuestion() { if (_currentQuestion > 0) _currentQuestion--; }
+
+    private void SelectAnswer(int questionId, int answerId)
+    {
+        var draft = GetDraft(questionId);
+        if (draft is null) return;
+        draft.SelectedAnswerId = answerId;
+        _ = AutoSave(questionId);
+    }
+
+    private void UpdateOpenAnswer(int questionId, string? text)
+    {
+        var draft = GetDraft(questionId);
+        if (draft is not null) draft.OpenAnswer = text;
+    }
+
+    private async Task AutoSave(int questionId)
+    {
+        var draft = GetDraft(questionId);
+        if (draft is null) return;
+        await Api.SaveAnswerAsync(_sessionInfo!.SessionId, new SubmitAnswerDto(
+            questionId, draft.SelectedAnswerId, draft.OpenAnswer));
+    }
+
+    private async Task SubmitExamAsync()
+    {
+        _showConfirm = false;
+        _submitting = true;
+        _timer?.Stop();
+
+        var answers = _drafts.Select(d => new SubmitAnswerDto(
+            d.QuestionId, d.SelectedAnswerId, d.OpenAnswer)).ToList();
+
+        _result = await Api.SubmitExamAsync(new SubmitExamDto(_sessionInfo!.SessionId, answers));
+        _state = ExamState.Completed;
+        _submitting = false;
+    }
+
+    private DraftAnswer? GetDraft(int questionId)
+        => _drafts.FirstOrDefault(d => d.QuestionId == questionId);
+
+    private string FormatTimer()
+    {
+        var t = TimeSpan.FromSeconds(_remainingSeconds);
+        return $"{(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
+    }
+
+    private string TimerClass()
+    {
+        if (_remainingSeconds < 60) return "bg-danger";
+        if (_remainingSeconds < 300) return "bg-warning text-dark";
+        return "bg-primary";
+    }
+
+    public void Dispose() { _timer?.Dispose(); }
+
+    private class DraftAnswer
+    {
+        public int QuestionId { get; set; }
+        public int? SelectedAnswerId { get; set; }
+        public string? OpenAnswer { get; set; }
+    }
+}

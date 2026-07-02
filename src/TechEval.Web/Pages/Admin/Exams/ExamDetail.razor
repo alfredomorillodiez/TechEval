@@ -1,0 +1,283 @@
+@page "/admin/exams/{Id:int}"
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Editar examen — TechEval</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <a href="/admin/exams" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0 flex-grow-1">@(_exam?.Title ?? "Cargando...")</h1>
+        @if (_exam is not null)
+        {
+            <span class="badge @(_isActive ? "bg-success" : "bg-secondary") fs-6">
+                @(_isActive ? "Activo" : "Inactivo")
+            </span>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_exam is null)
+    {
+        <div class="alert alert-warning">No se encontró el examen.</div>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_saveError))
+        {
+            <div class="alert alert-danger">@_saveError</div>
+        }
+        @if (_saveSuccess)
+        {
+            <div class="alert alert-success">Cambios guardados correctamente.</div>
+        }
+
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-0 pt-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Configuración</h5>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenSendModal(Id)">
+                        <i class="bi bi-send me-1"></i>Enviar a candidato
+                    </button>
+                    <button class="btn btn-sm btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                        @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-floppy me-1"></i>Guardar
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-9">
+                        <label class="form-label fw-semibold">Título</label>
+                        <input class="form-control" @bind="_title" />
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end pb-2">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="activeSwitch" @bind="_isActive" />
+                            <label class="form-check-label" for="activeSwitch">Examen activo</label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Descripción</label>
+                        <textarea class="form-control" rows="2" @bind="_description"></textarea>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Tiempo límite (min)</label>
+                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">% mínimo para aprobar</label>
+                        <input type="number" class="form-control" @bind="_passingScore" min="0" max="100" />
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <div class="d-flex gap-4 pb-2 text-muted">
+                            <span><strong class="text-dark">@_exam.QuestionCount</strong> preguntas</span>
+                            <span><strong class="text-dark">@_exam.TotalPoints</strong> puntos totales</span>
+                            <span>Creado: <strong class="text-dark">@_exam.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy")</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-0 pt-3">
+                <h5 class="mb-0">Preguntas <span class="badge bg-secondary ms-1">@_exam.Questions.Count</span></h5>
+            </div>
+            <div class="card-body">
+                @foreach (var q in _exam.Questions)
+                {
+                    <div class="border rounded p-3 mb-3">
+                        <div class="d-flex gap-3 align-items-start">
+                            <span class="badge bg-secondary rounded-pill px-2 py-1 mt-1" style="min-width:2.2rem; text-align:center;">@q.Order</span>
+                            <div class="flex-grow-1">
+                                <div class="d-flex flex-wrap gap-2 align-items-start mb-2">
+                                    <p class="mb-0 fw-semibold flex-grow-1">@q.QuestionText</p>
+                                    <span class="badge @DifficultyClass(q.Difficulty)">@DifficultyLabel(q.Difficulty)</span>
+                                    <span class="badge bg-light text-dark border">
+                                        @(q.QuestionType == QuestionType.MultipleChoice ? "Test" : "Abierta")
+                                    </span>
+                                    <span class="badge bg-primary">@q.Points pt@(q.Points != 1 ? "s" : "")</span>
+                                </div>
+                                @if (q.QuestionType == QuestionType.MultipleChoice && q.Answers.Any())
+                                {
+                                    <div class="row g-2 mt-1">
+                                        @foreach (var a in q.Answers.OrderBy(x => x.Order))
+                                        {
+                                            <div class="col-md-6">
+                                                <div class="d-flex align-items-center gap-2 px-3 py-2 rounded @(a.IsCorrect ? "bg-success bg-opacity-10 border border-success" : "bg-light")">
+                                                    <i class="bi @(a.IsCorrect ? "bi-check-circle-fill text-success" : "bi-circle text-muted") flex-shrink-0"></i>
+                                                    <span class="@(a.IsCorrect ? "fw-semibold text-success-emphasis" : "text-muted")">@a.Text</span>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@if (_sendingExamId.HasValue)
+{
+    <div class="modal d-block" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Enviar examen al candidato</h5>
+                    <button class="btn-close" @onclick="() => _sendingExamId = null"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_sendError))
+                    {
+                        <div class="alert alert-danger">@_sendError</div>
+                    }
+                    @if (_sendSuccess)
+                    {
+                        <div class="alert alert-success">
+                            Examen enviado correctamente a @_candidateEmail
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Nombre del candidato</label>
+                            <input class="form-control" @bind="_candidateName" placeholder="Juan García" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Email del candidato</label>
+                            <input type="email" class="form-control" @bind="_candidateEmail" placeholder="juan@empresa.com" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Expiración (horas)</label>
+                            <input type="number" class="form-control" @bind="_expirationHours" min="1" max="168" />
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => _sendingExamId = null">
+                        @(_sendSuccess ? "Cerrar" : "Cancelar")
+                    </button>
+                    @if (!_sendSuccess)
+                    {
+                        <button class="btn btn-primary" @onclick="ConfirmSendAsync" disabled="@_sendLoading">
+                            @if (_sendLoading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Enviar
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ExamDto? _exam;
+    private bool _loading = true;
+    private bool _saving;
+    private string _saveError = string.Empty;
+    private bool _saveSuccess;
+
+    private string _title = string.Empty;
+    private string _description = string.Empty;
+    private int _timeLimitMinutes;
+    private int _passingScore;
+    private bool _isActive;
+
+    private int? _sendingExamId;
+    private string _candidateName = string.Empty;
+    private string _candidateEmail = string.Empty;
+    private int _expirationHours = 72;
+    private bool _sendLoading, _sendSuccess;
+    private string _sendError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        _exam = await Api.GetExamAsync(Id);
+        if (_exam is not null) PopulateFields(_exam);
+        _loading = false;
+    }
+
+    private void PopulateFields(ExamDto exam)
+    {
+        _title = exam.Title;
+        _description = exam.Description;
+        _timeLimitMinutes = exam.TimeLimitMinutes;
+        _passingScore = exam.PassingScorePercentage;
+        _isActive = exam.IsActive;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saveError = string.Empty;
+        _saveSuccess = false;
+        if (string.IsNullOrWhiteSpace(_title)) { _saveError = "El título es obligatorio."; return; }
+        _saving = true;
+        var updated = await Api.UpdateExamAsync(Id, new UpdateExamDto(
+            _title, _description, _timeLimitMinutes, _passingScore, _isActive));
+        _saving = false;
+        if (updated is not null)
+        {
+            _exam = updated;
+            PopulateFields(updated);
+            _saveSuccess = true;
+        }
+        else
+        {
+            _saveError = "No se pudieron guardar los cambios.";
+        }
+    }
+
+    private void OpenSendModal(int id)
+    {
+        _sendingExamId = id;
+        _candidateName = _candidateEmail = _sendError = string.Empty;
+        _sendSuccess = _sendLoading = false;
+        _expirationHours = 72;
+    }
+
+    private async Task ConfirmSendAsync()
+    {
+        _sendError = string.Empty;
+        if (string.IsNullOrWhiteSpace(_candidateName) || string.IsNullOrWhiteSpace(_candidateEmail))
+        { _sendError = "Nombre y email son obligatorios."; return; }
+        _sendLoading = true;
+        var token = await Api.SendExamAsync(new SendExamDto(
+            _sendingExamId!.Value, _candidateName, _candidateEmail, _expirationHours));
+        _sendLoading = false;
+        if (token is not null) _sendSuccess = true;
+        else _sendError = "Error al enviar el examen. Verifica la configuración de email.";
+    }
+
+    private static string DifficultyClass(DifficultyLevel d) => d switch
+    {
+        DifficultyLevel.Basic => "bg-success",
+        DifficultyLevel.Intermediate => "bg-warning text-dark",
+        DifficultyLevel.Advanced => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private static string DifficultyLabel(DifficultyLevel d) => d switch
+    {
+        DifficultyLevel.Basic => "Básico",
+        DifficultyLevel.Intermediate => "Intermedio",
+        DifficultyLevel.Advanced => "Avanzado",
+        _ => d.ToString()
+    };
+}

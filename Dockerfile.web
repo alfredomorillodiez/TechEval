@@ -1,0 +1,17 @@
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+COPY src/TechEval.Domain/TechEval.Domain.csproj src/TechEval.Domain/
+COPY src/TechEval.Application/TechEval.Application.csproj src/TechEval.Application/
+COPY src/TechEval.Web/TechEval.Web.csproj src/TechEval.Web/
+
+RUN dotnet restore src/TechEval.Web/TechEval.Web.csproj
+
+COPY src/ src/
+
+RUN dotnet publish src/TechEval.Web/TechEval.Web.csproj -c Release -o /app/publish
+
+FROM nginx:alpine AS runtime
+COPY --from=build /app/publish/wwwroot /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/nginx.conf
+EXPOSE 80

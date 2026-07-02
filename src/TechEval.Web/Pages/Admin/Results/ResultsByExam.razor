@@ -1,0 +1,324 @@
+@page "/admin/results/exam/{ExamId:int}"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Estadísticas del examen — TechEval</PageTitle>
+
+<div class="container-fluid py-4">
+
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <a href="/admin/results" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <div>
+            <p class="text-muted small mb-0">Estadísticas del examen</p>
+            <h1 class="h3 mb-0">@_examTitle</h1>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (!_all.Any())
+    {
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            Este examen aún no tiene resultados registrados.
+        </div>
+    }
+    else
+    {
+        <!-- KPIs -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-xl-2">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <p class="text-muted small mb-1">Candidatos</p>
+                        <p class="h2 fw-bold mb-0">@_all.Count</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-2">
+                <div class="card border-start border-success border-3 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <p class="text-muted small mb-1">Aprobados</p>
+                        <p class="h2 fw-bold text-success mb-0">@_passedCount</p>
+                        <p class="text-muted small mb-0">@_passRate%</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-2">
+                <div class="card border-start border-danger border-3 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <p class="text-muted small mb-1">Reprobados</p>
+                        <p class="h2 fw-bold text-danger mb-0">@(_all.Count - _passedCount)</p>
+                        <p class="text-muted small mb-0">@(100 - _passRate)%</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-2">
+                <div class="card border-start border-primary border-3 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <p class="text-muted small mb-1">Nota media</p>
+                        <p class="h2 fw-bold text-primary mb-0">@_avgScore<span class="fs-6 fw-normal">%</span></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-2">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <p class="text-muted small mb-1">Nota máxima</p>
+                        <p class="h2 fw-bold mb-0">@_maxScore<span class="fs-6 fw-normal text-muted">%</span></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-2">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <p class="text-muted small mb-1">Nota mínima</p>
+                        <p class="h2 fw-bold mb-0">@_minScore<span class="fs-6 fw-normal text-muted">%</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Distribución de notas -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-0 pt-3">
+                <h6 class="mb-0 fw-semibold">Distribución de notas</h6>
+            </div>
+            <div class="card-body">
+                @foreach (var bucket in _distribution)
+                {
+                    var pct = _all.Count > 0 ? (double)bucket.Count / _all.Count * 100 : 0;
+                    <div class="d-flex align-items-center gap-3 mb-2">
+                        <span class="text-muted small text-end" style="min-width:5rem;">@bucket.Label</span>
+                        <div class="flex-grow-1 bg-light rounded" style="height:22px;position:relative;">
+                            <div class="rounded @bucket.Color"
+                                 style="height:100%;width:@((int)pct)%;transition:width .4s;"></div>
+                        </div>
+                        <span class="small fw-semibold" style="min-width:4rem;">
+                            @bucket.Count cand. <span class="text-muted fw-normal">(@((int)pct)%)</span>
+                        </span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Filtros -->
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body py-3">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold mb-1">Candidato / Email</label>
+                        <input class="form-control form-control-sm" placeholder="Buscar nombre o email..."
+                               value="@_fSearch"
+                               @oninput="e => { _fSearch = e.Value?.ToString() ?? string.Empty; ApplyFilter(); }" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small fw-semibold mb-1">Resultado</label>
+                        <select class="form-select form-select-sm" @bind="_fPassed" @bind:after="ApplyFilter">
+                            <option value="">Todos</option>
+                            <option value="true">Aprobado</option>
+                            <option value="false">Reprobado</option>
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small fw-semibold mb-1">Nota mínima (%)</label>
+                        <input type="number" class="form-control form-control-sm" min="0" max="100"
+                               @bind="_fScoreMin" @bind:after="ApplyFilter" />
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small fw-semibold mb-1">Nota máxima (%)</label>
+                        <input type="number" class="form-control form-control-sm" min="0" max="100"
+                               @bind="_fScoreMax" @bind:after="ApplyFilter" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small fw-semibold mb-1">Fecha desde</label>
+                        <input type="date" class="form-control form-control-sm"
+                               @bind="_fDateFrom" @bind:after="ApplyFilter" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small fw-semibold mb-1">Fecha hasta</label>
+                        <input type="date" class="form-control form-control-sm"
+                               @bind="_fDateTo" @bind:after="ApplyFilter" />
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button class="btn btn-outline-secondary btn-sm w-100" @onclick="ClearFilters">
+                            <i class="bi bi-x-circle me-1"></i>Limpiar
+                        </button>
+                    </div>
+                    <div class="col d-flex align-items-end">
+                        <span class="text-muted small">
+                            Mostrando <strong>@_filtered.Count</strong> de @_all.Count resultados
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-0">
+                @if (!_filtered.Any())
+                {
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-funnel fs-1 d-block mb-2"></i>
+                        No hay resultados que coincidan con los filtros.
+                    </div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">#</th>
+                                    <th>Candidato</th>
+                                    <th style="min-width:180px;">Puntuación</th>
+                                    <th>Resultado</th>
+                                    <th>Fecha</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var (r, i) in _filtered.OrderByDescending(r => r.ScorePercentage).Select((r, i) => (r, i + 1)))
+                                {
+                                    <tr>
+                                        <td class="ps-3 text-muted small">@i</td>
+                                        <td>
+                                            <div class="fw-semibold">@r.CandidateName</div>
+                                            <div class="text-muted small">@r.CandidateEmail</div>
+                                        </td>
+                                        <td>
+                                            <div class="d-flex align-items-center gap-2">
+                                                <div class="progress flex-grow-1" style="height:8px;">
+                                                    <div class="progress-bar @(r.Passed ? "bg-success" : "bg-danger")"
+                                                         style="width:@r.ScorePercentage%"></div>
+                                                </div>
+                                                <span class="fw-bold" style="min-width:3.5rem;">@r.ScorePercentage%</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge @(r.Passed ? "bg-success" : "bg-danger")">
+                                                @(r.Passed ? "Aprobado" : "Reprobado")
+                                            </span>
+                                        </td>
+                                        <td class="text-muted small text-nowrap">
+                                            @r.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy")<br />
+                                            <span style="font-size:.78rem;">@r.CompletedAt.ToLocalTime().ToString("HH:mm")</span>
+                                        </td>
+                                        <td class="text-end pe-3">
+                                            <a href="/admin/results/@r.Id" class="btn btn-sm btn-outline-primary">
+                                                Ver detalle
+                                            </a>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int ExamId { get; set; }
+
+    private List<ExamResultSummaryDto> _all = new();
+    private List<ExamResultSummaryDto> _filtered = new();
+    private string _examTitle = string.Empty;
+    private bool _loading = true;
+
+    // KPIs
+    private int _passedCount;
+    private int _passRate;
+    private decimal _avgScore;
+    private decimal _maxScore;
+    private decimal _minScore;
+
+    // Distribución
+    private record DistBucket(string Label, int Count, string Color);
+    private List<DistBucket> _distribution = new();
+
+    // Filtros
+    private string _fSearch = string.Empty;
+    private string _fPassed = string.Empty;
+    private int? _fScoreMin;
+    private int? _fScoreMax;
+    private DateTime? _fDateFrom;
+    private DateTime? _fDateTo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+
+        _all = await Api.GetResultsByExamAsync(ExamId) ?? new();
+        _examTitle = _all.FirstOrDefault()?.ExamTitle ?? $"Examen #{ExamId}";
+
+        ComputeKpis();
+        BuildDistribution();
+        _filtered = _all.ToList();
+        _loading = false;
+    }
+
+    private void ComputeKpis()
+    {
+        if (!_all.Any()) return;
+        _passedCount = _all.Count(r => r.Passed);
+        _passRate = (int)Math.Round((double)_passedCount / _all.Count * 100);
+        _avgScore = Math.Round(_all.Average(r => r.ScorePercentage), 1);
+        _maxScore = _all.Max(r => r.ScorePercentage);
+        _minScore = _all.Min(r => r.ScorePercentage);
+    }
+
+    private void BuildDistribution()
+    {
+        var ranges = new (string label, int from, int to, string color)[]
+        {
+            ("0 – 49%",   0,  49, "bg-danger"),
+            ("50 – 59%", 50,  59, "bg-warning"),
+            ("60 – 69%", 60,  69, "bg-warning"),
+            ("70 – 79%", 70,  79, "bg-info"),
+            ("80 – 89%", 80,  89, "bg-primary"),
+            ("90 – 100%",90, 100, "bg-success"),
+        };
+
+        _distribution = ranges.Select(r => new DistBucket(
+            r.label,
+            _all.Count(x => x.ScorePercentage >= r.from && x.ScorePercentage <= r.to),
+            r.color
+        )).ToList();
+    }
+
+    private void ApplyFilter()
+    {
+        _filtered = _all.Where(r =>
+            (string.IsNullOrEmpty(_fSearch) ||
+                r.CandidateName.Contains(_fSearch, StringComparison.OrdinalIgnoreCase) ||
+                r.CandidateEmail.Contains(_fSearch, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(_fPassed) || r.Passed.ToString().ToLower() == _fPassed) &&
+            (_fScoreMin is null || r.ScorePercentage >= _fScoreMin) &&
+            (_fScoreMax is null || r.ScorePercentage <= _fScoreMax) &&
+            (_fDateFrom is null || r.CompletedAt.ToLocalTime().Date >= _fDateFrom.Value.Date) &&
+            (_fDateTo is null || r.CompletedAt.ToLocalTime().Date <= _fDateTo.Value.Date)
+        ).ToList();
+    }
+
+    private void ClearFilters()
+    {
+        _fSearch = string.Empty;
+        _fPassed = string.Empty;
+        _fScoreMin = null;
+        _fScoreMax = null;
+        _fDateFrom = null;
+        _fDateTo = null;
+        _filtered = _all.ToList();
+    }
+}

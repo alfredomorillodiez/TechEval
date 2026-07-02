@@ -1,0 +1,259 @@
+@page "/admin/questions"
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Preguntas — TechEval</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">Banco de preguntas</h1>
+        <a href="/admin/questions/new" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i> Nueva pregunta
+        </a>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <select class="form-select" @onchange="OnCategoryChange">
+                        <option value="">Todas las categorías</option>
+                        @foreach (var c in _categories)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select" @onchange="OnDifficultyChange">
+                        <option value="">Todos los niveles</option>
+                        <option value="1">Básico</option>
+                        <option value="2">Intermedio</option>
+                        <option value="3">Avanzado</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select" @onchange="OnTypeChange">
+                        <option value="">Todos los tipos</option>
+                        <option value="1">Test (4 opciones)</option>
+                        <option value="2">Respuesta abierta</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-warning d-flex align-items-center gap-2 mb-4">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <span>@_error</span>
+            <button class="btn btn-sm btn-outline-warning ms-auto" @onclick="LoadQuestionsAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+            </button>
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Pregunta</th>
+                                <th>Categoría</th>
+                                <th>Nivel</th>
+                                <th>Tipo</th>
+                                <th>Puntos</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                            <tr>
+                                <th>
+                                    <input class="form-control form-control-sm" placeholder="Buscar..."
+                                           @oninput="e => _textFilter = e.Value?.ToString() ?? string.Empty" />
+                                </th>
+                                <th>
+                                    <select class="form-select form-select-sm"
+                                            @onchange="e => _catFilter = e.Value?.ToString() ?? string.Empty">
+                                        <option value="">Todas</option>
+                                        @foreach (var c in _categories)
+                                        {
+                                            <option value="@c.Name">@c.Name</option>
+                                        }
+                                    </select>
+                                </th>
+                                <th>
+                                    <select class="form-select form-select-sm"
+                                            @onchange="e => _diffFilter = e.Value?.ToString() ?? string.Empty">
+                                        <option value="">Todos</option>
+                                        <option value="Basic">Básico</option>
+                                        <option value="Intermediate">Intermedio</option>
+                                        <option value="Advanced">Avanzado</option>
+                                    </select>
+                                </th>
+                                <th>
+                                    <select class="form-select form-select-sm"
+                                            @onchange="e => _typeFilter = e.Value?.ToString() ?? string.Empty">
+                                        <option value="">Todos</option>
+                                        <option value="MultipleChoice">Test</option>
+                                        <option value="OpenEnded">Abierta</option>
+                                    </select>
+                                </th>
+                                <th></th>
+                                <th>
+                                    <select class="form-select form-select-sm"
+                                            @onchange="e => _activeFilter = e.Value?.ToString() ?? string.Empty">
+                                        <option value="">Todos</option>
+                                        <option value="true">Activa</option>
+                                        <option value="false">Inactiva</option>
+                                    </select>
+                                </th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var q in DisplayedQuestions)
+                            {
+                                <tr>
+                                    <td style="max-width:350px;">
+                                        <span class="text-truncate d-block" title="@q.Text">@q.Text</span>
+                                    </td>
+                                    <td><span class="badge bg-secondary">@q.CategoryName</span></td>
+                                    <td>
+                                        <span class="badge @DifficultyClass(q.Difficulty)">
+                                            @DifficultyLabel(q.Difficulty)
+                                        </span>
+                                    </td>
+                                    <td>@(q.Type == QuestionType.MultipleChoice ? "Test" : "Abierta")</td>
+                                    <td><strong>@q.Points</strong></td>
+                                    <td>
+                                        <span class="badge @(q.IsActive ? "bg-success" : "bg-secondary")">
+                                            @(q.IsActive ? "Activa" : "Inactiva")
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <a href="/admin/questions/@q.Id" class="btn btn-sm btn-outline-primary me-1">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                        <button class="btn btn-sm btn-outline-danger"
+                                                @onclick="() => DeleteAsync(q.Id)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (!DisplayedQuestions.Any())
+                {
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-inbox fs-1"></i>
+                        <p class="mt-2">No hay preguntas que coincidan con los filtros.</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<QuestionSummaryDto> _questions = new();
+    private List<CategoryDto> _categories = new();
+    private bool _loading = true;
+    private string _error = string.Empty;
+    private int? _categoryId;
+    private DifficultyLevel? _difficulty;
+    private QuestionType? _type;
+
+    private string _textFilter = string.Empty;
+    private string _catFilter = string.Empty;
+    private string _diffFilter = string.Empty;
+    private string _typeFilter = string.Empty;
+    private string _activeFilter = string.Empty;
+
+    private IEnumerable<QuestionSummaryDto> DisplayedQuestions => _questions
+        .Where(q => string.IsNullOrEmpty(_textFilter) ||
+                    q.Text.Contains(_textFilter, StringComparison.OrdinalIgnoreCase))
+        .Where(q => string.IsNullOrEmpty(_catFilter) ||
+                    q.CategoryName == _catFilter)
+        .Where(q => string.IsNullOrEmpty(_diffFilter) ||
+                    q.Difficulty.ToString() == _diffFilter)
+        .Where(q => string.IsNullOrEmpty(_typeFilter) ||
+                    q.Type.ToString() == _typeFilter)
+        .Where(q => string.IsNullOrEmpty(_activeFilter) ||
+                    q.IsActive.ToString().ToLower() == _activeFilter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        _categories = await Api.GetCategoriesAsync() ?? new();
+        await LoadQuestionsAsync();
+    }
+
+    private async Task LoadQuestionsAsync()
+    {
+        _loading = true;
+        _error = string.Empty;
+        var result = await Api.GetQuestionsAsync(_categoryId, _difficulty, _type);
+        if (result is null)
+            _error = "No se pudo conectar con la API. Verifica que la API esté activa y que tu sesión sea válida.";
+        else
+            _questions = result;
+        _loading = false;
+    }
+
+    private async Task OnCategoryChange(ChangeEventArgs e)
+    {
+        _categoryId = string.IsNullOrEmpty(e.Value?.ToString()) ? null : int.Parse(e.Value.ToString()!);
+        await LoadQuestionsAsync();
+    }
+
+    private async Task OnDifficultyChange(ChangeEventArgs e)
+    {
+        _difficulty = string.IsNullOrEmpty(e.Value?.ToString()) ? null :
+            (DifficultyLevel)int.Parse(e.Value.ToString()!);
+        await LoadQuestionsAsync();
+    }
+
+    private async Task OnTypeChange(ChangeEventArgs e)
+    {
+        _type = string.IsNullOrEmpty(e.Value?.ToString()) ? null :
+            (QuestionType)int.Parse(e.Value.ToString()!);
+        await LoadQuestionsAsync();
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        if (await Api.DeleteQuestionAsync(id))
+            _questions.RemoveAll(q => q.Id == id);
+    }
+
+    private static string DifficultyClass(DifficultyLevel d) => d switch
+    {
+        DifficultyLevel.Basic => "bg-success",
+        DifficultyLevel.Intermediate => "bg-warning text-dark",
+        DifficultyLevel.Advanced => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private static string DifficultyLabel(DifficultyLevel d) => d switch
+    {
+        DifficultyLevel.Basic => "Básico",
+        DifficultyLevel.Intermediate => "Intermedio",
+        DifficultyLevel.Advanced => "Avanzado",
+        _ => d.ToString()
+    };
+}

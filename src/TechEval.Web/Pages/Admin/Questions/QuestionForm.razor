@@ -1,0 +1,231 @@
+@page "/admin/questions/new"
+@page "/admin/questions/{Id:int}"
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>@(_isEdit ? "Editar" : "Nueva") pregunta — TechEval</PageTitle>
+
+<div class="container-lg py-4">
+    <div class="d-flex align-items-center mb-4 gap-3">
+        <a href="/admin/questions" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0">@(_isEdit ? "Editar pregunta" : "Nueva pregunta")</h1>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="alert alert-danger alert-dismissible mb-3">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>@_error
+            </div>
+        }
+
+        <div class="row g-4">
+            <!-- Columna principal: enunciado + respuestas -->
+            <div class="col-lg-8">
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-white border-0 pt-3 pb-0">
+                        <h6 class="text-uppercase text-muted small fw-semibold mb-3">Enunciado</h6>
+                    </div>
+                    <div class="card-body pt-0">
+                        <textarea class="form-control" rows="5" @bind="_text"
+                                  placeholder="Escribe aquí el enunciado completo de la pregunta..."
+                                  style="resize:vertical;"></textarea>
+                    </div>
+                </div>
+
+                @if (_type == QuestionType.MultipleChoice)
+                {
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white border-0 pt-3 pb-0">
+                            <h6 class="text-uppercase text-muted small fw-semibold mb-0">Opciones de respuesta</h6>
+                            <p class="text-muted small mt-1 mb-3">Marca el círculo de la opción correcta.</p>
+                        </div>
+                        <div class="card-body pt-0">
+                            @for (int i = 0; i < _answers.Count; i++)
+                            {
+                                var idx = i;
+                                var isCorrect = _answers[idx].IsCorrect;
+                                <div class="d-flex gap-3 align-items-start mb-3">
+                                    <div class="d-flex flex-column align-items-center pt-2" style="min-width:2.5rem;">
+                                        <input type="radio" name="correct" class="form-check-input mt-0"
+                                               style="width:1.2rem;height:1.2rem;cursor:pointer;"
+                                               checked="@isCorrect"
+                                               @onchange="() => SetCorrect(idx)" />
+                                        <span class="badge mt-2 @(isCorrect ? "bg-success" : "bg-light text-dark border")"
+                                              style="font-size:.7rem;">@(idx+1)</span>
+                                    </div>
+                                    <textarea class="form-control @(isCorrect ? "border-success" : "")"
+                                              rows="2"
+                                              placeholder="Opción @(idx + 1)"
+                                              style="resize:vertical;"
+                                              @bind="_answers[idx].Text"></textarea>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white border-0 pt-3 pb-0">
+                            <h6 class="text-uppercase text-muted small fw-semibold mb-3">Respuesta de referencia</h6>
+                        </div>
+                        <div class="card-body pt-0">
+                            <textarea class="form-control" rows="6" @bind="_sampleAnswer"
+                                      placeholder="Respuesta modelo para que el evaluador pueda comparar..."
+                                      style="resize:vertical;"></textarea>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Columna lateral: configuración -->
+            <div class="col-lg-4">
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-white border-0 pt-3 pb-0">
+                        <h6 class="text-uppercase text-muted small fw-semibold mb-3">Configuración</h6>
+                    </div>
+                    <div class="card-body pt-0">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Categoría *</label>
+                            <select class="form-select" @bind="_categoryId">
+                                <option value="0">Selecciona...</option>
+                                @foreach (var c in _categories)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Dificultad *</label>
+                            <select class="form-select" @bind="_difficulty">
+                                <option value="@DifficultyLevel.Basic">Básico</option>
+                                <option value="@DifficultyLevel.Intermediate">Intermedio</option>
+                                <option value="@DifficultyLevel.Advanced">Avanzado</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold small">Tipo *</label>
+                            <select class="form-select" @bind="_type" @bind:after="OnTypeChanged">
+                                <option value="@QuestionType.MultipleChoice">Test (4 opciones)</option>
+                                <option value="@QuestionType.OpenEnded">Respuesta abierta</option>
+                            </select>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label fw-semibold small">Puntos</label>
+                            <input type="number" class="form-control" @bind="_points" min="1" max="10" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                        @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-floppy me-1"></i>
+                        @(_isEdit ? "Guardar cambios" : "Crear pregunta")
+                    </button>
+                    <a href="/admin/questions" class="btn btn-outline-secondary">Cancelar</a>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private bool _isEdit => Id.HasValue;
+    private bool _loading = true, _saving = false;
+    private string _error = string.Empty;
+
+    private string _text = string.Empty;
+    private int _categoryId = 0;
+    private DifficultyLevel _difficulty = DifficultyLevel.Basic;
+    private QuestionType _type = QuestionType.MultipleChoice;
+    private int _points = 1;
+    private string? _sampleAnswer;
+    private List<AnswerModel> _answers = Enumerable.Range(1, 4)
+        .Select(i => new AnswerModel { Order = i }).ToList();
+    private List<CategoryDto> _categories = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+
+        _categories = await Api.GetCategoriesAsync() ?? new();
+
+        if (_isEdit)
+        {
+            var q = await Api.GetQuestionAsync(Id!.Value);
+            if (q is not null)
+            {
+                _text = q.Text;
+                _categoryId = q.CategoryId;
+                _difficulty = q.Difficulty;
+                _type = q.Type;
+                _points = q.Points;
+                _sampleAnswer = q.SampleAnswer;
+                _answers = q.Answers.Select(a => new AnswerModel
+                    { Text = a.Text, IsCorrect = a.IsCorrect, Order = a.Order }).ToList();
+            }
+        }
+
+        _loading = false;
+    }
+
+    private void OnTypeChanged()
+    {
+        if (_type == QuestionType.MultipleChoice && _answers.Count != 4)
+            _answers = Enumerable.Range(1, 4).Select(i => new AnswerModel { Order = i }).ToList();
+    }
+
+    private void SetCorrect(int idx)
+    {
+        for (int i = 0; i < _answers.Count; i++)
+            _answers[i].IsCorrect = i == idx;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = string.Empty;
+        if (string.IsNullOrWhiteSpace(_text)) { _error = "El enunciado es obligatorio."; return; }
+        if (_categoryId == 0) { _error = "Selecciona una categoría."; return; }
+        if (_type == QuestionType.MultipleChoice && !_answers.Any(a => a.IsCorrect))
+        { _error = "Marca la respuesta correcta."; return; }
+
+        _saving = true;
+        var answerDtos = _answers.Select(a => new CreateAnswerDto(a.Text, a.IsCorrect, a.Order)).ToList();
+
+        if (_isEdit)
+        {
+            await Api.UpdateQuestionAsync(Id!.Value, new UpdateQuestionDto(
+                _text, _type, _difficulty, _categoryId, _points, true, _sampleAnswer, answerDtos));
+        }
+        else
+        {
+            await Api.CreateQuestionAsync(new CreateQuestionDto(
+                _text, _type, _difficulty, _categoryId, _points, _sampleAnswer, answerDtos));
+        }
+
+        _saving = false;
+        Nav.NavigateTo("/admin/questions");
+    }
+
+    private class AnswerModel
+    {
+        public string Text { get; set; } = string.Empty;
+        public bool IsCorrect { get; set; }
+        public int Order { get; set; }
+    }
+}

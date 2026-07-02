@@ -1,0 +1,59 @@
+version: '3.9'
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      SA_PASSWORD: "TechEval_DB_2024!"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P TechEval_DB_2024! -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=TechEvalDb;User Id=sa;Password=TechEval_DB_2024!;TrustServerCertificate=True;
+      - Jwt__SecretKey=TechEval_SuperSecretKey_ChangeInProduction_2024!
+      - Email__Host=smtp.sendgrid.net
+      - Email__Port=587
+      - Email__UserName=apikey
+      - Email__Password=${SENDGRID_API_KEY}
+      - Email__FromEmail=noreply@yourdomain.com
+      - AdminPassword=Admin@123!
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "5001:80"
+    depends_on:
+      - api
+
+  # MailHog para desarrollo local (captura emails)
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    profiles:
+      - dev
+
+volumes:
+  sqlserver_data:

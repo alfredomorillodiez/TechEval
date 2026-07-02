@@ -2,18 +2,19 @@
 
 ## Índice
 1. [Visión general](#1-visión-general)
-2. [Arquitectura](#2-arquitectura)
-3. [Diseño de base de datos](#3-diseño-de-base-de-datos)
-4. [Estructura del proyecto](#4-estructura-del-proyecto)
-5. [API Reference](#5-api-reference)
-6. [Flujo completo del sistema](#6-flujo-completo-del-sistema)
-7. [Configuración y puesta en marcha](#7-configuración-y-puesta-en-marcha)
-8. [Script SQL de creación de base de datos](#8-script-sql-de-creación-de-base-de-datos)
-9. [Script SQL de preguntas del examen](#9-script-sql-de-preguntas-del-examen)
-10. [Docker](#10-docker)
-11. [Tests](#11-tests)
-12. [Seguridad](#12-seguridad)
-13. [Decisiones técnicas](#13-decisiones-técnicas)
+2. [Stack tecnológico y versiones](#2-stack-tecnológico-y-versiones)
+3. [Arquitectura](#3-arquitectura)
+4. [Diseño de base de datos](#4-diseño-de-base-de-datos)
+5. [Estructura del proyecto](#5-estructura-del-proyecto)
+6. [API Reference](#6-api-reference)
+7. [Flujo completo del sistema](#7-flujo-completo-del-sistema)
+8. [Configuración y puesta en marcha](#8-configuración-y-puesta-en-marcha)
+9. [Script SQL de creación de base de datos](#9-script-sql-de-creación-de-base-de-datos)
+10. [Script SQL de preguntas del examen](#10-script-sql-de-preguntas-del-examen)
+11. [Docker](#11-docker)
+12. [Tests](#12-tests)
+13. [Seguridad](#13-seguridad)
+14. [Decisiones técnicas](#14-decisiones-técnicas)
 
 
 ---
@@ -30,7 +31,24 @@ TechEval es una plataforma de evaluación técnica que permite:
 
 ---
 
-## 2. Arquitectura
+## 2. Stack tecnológico y versiones
+
+| Componente | Tecnología | Versión |
+|------------|-----------|---------|
+| Runtime | .NET | **9.0** |
+| Backend | ASP.NET Core | 9.0.0 |
+| Frontend | Blazor WebAssembly | 9.0.0 |
+| ORM | Entity Framework Core | 9.0.0 |
+| Base de datos | SQL Server | 2022 |
+| Autenticación | JWT Bearer | 9.0.0 |
+| Documentación API | Swashbuckle (Swagger) | 7.2.0 |
+| Logging | Serilog | 9.0.0 |
+| Email | SMTP (`System.Net.Mail`) | — |
+| Contenedores | Docker / Docker Compose | — |
+
+---
+
+## 3. Arquitectura
 
 Se aplica **Clean Architecture** con separación estricta de responsabilidades en 4 capas:
 
@@ -71,7 +89,7 @@ Se aplica **Clean Architecture** con separación estricta de responsabilidades e
 
 ---
 
-## 3. Diseño de base de datos
+## 4. Diseño de base de datos
 
 ### Diagrama de tablas
 
@@ -174,7 +192,7 @@ ExamResults
 
 ---
 
-## 4. Estructura del proyecto
+## 5. Estructura del proyecto
 
 ```
 TechEval/
@@ -291,7 +309,7 @@ TechEval/
 
 ---
 
-## 5. API Reference
+## 6. API Reference
 
 ### Autenticación
 
@@ -372,7 +390,7 @@ TechEval/
 
 ---
 
-## 6. Flujo completo del sistema
+## 7. Flujo completo del sistema
 
 ### Flujo del administrador
 
@@ -422,7 +440,7 @@ Admin consulta resultados en el dashboard
 
 ---
 
-## 7. Configuración y puesta en marcha
+## 8. Configuración y puesta en marcha
 
 ### Prerrequisitos
 
@@ -524,7 +542,7 @@ dotnet run
 
 ---
 
-## 8. Script SQL de creación de base de datos
+## 9. Script SQL de creación de base de datos
 
 El fichero [`scripts/create_database.sql`](scripts/create_database.sql) es una alternativa a las migraciones de EF Core.
 Úsalo cuando:
@@ -616,7 +634,7 @@ WHERE Email = 'admin@techeval.com';
 
 ---
 
-## 9. Script SQL de preguntas del examen
+## 10. Script SQL de preguntas del examen
 
 ### Archivo: `scripts/seed_questions_examen.sql`
 
@@ -659,7 +677,7 @@ Las preguntas de tipo `OpenEnded` (`Type = 2`) no tienen respuestas en la tabla 
 
 ---
 
-## 10. Docker
+## 11. Docker
 
 
 ### Desarrollo rápido con Docker Compose
@@ -689,7 +707,7 @@ SENDGRID_API_KEY=SG.xxx docker-compose up -d
 
 ---
 
-## 11. Tests
+## 12. Tests
 
 ### Ejecutar los tests
 
@@ -723,7 +741,7 @@ var context = new AppDbContext(options);
 
 ---
 
-## 12. Seguridad
+## 13. Seguridad
 
 ### Tokens de examen
 
@@ -768,7 +786,7 @@ var context = new AppDbContext(options);
 
 ---
 
-## 13. Decisiones técnicas
+## 14. Decisiones técnicas
 
 ### ¿Por qué Clean Architecture en lugar de solo capas?
 

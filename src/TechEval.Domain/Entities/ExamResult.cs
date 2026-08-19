@@ -7,6 +7,7 @@ public class ExamResult
     public int ExamId { get; set; }
     public string CandidateName { get; set; } = string.Empty;
     public string CandidateEmail { get; set; } = string.Empty;
+    public int? UserId { get; set; }
     public int TotalPoints { get; set; }
     public int ObtainedPoints { get; set; }
     public decimal ScorePercentage { get; set; }
@@ -15,4 +16,5 @@ public class ExamResult
 
     public ExamSession ExamSession { get; set; } = null!;
     public Exam Exam { get; set; } = null!;
+    public User? User { get; set; }
 }

@@ -24,4 +24,11 @@ public class ExamTokenRepository : BaseRepository<ExamToken>, IExamTokenReposito
             .Include(t => t.ExamSession)
                 .ThenInclude(s => s!.ExamResult)
             .FirstOrDefaultAsync(t => t.Token == token, ct);
+
+    public async Task<IReadOnlyList<ExamToken>> GetPendingByUserAsync(int userId, CancellationToken ct = default)
+        => await Context.ExamTokens
+            .Include(t => t.Exam)
+            .Where(t => t.UserId == userId && !t.IsUsed && t.ExpiresAt > DateTime.UtcNow)
+            .OrderByDescending(t => t.CreatedAt)
+            .ToListAsync(ct);
 }

@@ -15,12 +15,10 @@ public class CategoriesController : ControllerBase
     public CategoriesController(ICategoryService service) => _service = service;
 
     [HttpGet]
-    [AllowAnonymous]
     public async Task<IActionResult> GetAll(CancellationToken ct)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("{id:int}")]
-    [AllowAnonymous]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
         var result = await _service.GetByIdAsync(id, ct);

@@ -38,6 +38,6 @@ public record DashboardStatsDto(
     int PassRateThisMonth,
     List<ExamResultSummaryDto> RecentResults);
 
-public record AuthResultDto(string Token, string Name, string Email);
+public record AuthResultDto(string Token, string Name, string Email, bool IsAdmin);
 
 public record LoginDto(string Email, string Password);

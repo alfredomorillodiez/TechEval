@@ -13,6 +13,9 @@
 --   Cámbiala en producción: UPDATE Users SET PasswordHash = '<nuevo_hash>' WHERE Email = 'admin@techeval.com'
 -- ============================================================
 
+SET QUOTED_IDENTIFIER ON;
+GO
+
 USE master;
 GO
 
@@ -32,6 +35,8 @@ GO
 -- ============================================================
 -- Eliminar tablas (orden inverso de dependencias)
 -- ============================================================
+IF OBJECT_ID('dbo.QuestionGenerationJobItems', 'U') IS NOT NULL DROP TABLE dbo.QuestionGenerationJobItems;
+IF OBJECT_ID('dbo.QuestionGenerationJobs',     'U') IS NOT NULL DROP TABLE dbo.QuestionGenerationJobs;
 IF OBJECT_ID('dbo.ExamResults',   'U') IS NOT NULL DROP TABLE dbo.ExamResults;
 IF OBJECT_ID('dbo.UserAnswers',   'U') IS NOT NULL DROP TABLE dbo.UserAnswers;
 IF OBJECT_ID('dbo.ExamSessions',  'U') IS NOT NULL DROP TABLE dbo.ExamSessions;
@@ -50,6 +55,7 @@ GO
 CREATE TABLE dbo.Users (
     Id           INT           NOT NULL IDENTITY(1,1),
     Email        NVARCHAR(200) NOT NULL,
+    Username     NVARCHAR(200) NULL,        -- alumnos: parte local del email (ej. alejandro.robles)
     PasswordHash NVARCHAR(MAX) NOT NULL,   -- SHA-256 hex lowercase
     Name         NVARCHAR(200) NOT NULL,
     IsAdmin      BIT           NOT NULL CONSTRAINT DF_Users_IsAdmin    DEFAULT 0,
@@ -62,6 +68,7 @@ CREATE TABLE dbo.Users (
 GO
 
 CREATE UNIQUE INDEX IX_Users_Email ON dbo.Users (Email);
+CREATE UNIQUE INDEX IX_Users_Username ON dbo.Users (Username) WHERE Username IS NOT NULL;
 GO
 
 -- ============================================================
@@ -84,20 +91,22 @@ GO
 
 -- ============================================================
 -- 3. Questions
---    Type:       1 = MultipleChoice | 2 = OpenEnded
---    Difficulty: 1 = Basic | 2 = Intermediate | 3 = Advanced
+--    Type:               1 = MultipleChoice | 2 = OpenEnded
+--    Difficulty:         1 = Basic | 2 = Intermediate | 3 = Advanced
+--    QuestionReviewStatus: 1 = Approved | 2 = PendingReview | 3 = Rejected
 -- ============================================================
 CREATE TABLE dbo.Questions (
-    Id           INT            NOT NULL IDENTITY(1,1),
-    Text         NVARCHAR(2000) NOT NULL,
-    Type         INT            NOT NULL,
-    Difficulty   INT            NOT NULL,
-    CategoryId   INT            NOT NULL,
-    Points       INT            NOT NULL CONSTRAINT DF_Questions_Points    DEFAULT 1,
-    IsActive     BIT            NOT NULL CONSTRAINT DF_Questions_IsActive  DEFAULT 1,
-    SampleAnswer NVARCHAR(4000) NULL,       -- Respuesta de referencia para preguntas abiertas
-    CreatedAt    DATETIME2      NOT NULL CONSTRAINT DF_Questions_CreatedAt DEFAULT GETUTCDATE(),
-    UpdatedAt    DATETIME2      NULL,
+    Id                   INT            NOT NULL IDENTITY(1,1),
+    Text                 NVARCHAR(2000) NOT NULL,
+    Type                 INT            NOT NULL,
+    Difficulty           INT            NOT NULL,
+    CategoryId           INT            NOT NULL,
+    Points               INT            NOT NULL CONSTRAINT DF_Questions_Points    DEFAULT 1,
+    IsActive             BIT            NOT NULL CONSTRAINT DF_Questions_IsActive  DEFAULT 1,
+    QuestionReviewStatus INT            NOT NULL CONSTRAINT DF_Questions_ReviewStatus DEFAULT 1,
+    SampleAnswer         NVARCHAR(4000) NULL,       -- Respuesta de referencia para preguntas abiertas
+    CreatedAt            DATETIME2      NOT NULL CONSTRAINT DF_Questions_CreatedAt DEFAULT GETUTCDATE(),
+    UpdatedAt            DATETIME2      NULL,
 
     CONSTRAINT PK_Questions PRIMARY KEY (Id),
     CONSTRAINT FK_Questions_Categories FOREIGN KEY (CategoryId)
@@ -105,9 +114,10 @@ CREATE TABLE dbo.Questions (
 );
 GO
 
-CREATE INDEX IX_Questions_CategoryId ON dbo.Questions (CategoryId);
-CREATE INDEX IX_Questions_Difficulty  ON dbo.Questions (Difficulty);
-CREATE INDEX IX_Questions_IsActive    ON dbo.Questions (IsActive);
+CREATE INDEX IX_Questions_CategoryId     ON dbo.Questions (CategoryId);
+CREATE INDEX IX_Questions_Difficulty     ON dbo.Questions (Difficulty);
+CREATE INDEX IX_Questions_IsActive       ON dbo.Questions (IsActive);
+CREATE INDEX IX_Questions_ReviewStatus   ON dbo.Questions (QuestionReviewStatus);
 GO
 
 -- ============================================================
@@ -175,6 +185,7 @@ CREATE TABLE dbo.ExamTokens (
     ExamId         INT           NOT NULL,
     CandidateName  NVARCHAR(200) NOT NULL,
     CandidateEmail NVARCHAR(200) NOT NULL,
+    UserId         INT           NULL,       -- resuelto/creado la primera vez que se abre el enlace
     CreatedAt      DATETIME2     NOT NULL CONSTRAINT DF_ExamTokens_CreatedAt DEFAULT GETUTCDATE(),
     ExpiresAt      DATETIME2     NOT NULL,
     IsUsed         BIT           NOT NULL CONSTRAINT DF_ExamTokens_IsUsed DEFAULT 0,
@@ -182,11 +193,14 @@ CREATE TABLE dbo.ExamTokens (
 
     CONSTRAINT PK_ExamTokens PRIMARY KEY (Id),
     CONSTRAINT FK_ExamTokens_Exams FOREIGN KEY (ExamId)
-        REFERENCES dbo.Exams (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
+        REFERENCES dbo.Exams (Id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_ExamTokens_Users FOREIGN KEY (UserId)
+        REFERENCES dbo.Users (Id) ON DELETE SET NULL ON UPDATE NO ACTION
 );
 GO
 
 CREATE UNIQUE INDEX IX_ExamTokens_Token ON dbo.ExamTokens (Token);
+CREATE INDEX IX_ExamTokens_UserId ON dbo.ExamTokens (UserId);
 GO
 
 -- ============================================================
@@ -241,6 +255,7 @@ CREATE TABLE dbo.ExamResults (
     ExamId          INT           NOT NULL,
     CandidateName   NVARCHAR(200) NOT NULL,
     CandidateEmail  NVARCHAR(200) NOT NULL,
+    UserId          INT           NULL,       -- alumno dueño de la sesión
     TotalPoints     INT           NOT NULL CONSTRAINT DF_ExamResults_TotalPoints    DEFAULT 0,
     ObtainedPoints  INT           NOT NULL CONSTRAINT DF_ExamResults_ObtainedPoints DEFAULT 0,
     ScorePercentage DECIMAL(5,2)  NOT NULL CONSTRAINT DF_ExamResults_Score         DEFAULT 0,
@@ -251,7 +266,9 @@ CREATE TABLE dbo.ExamResults (
     CONSTRAINT FK_ExamResults_ExamSessions FOREIGN KEY (ExamSessionId)
         REFERENCES dbo.ExamSessions (Id) ON DELETE CASCADE ON UPDATE NO ACTION,
     CONSTRAINT FK_ExamResults_Exams FOREIGN KEY (ExamId)
-        REFERENCES dbo.Exams (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
+        REFERENCES dbo.Exams (Id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_ExamResults_Users FOREIGN KEY (UserId)
+        REFERENCES dbo.Users (Id) ON DELETE SET NULL ON UPDATE NO ACTION
 );
 GO
 
@@ -260,6 +277,60 @@ CREATE UNIQUE INDEX IX_ExamResults_ExamSessionId ON dbo.ExamResults (ExamSession
 CREATE INDEX IX_ExamResults_CandidateEmail       ON dbo.ExamResults (CandidateEmail);
 CREATE INDEX IX_ExamResults_ExamId               ON dbo.ExamResults (ExamId);
 CREATE INDEX IX_ExamResults_CompletedAt          ON dbo.ExamResults (CompletedAt);
+CREATE INDEX IX_ExamResults_UserId               ON dbo.ExamResults (UserId);
+GO
+
+-- ============================================================
+-- 11. QuestionGenerationJobs  (solicitud de generación de preguntas por IA)
+--    Difficulty: 1=Basic | 2=Intermediate | 3=Advanced
+--    Type:       1=MultipleChoice | 2=OpenEnded
+--    Status:     1=Queued | 2=Running | 3=Completed | 4=Failed
+-- ============================================================
+CREATE TABLE dbo.QuestionGenerationJobs (
+    Id              INT           NOT NULL IDENTITY(1,1),
+    CategoryId      INT           NOT NULL,
+    Difficulty      INT           NOT NULL,
+    Type            INT           NOT NULL,
+    Topic           NVARCHAR(500) NOT NULL,
+    RequestedCount  INT           NOT NULL,
+    Status          INT           NOT NULL CONSTRAINT DF_QGJobs_Status DEFAULT 1,
+    CreatedByUserId INT           NOT NULL,
+    CompletedAt     DATETIME2     NULL,
+    CreatedAt       DATETIME2     NOT NULL CONSTRAINT DF_QGJobs_CreatedAt DEFAULT GETUTCDATE(),
+    UpdatedAt       DATETIME2     NULL,
+
+    CONSTRAINT PK_QuestionGenerationJobs PRIMARY KEY (Id),
+    CONSTRAINT FK_QGJobs_Categories FOREIGN KEY (CategoryId)
+        REFERENCES dbo.Categories (Id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_QGJobs_Users FOREIGN KEY (CreatedByUserId)
+        REFERENCES dbo.Users (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
+);
+GO
+
+CREATE INDEX IX_QGJobs_Status ON dbo.QuestionGenerationJobs (Status);
+GO
+
+-- ============================================================
+-- 12. QuestionGenerationJobItems  (una fila por pregunta solicitada dentro de un job)
+--    Status: 1=Pending | 2=Succeeded | 3=Failed
+-- ============================================================
+CREATE TABLE dbo.QuestionGenerationJobItems (
+    Id           INT           NOT NULL IDENTITY(1,1),
+    JobId        INT           NOT NULL,
+    Status       INT           NOT NULL CONSTRAINT DF_QGJobItems_Status DEFAULT 1,
+    QuestionId   INT           NULL,
+    ErrorMessage NVARCHAR(2000) NULL,
+
+    CONSTRAINT PK_QuestionGenerationJobItems PRIMARY KEY (Id),
+    CONSTRAINT FK_QGJobItems_Jobs FOREIGN KEY (JobId)
+        REFERENCES dbo.QuestionGenerationJobs (Id) ON DELETE CASCADE ON UPDATE NO ACTION,
+    CONSTRAINT FK_QGJobItems_Questions FOREIGN KEY (QuestionId)
+        REFERENCES dbo.Questions (Id) ON DELETE SET NULL ON UPDATE NO ACTION
+);
+GO
+
+CREATE INDEX IX_QGJobItems_Status ON dbo.QuestionGenerationJobItems (Status);
+CREATE INDEX IX_QGJobItems_JobId  ON dbo.QuestionGenerationJobItems (JobId);
 GO
 
 -- ============================================================

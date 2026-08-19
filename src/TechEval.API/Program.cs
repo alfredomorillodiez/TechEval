@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
+using TechEval.API.BackgroundServices;
 using TechEval.API.Middleware;
 using TechEval.Application.Services;
 using TechEval.Infrastructure;
@@ -35,6 +36,9 @@ builder.Services.AddScoped<IQuestionService, QuestionService>();
 builder.Services.AddScoped<IExamService, ExamService>();
 builder.Services.AddScoped<IExamTokenService, ExamTokenService>();
 builder.Services.AddScoped<IResultService, ResultService>();
+builder.Services.AddScoped<IStudentPortalService, StudentPortalService>();
+builder.Services.AddScoped<IQuestionGenerationService, QuestionGenerationService>();
+builder.Services.AddHostedService<QuestionGenerationWorker>();
 
 // JWT Auth
 var jwtKey = builder.Configuration["Jwt:SecretKey"]!;

@@ -1,0 +1,9 @@
+@page "/exam/{Token}"
+@inject NavigationManager Nav
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    protected override void OnInitialized()
+        => Nav.NavigateTo($"/prueba/{Token}", forceLoad: true);
+}

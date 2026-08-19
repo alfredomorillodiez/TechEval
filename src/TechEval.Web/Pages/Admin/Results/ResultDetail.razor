@@ -33,7 +33,7 @@
                         <p class="text-muted small mb-0">@_result.CandidateEmail</p>
                     </div>
                     <div class="col-md-3">
-                        <p class="text-muted small mb-1">Examen</p>
+                        <p class="text-muted small mb-1">Prueba</p>
                         <p class="fw-semibold mb-0">@_result.ExamTitle</p>
                     </div>
                     <div class="col-md-2">
@@ -135,7 +135,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
         _result = await Api.GetResultDetailAsync(Id);
         _loading = false;
     }

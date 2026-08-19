@@ -32,4 +32,5 @@ public record ExamTokenValidationDto(
     string? Error,
     int? SessionId,
     string? ExamTitle,
-    string? CandidateName);
+    string? CandidateName,
+    string? AuthToken);

@@ -1,18 +1,18 @@
-@page "/admin/exams/new"
+@page "/admin/pruebas/new"
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
 
-<PageTitle>Nuevo examen — TechEval</PageTitle>
+<PageTitle>Nueva prueba — TechEval</PageTitle>
 
 <div class="container-fluid py-4">
     <div class="d-flex align-items-center gap-3 mb-4">
-        <a href="/admin/exams" class="btn btn-outline-secondary btn-sm">
+        <a href="/admin/pruebas" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-arrow-left"></i>
         </a>
-        <h1 class="h3 mb-0">Nuevo examen manual</h1>
+        <h1 class="h3 mb-0">Nueva prueba manual</h1>
     </div>
 
     @if (!string.IsNullOrEmpty(_error))
@@ -65,9 +65,9 @@
                             {
                                 <span class="spinner-border spinner-border-sm me-1"></span>
                             }
-                            <i class="bi bi-floppy me-1"></i> Crear examen
+                            <i class="bi bi-floppy me-1"></i> Crear prueba
                         </button>
-                        <a href="/admin/exams" class="btn btn-outline-secondary">Cancelar</a>
+                        <a href="/admin/pruebas" class="btn btn-outline-secondary">Cancelar</a>
                     </div>
                 </div>
             </div>
@@ -175,7 +175,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
 
         var (questions, categories) = (
             await Api.GetQuestionsAsync(),
@@ -214,8 +214,8 @@
             _selectedIds.ToList()));
         _saving = false;
 
-        if (result is not null) Nav.NavigateTo($"/admin/exams/{result.Id}");
-        else _error = "Error al crear el examen. Inténtalo de nuevo.";
+        if (result is not null) Nav.NavigateTo($"/admin/pruebas/{result.Id}");
+        else _error = "Error al crear la prueba. Inténtalo de nuevo.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

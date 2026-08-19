@@ -1,15 +1,15 @@
-@page "/admin/exams/{Id:int}"
+@page "/admin/pruebas/{Id:int}"
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
 
-<PageTitle>Editar examen — TechEval</PageTitle>
+<PageTitle>Editar prueba — TechEval</PageTitle>
 
 <div class="container-fluid py-4">
     <div class="d-flex align-items-center gap-3 mb-4">
-        <a href="/admin/exams" class="btn btn-outline-secondary btn-sm">
+        <a href="/admin/pruebas" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-arrow-left"></i>
         </a>
         <h1 class="h3 mb-0 flex-grow-1">@(_exam?.Title ?? "Cargando...")</h1>
@@ -27,7 +27,7 @@
     }
     else if (_exam is null)
     {
-        <div class="alert alert-warning">No se encontró el examen.</div>
+        <div class="alert alert-warning">No se encontró la prueba.</div>
     }
     else
     {
@@ -62,7 +62,7 @@
                     <div class="col-md-3 d-flex align-items-end pb-2">
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" id="activeSwitch" @bind="_isActive" />
-                            <label class="form-check-label" for="activeSwitch">Examen activo</label>
+                            <label class="form-check-label" for="activeSwitch">Prueba activa</label>
                         </div>
                     </div>
                     <div class="col-12">
@@ -136,7 +136,7 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Enviar examen al candidato</h5>
+                    <h5 class="modal-title">Enviar prueba al candidato</h5>
                     <button class="btn-close" @onclick="() => _sendingExamId = null"></button>
                 </div>
                 <div class="modal-body">
@@ -147,7 +147,7 @@
                     @if (_sendSuccess)
                     {
                         <div class="alert alert-success">
-                            Examen enviado correctamente a @_candidateEmail
+                            Prueba enviada correctamente a @_candidateEmail
                         </div>
                     }
                     else
@@ -208,7 +208,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
         _exam = await Api.GetExamAsync(Id);
         if (_exam is not null) PopulateFields(_exam);
         _loading = false;
@@ -262,7 +262,7 @@
             _sendingExamId!.Value, _candidateName, _candidateEmail, _expirationHours));
         _sendLoading = false;
         if (token is not null) _sendSuccess = true;
-        else _sendError = "Error al enviar el examen. Verifica la configuración de email.";
+        else _sendError = "Error al enviar la prueba. Verifica la configuración de email.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

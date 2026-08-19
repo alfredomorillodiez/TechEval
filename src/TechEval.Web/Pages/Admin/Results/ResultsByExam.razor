@@ -1,10 +1,10 @@
-@page "/admin/results/exam/{ExamId:int}"
+@page "/admin/results/prueba/{ExamId:int}"
 @using TechEval.Application.DTOs
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
 
-<PageTitle>Estadísticas del examen — TechEval</PageTitle>
+<PageTitle>Estadísticas de la prueba — TechEval</PageTitle>
 
 <div class="container-fluid py-4">
 
@@ -13,7 +13,7 @@
             <i class="bi bi-arrow-left"></i>
         </a>
         <div>
-            <p class="text-muted small mb-0">Estadísticas del examen</p>
+            <p class="text-muted small mb-0">Estadísticas de la prueba</p>
             <h1 class="h3 mb-0">@_examTitle</h1>
         </div>
     </div>
@@ -26,7 +26,7 @@
     {
         <div class="alert alert-info">
             <i class="bi bi-info-circle me-2"></i>
-            Este examen aún no tiene resultados registrados.
+            Esta prueba aún no tiene resultados registrados.
         </div>
     }
     else
@@ -257,10 +257,10 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
 
         _all = await Api.GetResultsByExamAsync(ExamId) ?? new();
-        _examTitle = _all.FirstOrDefault()?.ExamTitle ?? $"Examen #{ExamId}";
+        _examTitle = _all.FirstOrDefault()?.ExamTitle ?? $"Prueba #{ExamId}";
 
         ComputeKpis();
         BuildDistribution();

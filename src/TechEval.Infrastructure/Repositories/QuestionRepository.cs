@@ -20,7 +20,7 @@ public class QuestionRepository : BaseRepository<Question>, IQuestionRepository
         => await Context.Questions
             .Include(q => q.Category)
             .Include(q => q.Answers)
-            .Where(q => q.CategoryId == categoryId && q.IsActive)
+            .Where(q => q.CategoryId == categoryId && q.IsActive && q.QuestionReviewStatus == QuestionReviewStatus.Approved)
             .ToListAsync(ct);
 
     public async Task<IReadOnlyList<Question>> GetFilteredAsync(
@@ -32,7 +32,8 @@ public class QuestionRepository : BaseRepository<Question>, IQuestionRepository
             .Include(q => q.Answers)
             .AsQueryable();
 
-        if (onlyActive) query = query.Where(q => q.IsActive);
+        if (onlyActive)
+            query = query.Where(q => q.IsActive && q.QuestionReviewStatus == QuestionReviewStatus.Approved);
         if (categoryId.HasValue) query = query.Where(q => q.CategoryId == categoryId.Value);
         if (difficulty.HasValue) query = query.Where(q => q.Difficulty == difficulty.Value);
         if (type.HasValue) query = query.Where(q => q.Type == type.Value);
@@ -45,7 +46,7 @@ public class QuestionRepository : BaseRepository<Question>, IQuestionRepository
     {
         var query = Context.Questions
             .Include(q => q.Answers)
-            .Where(q => q.IsActive);
+            .Where(q => q.IsActive && q.QuestionReviewStatus == QuestionReviewStatus.Approved);
 
         if (categoryIds is { Count: > 0 }) query = query.Where(q => categoryIds.Contains(q.CategoryId));
         if (difficulty.HasValue) query = query.Where(q => q.Difficulty == difficulty.Value);

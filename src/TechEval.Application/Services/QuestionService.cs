@@ -117,5 +117,6 @@ public class QuestionService : IQuestionService
         q.Points, q.IsActive, q.SampleAnswer,
         q.Answers.OrderBy(a => a.Order)
             .Select(a => new AnswerDto(a.Id, a.Text, a.IsCorrect, a.Order))
-            .ToList());
+            .ToList(),
+        q.CreatedAt, q.UpdatedAt);
 }

@@ -1,0 +1,128 @@
+@page "/admin/questions/generate"
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Generar preguntas con IA — TechEval</PageTitle>
+
+<div class="container py-4" style="max-width: 700px;">
+    <div class="d-flex align-items-center mb-4 gap-3">
+        <a href="/admin/questions" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0">Generar preguntas con IA</h1>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+            @if (_success)
+            {
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle me-1"></i>
+                    Se encoló la generación de @_lastCount pregunta(s). El proceso corre en segundo plano;
+                    revisa el resultado en
+                    <a href="/admin/questions/review" class="alert-link">Pendientes de revisión</a>.
+                </div>
+            }
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Categoría *</label>
+                <select class="form-select" @bind="_categoryId">
+                    <option value="0">Selecciona...</option>
+                    @foreach (var c in _categories)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Dificultad *</label>
+                    <select class="form-select" @bind="_difficulty">
+                        <option value="@DifficultyLevel.Basic">Básico</option>
+                        <option value="@DifficultyLevel.Intermediate">Intermedio</option>
+                        <option value="@DifficultyLevel.Advanced">Avanzado</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Tipo *</label>
+                    <select class="form-select" @bind="_type">
+                        <option value="@QuestionType.MultipleChoice">Test (4 opciones)</option>
+                        <option value="@QuestionType.OpenEnded">Respuesta abierta</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Tema *</label>
+                <textarea class="form-control" rows="3" @bind="_topic"
+                          placeholder="Ej: JOINs en SQL, autenticación con JWT, patrones de diseño creacionales..."></textarea>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Cantidad de preguntas *</label>
+                <input type="number" class="form-control" @bind="_count" min="1" max="20" style="max-width:150px;" />
+            </div>
+
+            <div class="d-flex justify-content-end gap-2">
+                <a href="/admin/questions" class="btn btn-outline-secondary">Volver</a>
+                <button class="btn btn-primary" @onclick="GenerateAsync" disabled="@_loading">
+                    @if (_loading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-magic me-1"></i> Generar con IA
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<CategoryDto> _categories = new();
+    private int _categoryId;
+    private DifficultyLevel _difficulty = DifficultyLevel.Basic;
+    private QuestionType _type = QuestionType.MultipleChoice;
+    private string _topic = string.Empty;
+    private int _count = 5;
+    private bool _loading, _success;
+    private int _lastCount;
+    private string _error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
+        _categories = await Api.GetCategoriesAsync() ?? new();
+    }
+
+    private async Task GenerateAsync()
+    {
+        _error = string.Empty;
+        _success = false;
+
+        if (_categoryId == 0) { _error = "Selecciona una categoría."; return; }
+        if (string.IsNullOrWhiteSpace(_topic)) { _error = "El tema es obligatorio."; return; }
+        if (_count < 1 || _count > 20) { _error = "La cantidad debe estar entre 1 y 20."; return; }
+
+        _loading = true;
+        var result = await Api.GenerateQuestionsAsync(new CreateQuestionGenerationJobDto(
+            _categoryId, _difficulty, _type, _topic, _count));
+        _loading = false;
+
+        if (result is not null)
+        {
+            _success = true;
+            _lastCount = _count;
+            _topic = string.Empty;
+        }
+        else
+        {
+            _error = "No se pudo encolar la generación. Verifica que la API esté activa.";
+        }
+    }
+}

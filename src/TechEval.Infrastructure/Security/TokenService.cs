@@ -38,7 +38,7 @@ public class TokenService : ITokenService
         {
             new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
             new Claim(ClaimTypes.Email, email),
-            new Claim(ClaimTypes.Role, isAdmin ? "Admin" : "User"),
+            new Claim(ClaimTypes.Role, isAdmin ? "Admin" : "Alumno"),
             new Claim("isAdmin", isAdmin.ToString())
         };
 

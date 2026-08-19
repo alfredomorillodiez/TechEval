@@ -66,9 +66,9 @@
                                @oninput="e => { _fSearch = e.Value?.ToString() ?? string.Empty; ApplyFilter(); }" />
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label small fw-semibold mb-1">Examen</label>
+                        <label class="form-label small fw-semibold mb-1">Prueba</label>
                         <select class="form-select form-select-sm" @bind="_fExamTitle" @bind:after="ApplyFilter">
-                            <option value="">Todos los exámenes</option>
+                            <option value="">Todas las pruebas</option>
                             @foreach (var t in _examTitles)
                             {
                                 <option value="@t">@t</option>
@@ -135,7 +135,7 @@
                                 <tr>
                                     <th class="ps-3">#</th>
                                     <th>Candidato</th>
-                                    <th>Examen</th>
+                                    <th>Prueba</th>
                                     <th style="min-width:160px;">Puntuación</th>
                                     <th>Resultado</th>
                                     <th>Fecha</th>
@@ -152,9 +152,9 @@
                                             <div class="text-muted small">@r.CandidateEmail</div>
                                         </td>
                                         <td>
-                                            <a href="/admin/results/exam/@r.ExamId"
+                                            <a href="/admin/results/prueba/@r.ExamId"
                                                class="text-decoration-none fw-semibold"
-                                               title="Ver estadísticas de este examen">
+                                               title="Ver estadísticas de esta prueba">
                                                 @r.ExamTitle
                                                 <i class="bi bi-box-arrow-up-right ms-1 small text-muted"></i>
                                             </a>
@@ -218,7 +218,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
 
         _all = await Api.GetResultsAsync() ?? new();
         _examTitles = _all.Select(r => r.ExamTitle).Distinct().OrderBy(t => t).ToList();

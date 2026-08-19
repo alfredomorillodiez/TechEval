@@ -72,6 +72,28 @@ public class ApiService
     public Task<bool> DeleteQuestionAsync(int id)
         => DeleteAsync($"api/questions/{id}");
 
+    // Question generation (IA)
+    public Task<QuestionGenerationJobDto?> GenerateQuestionsAsync(CreateQuestionGenerationJobDto dto)
+        => PostAsync<CreateQuestionGenerationJobDto, QuestionGenerationJobDto>("api/question-generation/jobs", dto);
+
+    public Task<List<QuestionGenerationJobItemDto>?> GetPendingReviewItemsAsync()
+        => GetAsync<List<QuestionGenerationJobItemDto>>("api/question-generation/pending-items");
+
+    public Task<List<QuestionGenerationJobProgressDto>?> GetActiveGenerationProgressAsync()
+        => GetAsync<List<QuestionGenerationJobProgressDto>>("api/question-generation/jobs/progress");
+
+    public async Task<bool> ApproveQuestionAsync(int itemId)
+    {
+        var response = await _http.PostAsync($"api/question-generation/items/{itemId}/approve", null);
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> RejectQuestionAsync(int itemId)
+    {
+        var response = await _http.PostAsync($"api/question-generation/items/{itemId}/reject", null);
+        return response.IsSuccessStatusCode;
+    }
+
     // Exams
     public Task<List<ExamSummaryDto>?> GetExamsAsync()
         => GetAsync<List<ExamSummaryDto>>("api/exams");
@@ -118,6 +140,13 @@ public class ApiService
 
     public Task<DashboardStatsDto?> GetDashboardAsync()
         => GetAsync<DashboardStatsDto>("api/results/dashboard");
+
+    // Student portal
+    public Task<List<PendingExamDto>?> GetPendingExamsAsync()
+        => GetAsync<List<PendingExamDto>>("api/student/pending");
+
+    public Task<List<CompletedExamDto>?> GetCompletedExamsAsync()
+        => GetAsync<List<CompletedExamDto>>("api/student/completed");
 
     // Exam session (público)
     public Task<ExamTokenValidationDto?> ValidateTokenAsync(string token)

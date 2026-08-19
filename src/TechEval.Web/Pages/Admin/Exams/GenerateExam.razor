@@ -1,18 +1,18 @@
-@page "/admin/exams/generate"
+@page "/admin/pruebas/generate"
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
 
-<PageTitle>Generar examen — TechEval</PageTitle>
+<PageTitle>Generar prueba — TechEval</PageTitle>
 
 <div class="container py-4" style="max-width: 700px;">
     <div class="d-flex align-items-center mb-4 gap-3">
-        <a href="/admin/exams" class="btn btn-outline-secondary btn-sm">
+        <a href="/admin/pruebas" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-arrow-left"></i>
         </a>
-        <h1 class="h3 mb-0">Generar examen automático</h1>
+        <h1 class="h3 mb-0">Generar prueba automática</h1>
     </div>
 
     <div class="card border-0 shadow-sm">
@@ -23,7 +23,7 @@
             }
 
             <div class="mb-3">
-                <label class="form-label fw-semibold">Título del examen *</label>
+                <label class="form-label fw-semibold">Título de la prueba *</label>
                 <input class="form-control" @bind="_title" placeholder="Ej: Evaluación técnica SQL — Junio 2024" />
             </div>
             <div class="mb-3">
@@ -93,10 +93,10 @@
             </div>
 
             <div class="d-flex justify-content-end gap-2">
-                <a href="/admin/exams" class="btn btn-outline-secondary">Cancelar</a>
+                <a href="/admin/pruebas" class="btn btn-outline-secondary">Cancelar</a>
                 <button class="btn btn-primary" @onclick="GenerateAsync" disabled="@_loading">
                     @if (_loading) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                    <i class="bi bi-magic me-1"></i> Generar examen
+                    <i class="bi bi-magic me-1"></i> Generar prueba
                 </button>
             </div>
         </div>
@@ -114,7 +114,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
         _categories = await Api.GetCategoriesAsync() ?? new();
     }
 
@@ -136,7 +136,7 @@
             _questionCount, categoryIds, _difficulty));
         _loading = false;
 
-        if (result is not null) Nav.NavigateTo("/admin/exams");
+        if (result is not null) Nav.NavigateTo("/admin/pruebas");
         else _error = "No hay suficientes preguntas con los filtros seleccionados. Prueba cambiando los filtros.";
     }
 }

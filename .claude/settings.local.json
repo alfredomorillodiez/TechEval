@@ -3,7 +3,12 @@
     "allow": [
       "PowerShell($bytes = [System.Text.Encoding]::UTF8.GetBytes\\(\"Admin@123!\"\\); $hash = [System.Security.Cryptography.SHA256]::Create\\(\\).ComputeHash\\($bytes\\); [System.BitConverter]::ToString\\($hash\\).Replace\\(\"-\",\"\"\\).ToLower\\(\\))",
       "Bash(xargs grep -l \"GetResultDetailAsync\\\\|/admin/results/{id}\")",
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Bash(npm --version)",
+      "Bash(rtk npx *)",
+      "Bash(npm list *)",
+      "Bash(rtk ls *)",
+      "Bash(openspec list *)"
     ]
   }
 }

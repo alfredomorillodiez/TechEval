@@ -22,6 +22,7 @@ public class ExamTokenService : IExamTokenService
     private readonly IRepository<ExamSession> _sessionRepo;
     private readonly IRepository<UserAnswer> _answerRepo;
     private readonly IExamResultRepository _resultRepo;
+    private readonly IRepository<User> _userRepo;
     private readonly IEmailService _emailService;
     private readonly ITokenService _tokenService;
 
@@ -31,6 +32,7 @@ public class ExamTokenService : IExamTokenService
         IRepository<ExamSession> sessionRepo,
         IRepository<UserAnswer> answerRepo,
         IExamResultRepository resultRepo,
+        IRepository<User> userRepo,
         IEmailService emailService,
         ITokenService tokenService)
     {
@@ -39,6 +41,7 @@ public class ExamTokenService : IExamTokenService
         _sessionRepo = sessionRepo;
         _answerRepo = answerRepo;
         _resultRepo = resultRepo;
+        _userRepo = userRepo;
         _emailService = emailService;
         _tokenService = tokenService;
     }
@@ -62,7 +65,7 @@ public class ExamTokenService : IExamTokenService
 
         await _tokenRepo.AddAsync(examToken, ct);
 
-        var examLink = $"{baseUrl}/exam/{secureToken}";
+        var examLink = $"{baseUrl}/prueba/{secureToken}";
         await _emailService.SendExamInvitationAsync(
             dto.CandidateEmail, dto.CandidateName,
             exam.Title, examLink, expiresAt, ct);
@@ -95,7 +98,7 @@ public class ExamTokenService : IExamTokenService
 
                 await _tokenRepo.AddAsync(examToken, ct);
 
-                var examLink = $"{baseUrl}/exam/{secureToken}";
+                var examLink = $"{baseUrl}/prueba/{secureToken}";
                 await _emailService.SendExamInvitationAsync(
                     candidate.Email, candidate.Name,
                     exam.Title, examLink, expiresAt, ct);
@@ -118,17 +121,45 @@ public class ExamTokenService : IExamTokenService
     {
         var examToken = await _tokenRepo.GetWithExamAndSessionAsync(token, ct);
         if (examToken is null)
-            return new ExamTokenValidationDto(false, "Token no válido.", null, null, null);
+            return new ExamTokenValidationDto(false, "Token no válido.", null, null, null, null);
         if (examToken.IsExpired)
-            return new ExamTokenValidationDto(false, "El enlace ha expirado.", null, null, null);
+            return new ExamTokenValidationDto(false, "El enlace ha expirado.", null, null, null, null);
         if (examToken.IsUsed)
-            return new ExamTokenValidationDto(false, "Este examen ya ha sido completado.", null, null, null);
+            return new ExamTokenValidationDto(false, "Este examen ya ha sido completado.", null, null, null, null);
+
+        var user = await GetOrCreateStudentAsync(examToken.CandidateEmail, examToken.CandidateName, ct);
+        if (examToken.UserId != user.Id)
+        {
+            examToken.UserId = user.Id;
+            await _tokenRepo.UpdateAsync(examToken, ct);
+        }
+
+        var authToken = _tokenService.GenerateJwtToken(user.Id, user.Email, isAdmin: false);
 
         return new ExamTokenValidationDto(
             true, null,
             examToken.ExamSession?.Id,
             examToken.Exam.Title,
-            examToken.CandidateName);
+            examToken.CandidateName,
+            authToken);
+    }
+
+    private async Task<User> GetOrCreateStudentAsync(string email, string name, CancellationToken ct)
+    {
+        var existing = await _userRepo.FindAsync(u => u.Email == email, ct);
+        if (existing.Count > 0) return existing[0];
+
+        var username = email.Split('@')[0];
+        var user = new User
+        {
+            Email = email,
+            Username = username,
+            Name = name,
+            PasswordHash = PasswordHasher.Hash(username),
+            IsAdmin = false,
+            IsActive = true
+        };
+        return await _userRepo.AddAsync(user, ct);
     }
 
     public async Task<ExamSessionInfoDto?> StartSessionAsync(string token, CancellationToken ct = default)
@@ -252,6 +283,7 @@ public class ExamTokenService : IExamTokenService
             ExamId = exam.Id,
             CandidateName = examToken.CandidateName,
             CandidateEmail = examToken.CandidateEmail,
+            UserId = examToken.UserId,
             TotalPoints = totalPoints,
             ObtainedPoints = obtained,
             ScorePercentage = pct,

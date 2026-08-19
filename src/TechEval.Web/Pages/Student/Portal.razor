@@ -1,0 +1,100 @@
+@page "/portal"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject AuthStateService Auth
+@inject NavigationManager Nav
+
+<PageTitle>Mis pruebas — TechEval</PageTitle>
+
+<div class="container py-4" style="max-width:800px;">
+    <h2 class="h4 mb-4">Mis pruebas</h2>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary"></div>
+        </div>
+    }
+    else
+    {
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-hourglass-split text-warning me-1"></i> Pendientes
+            </div>
+            <div class="card-body p-0">
+                @if (_pending.Count == 0)
+                {
+                    <p class="text-muted p-3 mb-0">No tienes pruebas pendientes.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var exam in _pending)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-semibold">@exam.ExamTitle</div>
+                                    <small class="text-muted">Expira: @exam.ExpiresAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</small>
+                                </div>
+                                <button class="btn btn-primary btn-sm" @onclick="() => StartExam(exam.Token)">
+                                    Comenzar <i class="bi bi-arrow-right ms-1"></i>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-check-circle text-success me-1"></i> Realizadas
+            </div>
+            <div class="card-body p-0">
+                @if (_completed.Count == 0)
+                {
+                    <p class="text-muted p-3 mb-0">Todavía no has realizado ninguna prueba.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var result in _completed)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-semibold">@result.ExamTitle</div>
+                                    <small class="text-muted">@result.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</small>
+                                </div>
+                                <span class="badge @(result.Passed ? "bg-success" : "bg-danger") fs-6">
+                                    @result.ScorePercentage% · @(result.Passed ? "Aprobado" : "No aprobado")
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private List<PendingExamDto> _pending = new();
+    private List<CompletedExamDto> _completed = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAuthenticated || Auth.IsAdmin)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        _pending = await Api.GetPendingExamsAsync() ?? new();
+        _completed = await Api.GetCompletedExamsAsync() ?? new();
+        _loading = false;
+    }
+
+    private void StartExam(string token) => Nav.NavigateTo($"/prueba/{token}");
+}

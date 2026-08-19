@@ -11,11 +11,12 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 
 ## Características
 
-- **Banco de preguntas** — tipo test y respuesta abierta, con categorías y niveles de dificultad
+- **Banco de preguntas** — tipo testv y respuesta abierta, con categorías y niveles de dificultad
 - **Generación de exámenes** — manual o automática con preguntas aleatorias por categoría y dificultad
 - **Envío por email** — enlace único por candidato con expiración configurable; envío masivo a múltiples candidatos desde CSV o lista manual
 - **Examen del candidato** — temporizador, auto-guardado de respuestas y envío automático al agotar el tiempo
 - **Corrección automática** — para preguntas tipo test; preguntas abiertas pendientes de revisión manual
+- **Generación de preguntas con IA** — genera preguntas nuevas a partir de un tema en texto libre usando un modelo de IA local (Ollama); procesa en segundo plano y exige revisión y aprobación manual antes de que una pregunta generada quede disponible para pruebas
 - **Dashboard de resultados** — historial, estadísticas y detalle por candidato
 
 ---
@@ -32,6 +33,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 | Autenticación | JWT Bearer | 9.0.0 |
 | Documentación API | Swagger (Swashbuckle) | 7.2.0 |
 | Logging | Serilog | 9.0.0 |
+| IA (generación de preguntas) | Ollama (local, `deepseek-r1:7b`) | — |
 | Contenedores | Docker / Docker Compose | — |
 
 ---
@@ -63,6 +65,12 @@ docker-compose --profile dev up -d
 | MailHog (emails) | http://localhost:8025 |
 
 **Credenciales por defecto:** `admin@techeval.com` / `Admin@123!`
+
+> **Generación de preguntas con IA**: el servicio `ollama` se levanta vacío (sin modelo descargado) para no alargar el `docker-compose up` inicial. La primera vez, descarga el modelo manualmente:
+> ```bash
+> docker exec ollama ollama pull deepseek-r1:7b
+> ```
+> El modelo corre por CPU (no requiere GPU) y se conserva en el volumen `ollama_data` entre reinicios del contenedor.
 
 ---
 

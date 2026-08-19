@@ -14,6 +14,9 @@ public class QuestionConfiguration : IEntityTypeConfiguration<Question>
         builder.Property(q => q.Type).IsRequired();
         builder.Property(q => q.Difficulty).IsRequired();
         builder.Property(q => q.Points).HasDefaultValue(1);
+        builder.Property(q => q.QuestionReviewStatus)
+            .IsRequired()
+            .HasDefaultValue(TechEval.Domain.Enums.QuestionReviewStatus.Approved);
 
         builder.HasOne(q => q.Category)
             .WithMany(c => c.Questions)
@@ -28,6 +31,7 @@ public class QuestionConfiguration : IEntityTypeConfiguration<Question>
         builder.HasIndex(q => q.CategoryId);
         builder.HasIndex(q => q.Difficulty);
         builder.HasIndex(q => q.IsActive);
+        builder.HasIndex(q => q.QuestionReviewStatus);
     }
 }
 
@@ -57,9 +61,11 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
     {
         builder.HasKey(u => u.Id);
         builder.Property(u => u.Email).IsRequired().HasMaxLength(200);
+        builder.Property(u => u.Username).HasMaxLength(200);
         builder.Property(u => u.Name).IsRequired().HasMaxLength(200);
         builder.Property(u => u.PasswordHash).IsRequired();
         builder.HasIndex(u => u.Email).IsUnique();
+        builder.HasIndex(u => u.Username).IsUnique().HasFilter("[Username] IS NOT NULL");
     }
 }
 
@@ -115,10 +121,18 @@ public class ExamTokenConfiguration : IEntityTypeConfiguration<ExamToken>
             .HasForeignKey(t => t.ExamId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(t => t.User)
+            .WithMany()
+            .HasForeignKey(t => t.UserId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
         builder.HasOne(t => t.ExamSession)
             .WithOne(s => s.ExamToken)
             .HasForeignKey<ExamSession>(s => s.ExamTokenId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasIndex(t => t.UserId);
     }
 }
 
@@ -173,8 +187,62 @@ public class ExamResultConfiguration : IEntityTypeConfiguration<ExamResult>
             .HasForeignKey(r => r.ExamId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(r => r.User)
+            .WithMany()
+            .HasForeignKey(r => r.UserId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
         builder.HasIndex(r => r.CandidateEmail);
         builder.HasIndex(r => r.ExamId);
         builder.HasIndex(r => r.CompletedAt);
+        builder.HasIndex(r => r.UserId);
+    }
+}
+
+public class QuestionGenerationJobConfiguration : IEntityTypeConfiguration<QuestionGenerationJob>
+{
+    public void Configure(EntityTypeBuilder<QuestionGenerationJob> builder)
+    {
+        builder.HasKey(j => j.Id);
+        builder.Property(j => j.Topic).IsRequired().HasMaxLength(500);
+        builder.Property(j => j.Difficulty).IsRequired();
+        builder.Property(j => j.Type).IsRequired();
+        builder.Property(j => j.Status).IsRequired();
+
+        builder.HasOne(j => j.Category)
+            .WithMany()
+            .HasForeignKey(j => j.CategoryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(j => j.CreatedByUser)
+            .WithMany()
+            .HasForeignKey(j => j.CreatedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(j => j.Status);
+    }
+}
+
+public class QuestionGenerationJobItemConfiguration : IEntityTypeConfiguration<QuestionGenerationJobItem>
+{
+    public void Configure(EntityTypeBuilder<QuestionGenerationJobItem> builder)
+    {
+        builder.HasKey(i => i.Id);
+        builder.Property(i => i.Status).IsRequired();
+        builder.Property(i => i.ErrorMessage).HasMaxLength(2000);
+
+        builder.HasOne(i => i.Job)
+            .WithMany(j => j.Items)
+            .HasForeignKey(i => i.JobId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(i => i.Question)
+            .WithMany()
+            .HasForeignKey(i => i.QuestionId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(i => i.Status);
+        builder.HasIndex(i => i.JobId);
     }
 }

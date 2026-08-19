@@ -43,17 +43,22 @@ El sistema SHALL permitir crear preguntas de tipo `OpenEnded` con un campo opcio
 - **THEN** el sistema crea la pregunta sin exigir respuestas de opción múltiple y persiste el texto de referencia junto a la pregunta
 
 ### Requirement: Filtrado de preguntas del banco
-El sistema SHALL permitir listar preguntas filtrando de forma combinable por categoría, nivel de dificultad y tipo de pregunta, devolviendo únicamente preguntas activas por defecto.
+El sistema SHALL permitir listar preguntas filtrando de forma combinable por categoría, nivel de dificultad y tipo de pregunta, devolviendo únicamente preguntas activas y con revisión aprobada (`QuestionReviewStatus = Approved`) por defecto.
 
 #### Scenario: Filtro combinado por categoría y dificultad
 - **GIVEN** un banco de preguntas con múltiples categorías y niveles de dificultad
 - **WHEN** se solicita `GET /api/questions?categoryId=1&difficulty=Advanced`
-- **THEN** el sistema SHALL devolver únicamente las preguntas activas de la categoría 1 con dificultad `Advanced`, ordenadas por nombre de categoría y dificultad
+- **THEN** el sistema SHALL devolver únicamente las preguntas activas y aprobadas de la categoría 1 con dificultad `Advanced`, ordenadas por nombre de categoría y dificultad
 
 #### Scenario: Filtro sin parámetros
 - **GIVEN** un banco de preguntas existente
 - **WHEN** se solicita `GET /api/questions` sin parámetros de filtro
-- **THEN** el sistema SHALL devolver el listado resumido de todas las preguntas activas, independientemente de categoría, dificultad o tipo
+- **THEN** el sistema SHALL devolver el listado resumido de todas las preguntas activas y aprobadas, independientemente de categoría, dificultad o tipo
+
+#### Scenario: Preguntas pendientes de revisión o rechazadas quedan excluidas
+- **GIVEN** un banco de preguntas con algunas preguntas en `QuestionReviewStatus = PendingReview` o `QuestionReviewStatus = Rejected`
+- **WHEN** se solicita `GET /api/questions` con o sin filtros de categoría, dificultad o tipo
+- **THEN** el sistema SHALL excluir esas preguntas del resultado en todos los casos, de forma que nunca queden disponibles para la creación manual o generación automática de pruebas mientras no estén aprobadas
 
 ### Requirement: Baja lógica (soft delete) de preguntas
 El sistema SHALL dar de baja una pregunta marcándola como inactiva (`IsActive = false`) en lugar de eliminarla físicamente, preservando su historial de resultados asociado.
@@ -88,4 +93,17 @@ El sistema MUST validar la consistencia de los datos de categorías y preguntas 
 - **GIVEN** un `CategoryId` que no corresponde a ninguna categoría existente
 - **WHEN** se intenta crear una pregunta con ese `CategoryId`
 - **THEN** el sistema SHALL rechazar la operación por la restricción de clave foránea entre `Question` y `Category`, sin persistir la pregunta
+
+### Requirement: Visualización de fecha y hora de creación y actualización de una pregunta
+El sistema SHALL exponer y mostrar, en la pantalla de edición de una pregunta, la fecha y hora exactas (con precisión de minutos) de creación (`CreatedAt`) y, si existe, de última actualización (`UpdatedAt`) de la pregunta, expresadas en UTC, tanto para preguntas creadas manualmente como generadas por IA.
+
+#### Scenario: Pregunta con fecha de creación y sin actualizaciones posteriores
+- **GIVEN** una pregunta creada y nunca modificada desde su creación
+- **WHEN** un administrador abre su pantalla de edición
+- **THEN** el sistema SHALL mostrar la fecha y hora de creación en UTC con precisión de minutos, sin mostrar una fecha de última actualización
+
+#### Scenario: Pregunta editada después de su creación
+- **GIVEN** una pregunta que fue modificada después de creada
+- **WHEN** un administrador abre su pantalla de edición
+- **THEN** el sistema SHALL mostrar tanto la fecha y hora de creación como la de última actualización, ambas en UTC con precisión de minutos
 

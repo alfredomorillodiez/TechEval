@@ -1,19 +1,19 @@
-@page "/admin/exams"
+@page "/admin/pruebas"
 @using TechEval.Application.DTOs
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
 
-<PageTitle>Exámenes — TechEval</PageTitle>
+<PageTitle>Pruebas — TechEval</PageTitle>
 
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">Exámenes</h1>
+        <h1 class="h3 mb-0">Pruebas</h1>
         <div class="d-flex gap-2">
-            <a href="/admin/exams/new" class="btn btn-outline-primary">
+            <a href="/admin/pruebas/new" class="btn btn-outline-primary">
                 <i class="bi bi-plus-lg me-1"></i> Manual
             </a>
-            <a href="/admin/exams/generate" class="btn btn-primary">
+            <a href="/admin/pruebas/generate" class="btn btn-primary">
                 <i class="bi bi-magic me-1"></i> Generar automático
             </a>
         </div>
@@ -62,7 +62,7 @@
                                         @onclick="() => SendExam(exam.Id)">
                                     <i class="bi bi-send me-1"></i> Enviar
                                 </button>
-                                <a href="/admin/exams/@exam.Id" class="btn btn-sm btn-outline-primary">
+                                <a href="/admin/pruebas/@exam.Id" class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-pencil"></i>
                                 </a>
                                 <a href="/admin/results?examId=@exam.Id" class="btn btn-sm btn-outline-secondary">
@@ -82,7 +82,7 @@
         {
             <div class="text-center text-muted py-5">
                 <i class="bi bi-journal-x fs-1"></i>
-                <p class="mt-2">No hay exámenes creados aún.</p>
+                <p class="mt-2">No hay pruebas creadas aún.</p>
             </div>
         }
     }
@@ -95,7 +95,7 @@
         <div class="modal-dialog modal-dialog-centered @(_isBulkMode ? "modal-lg" : "")">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Enviar examen</h5>
+                    <h5 class="modal-title">Enviar prueba</h5>
                     <button class="btn-close" @onclick="CloseModal"></button>
                 </div>
                 <div class="modal-body">
@@ -128,7 +128,7 @@
                         @if (_sendSuccess)
                         {
                             <div class="alert alert-success">
-                                <i class="bi bi-check-circle me-1"></i> Examen enviado correctamente a <strong>@_candidateEmail</strong>
+                                <i class="bi bi-check-circle me-1"></i> Prueba enviada correctamente a <strong>@_candidateEmail</strong>
                             </div>
                         }
                         else
@@ -336,7 +336,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
         _exams = await Api.GetExamsAsync() ?? new();
         _loading = false;
     }
@@ -368,7 +368,7 @@
         _sendLoading = false;
 
         if (token is not null) _sendSuccess = true;
-        else _sendError = "Error al enviar el examen. Verifica la configuración de email.";
+        else _sendError = "Error al enviar la prueba. Verifica la configuración de email.";
     }
 
     private void AddBulkCandidate()

@@ -23,6 +23,13 @@ public class ExamResultRepository : BaseRepository<ExamResult>, IExamResultRepos
             .OrderByDescending(r => r.CompletedAt)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<ExamResult>> GetByUserAsync(int userId, CancellationToken ct = default)
+        => await Context.ExamResults
+            .Include(r => r.Exam)
+            .Where(r => r.UserId == userId)
+            .OrderByDescending(r => r.CompletedAt)
+            .ToListAsync(ct);
+
     public async Task<ExamResult?> GetWithDetailsAsync(int id, CancellationToken ct = default)
         => await Context.ExamResults
             .Include(r => r.Exam)

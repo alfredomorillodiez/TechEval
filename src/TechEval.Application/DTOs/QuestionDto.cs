@@ -14,7 +14,9 @@ public record QuestionDto(
     int Points,
     bool IsActive,
     string? SampleAnswer,
-    List<AnswerDto> Answers);
+    List<AnswerDto> Answers,
+    DateTime CreatedAt,
+    DateTime? UpdatedAt);
 
 public record CreateQuestionDto(
     string Text,

@@ -34,7 +34,7 @@ services:
       - Email__FromEmail=noreply@yourdomain.com
       - AdminPassword=Admin@123!
       - Ollama__BaseUrl=http://ollama:11434
-      - Ollama__Model=deepseek-r1:7b
+      - Ollama__Model=qwen2.5-coder:14b
     depends_on:
       sqlserver:
         condition: service_healthy

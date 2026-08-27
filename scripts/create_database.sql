@@ -75,12 +75,13 @@ GO
 -- 2. Categories
 -- ============================================================
 CREATE TABLE dbo.Categories (
-    Id          INT           NOT NULL IDENTITY(1,1),
-    Name        NVARCHAR(100) NOT NULL,
-    Description NVARCHAR(500) NOT NULL CONSTRAINT DF_Categories_Desc DEFAULT '',
-    IsActive    BIT           NOT NULL CONSTRAINT DF_Categories_IsActive  DEFAULT 1,
-    CreatedAt   DATETIME2     NOT NULL CONSTRAINT DF_Categories_CreatedAt DEFAULT GETUTCDATE(),
-    UpdatedAt   DATETIME2     NULL,
+    Id                INT           NOT NULL IDENTITY(1,1),
+    Name              NVARCHAR(100) NOT NULL,
+    Description       NVARCHAR(500) NOT NULL CONSTRAINT DF_Categories_Desc DEFAULT '',
+    IsActive          BIT           NOT NULL CONSTRAINT DF_Categories_IsActive  DEFAULT 1,
+    AllowsAiGeneration BIT          NOT NULL CONSTRAINT DF_Categories_AllowsAi DEFAULT 1,
+    CreatedAt         DATETIME2     NOT NULL CONSTRAINT DF_Categories_CreatedAt DEFAULT GETUTCDATE(),
+    UpdatedAt         DATETIME2     NULL,
 
     CONSTRAINT PK_Categories PRIMARY KEY (Id)
 );

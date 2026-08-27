@@ -35,12 +35,7 @@ public class OllamaQuestionGenerationService : IQuestionGenerationAiService
         if (rawResponse is null)
             return GeneratedQuestionResult.Fail("No se pudo contactar al modelo de IA.");
 
-        var candidate = ParseAndValidate(rawResponse, type);
-        if (!candidate.Success)
-            return candidate;
-
-        var (approved, reason) = await CritiqueAsync(candidate, type, ct);
-        return approved ? candidate : GeneratedQuestionResult.Fail(reason);
+        return ParseAndValidate(rawResponse, type);
     }
 
     private async Task<string?> CallModelAsync(string prompt, CancellationToken ct)
@@ -91,8 +86,7 @@ public class OllamaQuestionGenerationService : IQuestionGenerationAiService
             ? persona +
               $"Genera una pregunta de opción múltiple en español sobre \"{topic}\", para la categoría " +
               $"\"{categoryName}\", de dificultad {difficultyEs}. " +
-              "Puedes razonar brevemente antes de responder. Al final de tu respuesta, incluye ÚNICAMENTE un " +
-              "objeto JSON con esta forma exacta: " +
+              "Al final de tu respuesta, incluye ÚNICAMENTE un objeto JSON con esta forma exacta: " +
               "{\"questionText\": \"<enunciado>\", \"answers\": [" +
               "{\"text\": \"<opción 1>\", \"isCorrect\": true|false}, " +
               "{\"text\": \"<opción 2>\", \"isCorrect\": true|false}, " +
@@ -103,63 +97,15 @@ public class OllamaQuestionGenerationService : IQuestionGenerationAiService
             : persona +
               $"Genera una pregunta de respuesta abierta en español sobre \"{topic}\", para la categoría " +
               $"\"{categoryName}\", de dificultad {difficultyEs}. " +
-              "Puedes razonar brevemente antes de responder. Al final de tu respuesta, incluye ÚNICAMENTE un " +
-              "objeto JSON con esta forma exacta: {\"questionText\": \"<enunciado>\", " +
+              "Al final de tu respuesta, incluye ÚNICAMENTE un objeto JSON con esta forma exacta: " +
+              "{\"questionText\": \"<enunciado>\", " +
               "\"sampleAnswer\": \"<respuesta de referencia para el evaluador>\"} " + JsonPurityInstruction;
-    }
-
-    private static string BuildCritiquePrompt(GeneratedQuestionResult candidate, QuestionType type)
-    {
-        var content = type == QuestionType.MultipleChoice
-            ? $"Enunciado: \"{candidate.QuestionText}\"\nOpciones:\n" +
-              string.Join("\n", candidate.Answers.Select(a =>
-                  $"- \"{a.Text}\" (marcada como {(a.IsCorrect ? "correcta" : "incorrecta")})"))
-            : $"Enunciado: \"{candidate.QuestionText}\"\nRespuesta de referencia: \"{candidate.SampleAnswer}\"";
-
-        return "Eres un revisor técnico senior evaluando la calidad de una pregunta de examen ya generada. " +
-               "Evalúa ESTRICTAMENTE estos tres problemas posibles:\n" +
-               "1. Ambigüedad: ¿existe más de una opción que podría defenderse razonablemente como correcta?\n" +
-               "2. Distractores poco distinguibles: si es de opción múltiple, ¿alguna opción incorrecta es " +
-               "prácticamente indistinguible en significado de otra opción?\n" +
-               "3. Coherencia: ¿el texto tiene errores, repeticiones o resulta confuso o mal formado?\n\n" +
-               $"{content}\n\n" +
-               "Puedes razonar brevemente antes de responder. Al final de tu respuesta, incluye ÚNICAMENTE un " +
-               "objeto JSON con esta forma exacta: {\"approved\": true|false, \"reason\": \"<motivo breve si " +
-               "approved es false; cadena vacía si es true>\"}. " + JsonPurityInstruction;
     }
 
     private const string JsonPurityInstruction =
         "Una vez que empieces a escribir ese objeto JSON, escríbelo completo de una sola vez, sin dudar ni " +
         "corregirte a mitad de camino, y no le agregues comentarios (por ejemplo, texto que empiece con \"//\") " +
         "ni ninguna explicación dentro o después del JSON: debe ser JSON válido por sí mismo, nada más.";
-
-    private async Task<(bool Approved, string Reason)> CritiqueAsync(
-        GeneratedQuestionResult candidate, QuestionType type, CancellationToken ct)
-    {
-        var rawResponse = await CallModelAsync(BuildCritiquePrompt(candidate, type), ct);
-        if (rawResponse is null)
-            return (false, "No se pudo contactar al modelo de IA durante la etapa de crítica.");
-
-        CritiqueVerdict? verdict;
-        try
-        {
-            verdict = JsonSerializer.Deserialize<CritiqueVerdict>(ExtractJsonPayload(rawResponse), JsonOptions);
-        }
-        catch (JsonException)
-        {
-            return (false, "La respuesta de la etapa de crítica no es un JSON válido.");
-        }
-
-        if (verdict is null)
-            return (false, "La etapa de crítica no devolvió un veredicto.");
-
-        if (verdict.Approved)
-            return (true, string.Empty);
-
-        return (false, string.IsNullOrWhiteSpace(verdict.Reason)
-            ? "La etapa de crítica rechazó la pregunta sin especificar un motivo."
-            : verdict.Reason);
-    }
 
     /// <summary>
     /// Extrae el objeto JSON de la respuesta cruda del modelo, descartando el bloque de razonamiento
@@ -281,11 +227,5 @@ public class OllamaQuestionGenerationService : IQuestionGenerationAiService
     {
         public string Text { get; set; } = string.Empty;
         public bool IsCorrect { get; set; }
-    }
-
-    private class CritiqueVerdict
-    {
-        public bool Approved { get; set; }
-        public string? Reason { get; set; }
     }
 }

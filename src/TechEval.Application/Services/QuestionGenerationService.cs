@@ -46,6 +46,8 @@ public class QuestionGenerationService : IQuestionGenerationService
 
         var category = await _categoryRepo.GetByIdAsync(dto.CategoryId, ct)
             ?? throw new InvalidOperationException("La categoría seleccionada no existe.");
+        if (!category.AllowsAiGeneration)
+            throw new InvalidOperationException("Esta categoría no está habilitada para generación de preguntas por IA.");
 
         var job = new QuestionGenerationJob
         {

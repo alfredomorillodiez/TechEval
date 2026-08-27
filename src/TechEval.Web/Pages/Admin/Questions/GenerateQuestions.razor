@@ -97,7 +97,8 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
-        _categories = await Api.GetCategoriesAsync() ?? new();
+        _categories = (await Api.GetCategoriesAsync() ?? new())
+            .Where(c => c.AllowsAiGeneration).ToList();
     }
 
     private async Task GenerateAsync()

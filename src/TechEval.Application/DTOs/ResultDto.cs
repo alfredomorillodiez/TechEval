@@ -1,3 +1,5 @@
+using TechEval.Domain.Enums;
+
 namespace TechEval.Application.DTOs;
 
 public record ExamResultDto(
@@ -8,7 +10,8 @@ public record ExamResultDto(
     int TotalPoints,
     int ObtainedPoints,
     decimal ScorePercentage,
-    bool Passed,
+    bool? Passed,
+    ExamResultStatus Status,
     DateTime CompletedAt,
     List<AnswerReviewDto> Answers);
 
@@ -18,7 +21,9 @@ public record AnswerReviewDto(
     string? OpenAnswer,
     string? CorrectAnswerText,
     bool? IsCorrect,
-    int Points);
+    int Points,
+    int? AwardedPoints,
+    string? ReviewerComment);
 
 public record ExamResultSummaryDto(
     int Id,
@@ -27,7 +32,8 @@ public record ExamResultSummaryDto(
     string CandidateEmail,
     string ExamTitle,
     decimal ScorePercentage,
-    bool Passed,
+    bool? Passed,
+    ExamResultStatus Status,
     DateTime CompletedAt);
 
 public record DashboardStatsDto(
@@ -36,6 +42,7 @@ public record DashboardStatsDto(
     int TotalResultsThisMonth,
     decimal AverageScoreThisMonth,
     int PassRateThisMonth,
+    int PendingReviewCount,
     List<ExamResultSummaryDto> RecentResults);
 
 public record AuthResultDto(string Token, string Name, string Email, bool IsAdmin);

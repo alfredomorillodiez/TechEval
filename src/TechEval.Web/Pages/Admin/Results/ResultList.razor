@@ -1,5 +1,6 @@
 @page "/admin/results"
 @using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
@@ -41,7 +42,7 @@
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body">
                         <p class="text-muted small mb-1">Reprobados</p>
-                        <p class="h3 fw-bold text-danger mb-0">@(_all.Count - _passedCount)</p>
+                        <p class="h3 fw-bold text-danger mb-0">@(_reviewedCount - _passedCount)</p>
                     </div>
                 </div>
             </div>
@@ -50,10 +51,24 @@
                     <div class="card-body">
                         <p class="text-muted small mb-1">Nota media</p>
                         <p class="h3 fw-bold mb-0">@_avgScore<span class="fs-6 fw-normal text-muted">%</span></p>
+                        <p class="text-muted small mb-0">sobre @_reviewedCount corregidos</p>
                     </div>
                 </div>
             </div>
         </div>
+
+        @if (_pendingCount > 0)
+        {
+            <div class="alert alert-warning d-flex align-items-center justify-content-between">
+                <div>
+                    <i class="bi bi-pencil-square me-2"></i>
+                    <strong>@_pendingCount</strong>
+                    @(_pendingCount == 1 ? " prueba pendiente" : " pruebas pendientes") de corrección manual.
+                    No se contabilizan en los indicadores de arriba.
+                </div>
+                <a href="/admin/results/pending" class="btn btn-warning btn-sm">Ir a la cola</a>
+            </div>
+        }
 
         <!-- Filtros -->
         <div class="card border-0 shadow-sm mb-3">
@@ -81,6 +96,7 @@
                             <option value="">Todos</option>
                             <option value="true">Aprobado</option>
                             <option value="false">Reprobado</option>
+                            <option value="pending">Pendiente de corrección</option>
                         </select>
                     </div>
                     <div class="col-6 col-md-2">
@@ -160,18 +176,34 @@
                                             </a>
                                         </td>
                                         <td>
-                                            <div class="d-flex align-items-center gap-2">
-                                                <div class="progress flex-grow-1" style="height:6px;">
-                                                    <div class="progress-bar @(r.Passed ? "bg-success" : "bg-danger")"
-                                                         style="width:@r.ScorePercentage%"></div>
+                                            @if (r.Status == ExamResultStatus.PendingReview)
+                                            {
+                                                <span class="text-muted small">Sin corregir</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="d-flex align-items-center gap-2">
+                                                    <div class="progress flex-grow-1" style="height:6px;">
+                                                        <div class="progress-bar @(r.Passed == true ? "bg-success" : "bg-danger")"
+                                                             style="width:@r.ScorePercentage%"></div>
+                                                    </div>
+                                                    <span class="small fw-bold" style="min-width:3rem;">@r.ScorePercentage%</span>
                                                 </div>
-                                                <span class="small fw-bold" style="min-width:3rem;">@r.ScorePercentage%</span>
-                                            </div>
+                                            }
                                         </td>
                                         <td>
-                                            <span class="badge @(r.Passed ? "bg-success" : "bg-danger")">
-                                                @(r.Passed ? "Aprobado" : "Reprobado")
-                                            </span>
+                                            @if (r.Status == ExamResultStatus.PendingReview)
+                                            {
+                                                <a href="/admin/results/pending" class="badge bg-secondary text-decoration-none">
+                                                    <i class="bi bi-hourglass-split me-1"></i> Pendiente de corrección
+                                                </a>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge @(r.Passed == true ? "bg-success" : "bg-danger")">
+                                                    @(r.Passed == true ? "Aprobado" : "Reprobado")
+                                                </span>
+                                            }
                                         </td>
                                         <td class="text-muted small text-nowrap">
                                             @r.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy")<br />
@@ -212,6 +244,8 @@
 
     // KPIs
     private int _passedCount;
+    private int _reviewedCount;
+    private int _pendingCount;
     private int _passRate;
     private decimal _avgScore;
 
@@ -228,11 +262,25 @@
         _loading = false;
     }
 
+    private bool MatchesOutcome(ExamResultSummaryDto r) => _fPassed switch
+    {
+        "" or null => true,
+        "pending" => r.Status == ExamResultStatus.PendingReview,
+        "true" => r.Status == ExamResultStatus.Reviewed && r.Passed == true,
+        "false" => r.Status == ExamResultStatus.Reviewed && r.Passed == false,
+        _ => true
+    };
+
     private void ComputeKpis()
     {
-        _passedCount = _all.Count(r => r.Passed);
-        _passRate = _all.Count > 0 ? (int)Math.Round((double)_passedCount / _all.Count * 100) : 0;
-        _avgScore = _all.Count > 0 ? Math.Round(_all.Average(r => r.ScorePercentage), 1) : 0;
+        // Solo sobre lo corregido: un pendiente lleva puntuación parcial y falsearía
+        // tanto la media como la proporción de aprobados.
+        var reviewed = _all.Where(r => r.Status == ExamResultStatus.Reviewed).ToList();
+        _reviewedCount = reviewed.Count;
+        _pendingCount = _all.Count - reviewed.Count;
+        _passedCount = reviewed.Count(r => r.Passed == true);
+        _passRate = reviewed.Count > 0 ? (int)Math.Round((double)_passedCount / reviewed.Count * 100) : 0;
+        _avgScore = reviewed.Count > 0 ? Math.Round(reviewed.Average(r => r.ScorePercentage), 1) : 0;
     }
 
     private void ApplyFilter()
@@ -242,9 +290,11 @@
                 r.CandidateName.Contains(_fSearch, StringComparison.OrdinalIgnoreCase) ||
                 r.CandidateEmail.Contains(_fSearch, StringComparison.OrdinalIgnoreCase)) &&
             (string.IsNullOrEmpty(_fExamTitle) || r.ExamTitle == _fExamTitle) &&
-            (string.IsNullOrEmpty(_fPassed) || r.Passed.ToString().ToLower() == _fPassed) &&
-            (_fScoreMin is null || r.ScorePercentage >= _fScoreMin) &&
-            (_fScoreMax is null || r.ScorePercentage <= _fScoreMax) &&
+            MatchesOutcome(r) &&
+            // Los pendientes no tienen nota definitiva que comparar: quedan fuera
+            // en cuanto se filtra por rango de nota.
+            (_fScoreMin is null || (r.Status == ExamResultStatus.Reviewed && r.ScorePercentage >= _fScoreMin)) &&
+            (_fScoreMax is null || (r.Status == ExamResultStatus.Reviewed && r.ScorePercentage <= _fScoreMax)) &&
             (_fDateFrom is null || r.CompletedAt.ToLocalTime().Date >= _fDateFrom.Value.Date) &&
             (_fDateTo is null || r.CompletedAt.ToLocalTime().Date <= _fDateTo.Value.Date)
         ).ToList();

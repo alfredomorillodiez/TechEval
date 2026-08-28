@@ -235,6 +235,8 @@ CREATE TABLE dbo.UserAnswers (
     SelectedAnswerId INT            NULL,       -- NULL para preguntas abiertas
     OpenAnswer       NVARCHAR(4000) NULL,       -- NULL para preguntas tipo test
     IsCorrect        BIT            NULL,       -- NULL hasta corrección (abiertas)
+    AwardedPoints    INT            NULL,       -- puntos congelados; NULL en abiertas sin corregir
+    ReviewerComment  NVARCHAR(2000) NULL,       -- comentario del corrector (abiertas)
     AnsweredAt       DATETIME2      NOT NULL CONSTRAINT DF_UserAnswers_AnsweredAt DEFAULT GETUTCDATE(),
 
     CONSTRAINT PK_UserAnswers PRIMARY KEY (Id),
@@ -260,7 +262,10 @@ CREATE TABLE dbo.ExamResults (
     TotalPoints     INT           NOT NULL CONSTRAINT DF_ExamResults_TotalPoints    DEFAULT 0,
     ObtainedPoints  INT           NOT NULL CONSTRAINT DF_ExamResults_ObtainedPoints DEFAULT 0,
     ScorePercentage DECIMAL(5,2)  NOT NULL CONSTRAINT DF_ExamResults_Score         DEFAULT 0,
-    Passed          BIT           NOT NULL CONSTRAINT DF_ExamResults_Passed        DEFAULT 0,
+    Passed          BIT           NULL,       -- NULL mientras esté pendiente de corrección
+    Status          INT           NOT NULL CONSTRAINT DF_ExamResults_Status        DEFAULT 2, -- 1=PendingReview, 2=Reviewed
+    ReviewedAt      DATETIME2     NULL,
+    ReviewedByUserId INT          NULL,       -- administrador que corrigió las abiertas
     CompletedAt     DATETIME2     NOT NULL CONSTRAINT DF_ExamResults_CompletedAt   DEFAULT GETUTCDATE(),
 
     CONSTRAINT PK_ExamResults PRIMARY KEY (Id),
@@ -269,7 +274,9 @@ CREATE TABLE dbo.ExamResults (
     CONSTRAINT FK_ExamResults_Exams FOREIGN KEY (ExamId)
         REFERENCES dbo.Exams (Id) ON DELETE NO ACTION ON UPDATE NO ACTION,
     CONSTRAINT FK_ExamResults_Users FOREIGN KEY (UserId)
-        REFERENCES dbo.Users (Id) ON DELETE SET NULL ON UPDATE NO ACTION
+        REFERENCES dbo.Users (Id) ON DELETE SET NULL ON UPDATE NO ACTION,
+    CONSTRAINT FK_ExamResults_ReviewedByUser FOREIGN KEY (ReviewedByUserId)
+        REFERENCES dbo.Users (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
 );
 GO
 
@@ -279,6 +286,8 @@ CREATE INDEX IX_ExamResults_CandidateEmail       ON dbo.ExamResults (CandidateEm
 CREATE INDEX IX_ExamResults_ExamId               ON dbo.ExamResults (ExamId);
 CREATE INDEX IX_ExamResults_CompletedAt          ON dbo.ExamResults (CompletedAt);
 CREATE INDEX IX_ExamResults_UserId               ON dbo.ExamResults (UserId);
+CREATE INDEX IX_ExamResults_ReviewedByUserId     ON dbo.ExamResults (ReviewedByUserId);
+CREATE INDEX IX_ExamResults_Status               ON dbo.ExamResults (Status);
 GO
 
 -- ============================================================

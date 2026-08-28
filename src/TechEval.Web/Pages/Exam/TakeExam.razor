@@ -200,20 +200,44 @@ else if (_state == ExamState.Completed)
 {
     <div class="d-flex justify-content-center align-items-center min-vh-100 bg-light">
         <div class="card border-0 shadow-lg p-4 text-center" style="max-width:500px;width:100%;">
-            <div class="display-1 mb-3">@(_result!.Passed ? "🎉" : "😔")</div>
-            <h2 class="h4 mb-1">@(_result.Passed ? "¡Aprobado!" : "No aprobado")</h2>
-            <p class="text-muted mb-4">@_result.ExamTitle</p>
+            @if (_result!.Status == ExamResultStatus.PendingReview)
+            {
+                @* Sin puntuación, veredicto ni indicadores de éxito o fracaso: la prueba
+                   contiene abiertas que nadie ha corregido todavía. *@
+                <div class="display-1 mb-3">📨</div>
+                <h2 class="h4 mb-1">Prueba recibida</h2>
+                <p class="text-muted mb-4">@_result.ExamTitle</p>
 
-            <div class="p-4 rounded-3 mb-4 @(_result.Passed ? "bg-success bg-opacity-10" : "bg-danger bg-opacity-10")">
-                <div class="display-4 fw-bold @(_result.Passed ? "text-success" : "text-danger")">
-                    @_result.ScorePercentage%
+                <div class="p-4 rounded-3 mb-4 bg-primary bg-opacity-10 text-start">
+                    <p class="mb-0">
+                        Esta prueba incluye preguntas de respuesta abierta que requieren
+                        <strong>corrección manual</strong> por parte del equipo evaluador.
+                    </p>
                 </div>
-                <div class="text-muted">@_result.ObtainedPoints / @_result.TotalPoints puntos</div>
-            </div>
 
-            <p class="text-muted small">
-                Recibirás un email con los resultados. Gracias por participar.
-            </p>
+                <p class="text-muted small">
+                    Te enviaremos el resultado por email en cuanto la corrección esté finalizada.
+                    Gracias por participar.
+                </p>
+            }
+            else
+            {
+                var passed = _result.Passed == true;
+                <div class="display-1 mb-3">@(passed ? "🎉" : "😔")</div>
+                <h2 class="h4 mb-1">@(passed ? "¡Aprobado!" : "No aprobado")</h2>
+                <p class="text-muted mb-4">@_result.ExamTitle</p>
+
+                <div class="p-4 rounded-3 mb-4 @(passed ? "bg-success bg-opacity-10" : "bg-danger bg-opacity-10")">
+                    <div class="display-4 fw-bold @(passed ? "text-success" : "text-danger")">
+                        @_result.ScorePercentage%
+                    </div>
+                    <div class="text-muted">@_result.ObtainedPoints / @_result.TotalPoints puntos</div>
+                </div>
+
+                <p class="text-muted small">
+                    Recibirás un email con los resultados. Gracias por participar.
+                </p>
+            }
             <a class="btn btn-outline-primary" href="/portal">
                 <i class="bi bi-list-check me-1"></i> Ver mis pruebas
             </a>
@@ -228,7 +252,7 @@ else if (_state == ExamState.Completed)
     private ExamState _state = ExamState.Validating;
 
     private ExamSessionInfoDto? _sessionInfo;
-    private ExamResultDto? _result;
+    private ExamSubmissionReceiptDto? _result;
     private string _errorMessage = string.Empty;
     private int _currentQuestion = 0;
     private bool _showConfirm, _submitting;

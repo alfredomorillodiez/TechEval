@@ -11,7 +11,7 @@ public interface IExamTokenService
     Task<BulkSendResultDto> SendExamBulkAsync(BulkSendExamDto dto, string baseUrl, CancellationToken ct = default);
     Task<ExamTokenValidationDto> ValidateTokenAsync(string token, CancellationToken ct = default);
     Task<ExamSessionInfoDto?> StartSessionAsync(string token, CancellationToken ct = default);
-    Task<ExamResultDto> SubmitExamAsync(SubmitExamDto dto, CancellationToken ct = default);
+    Task<ExamSubmissionReceiptDto> SubmitExamAsync(SubmitExamDto dto, CancellationToken ct = default);
     Task SaveDraftAnswerAsync(int sessionId, SubmitAnswerDto answer, CancellationToken ct = default);
 }
 
@@ -207,7 +207,7 @@ public class ExamTokenService : IExamTokenService
         }
     }
 
-    public async Task<ExamResultDto> SubmitExamAsync(SubmitExamDto dto, CancellationToken ct = default)
+    public async Task<ExamSubmissionReceiptDto> SubmitExamAsync(SubmitExamDto dto, CancellationToken ct = default)
     {
         var sessions = await _sessionRepo.FindAsync(s => s.Id == dto.SessionId, ct);
         var session = sessions.FirstOrDefault()
@@ -220,25 +220,39 @@ public class ExamTokenService : IExamTokenService
         var exam = await _examRepo.GetWithQuestionsAsync(examToken.ExamId, ct)!
             ?? throw new InvalidOperationException("Examen no encontrado.");
 
-        // Procesar y guardar respuestas
+        // El estado lo decide la composición del examen, no lo que responda el candidato:
+        // así es predecible desde que se monta la prueba y un humano siempre valida
+        // una prueba con abiertas, incluso si el candidato no escribió nada.
+        bool hasOpenQuestions = exam.ExamQuestions
+            .Any(eq => eq.Question?.Type == Domain.Enums.QuestionType.OpenEnded);
+
         int totalPoints = 0, obtained = 0;
-        var answerReviews = new List<AnswerReviewDto>();
 
         foreach (var eq in exam.ExamQuestions.OrderBy(eq => eq.Order))
         {
             var q = eq.Question!;
             totalPoints += q.Points;
             var submitted = dto.Answers.FirstOrDefault(a => a.QuestionId == q.Id);
-            bool? isCorrect = q.Type == Domain.Enums.QuestionType.MultipleChoice ? false : null;
-            Answer? correctAnswer = q.Answers.FirstOrDefault(a => a.IsCorrect);
-            Answer? selectedAnswer = null;
 
-            if (submitted is not null && q.Type == Domain.Enums.QuestionType.MultipleChoice
-                && submitted.SelectedAnswerId.HasValue)
+            bool? isCorrect = null;
+            int? awardedPoints = null;
+
+            if (q.Type == Domain.Enums.QuestionType.MultipleChoice)
             {
-                selectedAnswer = q.Answers.FirstOrDefault(a => a.Id == submitted.SelectedAnswerId.Value);
+                var selectedAnswer = submitted?.SelectedAnswerId is int sel
+                    ? q.Answers.FirstOrDefault(a => a.Id == sel)
+                    : null;
                 isCorrect = selectedAnswer?.IsCorrect ?? false;
-                if (isCorrect == true) obtained += q.Points;
+                // Congelado aquí: recalcular más tarde contra Question.Points daría otra
+                // nota si alguien edita la pregunta entre el envío y la corrección.
+                awardedPoints = isCorrect == true ? q.Points : 0;
+                obtained += awardedPoints.Value;
+            }
+            else if (string.IsNullOrWhiteSpace(submitted?.OpenAnswer))
+            {
+                // En blanco: se pre-puntúa a 0 como valor por defecto que el corrector
+                // confirmará. No exime al resultado de pasar por la cola.
+                awardedPoints = 0;
             }
 
             var existing = await _answerRepo.FindAsync(
@@ -250,7 +264,8 @@ public class ExamTokenService : IExamTokenService
                 answer.SelectedAnswerId = submitted?.SelectedAnswerId;
                 answer.OpenAnswer = submitted?.OpenAnswer;
                 answer.IsCorrect = isCorrect;
-                answer.AnsweredAt = DateTime.Now;
+                answer.AwardedPoints = awardedPoints;
+                answer.AnsweredAt = DateTime.UtcNow;
                 await _answerRepo.UpdateAsync(answer, ct);
             }
             else
@@ -261,21 +276,20 @@ public class ExamTokenService : IExamTokenService
                     QuestionId = q.Id,
                     SelectedAnswerId = submitted?.SelectedAnswerId,
                     OpenAnswer = submitted?.OpenAnswer,
-                    IsCorrect = isCorrect
+                    IsCorrect = isCorrect,
+                    AwardedPoints = awardedPoints,
+                    AnsweredAt = DateTime.UtcNow
                 }, ct);
             }
-
-            answerReviews.Add(new AnswerReviewDto(
-                q.Text,
-                selectedAnswer?.Text,
-                submitted?.OpenAnswer,
-                correctAnswer?.Text,
-                isCorrect,
-                q.Points));
         }
 
         decimal pct = totalPoints > 0 ? Math.Round((decimal)obtained / totalPoints * 100, 2) : 0;
-        bool passed = pct >= exam.PassingScorePercentage;
+        var status = hasOpenQuestions
+            ? Domain.Enums.ExamResultStatus.PendingReview
+            : Domain.Enums.ExamResultStatus.Reviewed;
+        bool? passed = status == Domain.Enums.ExamResultStatus.Reviewed
+            ? pct >= exam.PassingScorePercentage
+            : null;
 
         var result = new ExamResult
         {
@@ -287,7 +301,8 @@ public class ExamTokenService : IExamTokenService
             TotalPoints = totalPoints,
             ObtainedPoints = obtained,
             ScorePercentage = pct,
-            Passed = passed
+            Passed = passed,
+            Status = status
         };
 
         await _resultRepo.AddAsync(result, ct);
@@ -296,14 +311,24 @@ public class ExamTokenService : IExamTokenService
         session.CompletedAt = DateTime.UtcNow;
         await _sessionRepo.UpdateAsync(session, ct);
 
+        if (status == Domain.Enums.ExamResultStatus.PendingReview)
+        {
+            // Acuse sin cifras: el resultado definitivo se envía al cerrar la corrección.
+            await _emailService.SendExamPendingReviewAsync(
+                examToken.CandidateEmail, examToken.CandidateName, exam.Title, ct);
+
+            return new ExamSubmissionReceiptDto(
+                result.Id, exam.Title, status,
+                null, null, null, null, result.CompletedAt);
+        }
+
         await _emailService.SendExamResultAsync(
             examToken.CandidateEmail, examToken.CandidateName,
-            exam.Title, pct, passed, ct);
+            exam.Title, pct, passed!.Value, ct);
 
-        return new ExamResultDto(
-            result.Id, result.CandidateName, result.CandidateEmail,
-            exam.Title, totalPoints, obtained, pct, passed,
-            result.CompletedAt, answerReviews);
+        return new ExamSubmissionReceiptDto(
+            result.Id, exam.Title, status,
+            totalPoints, obtained, pct, passed, result.CompletedAt);
     }
 
     private static ExamSessionInfoDto BuildSessionInfo(ExamToken token) => new(

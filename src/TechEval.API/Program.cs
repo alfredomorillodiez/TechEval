@@ -38,6 +38,7 @@ builder.Services.AddScoped<IExamTokenService, ExamTokenService>();
 builder.Services.AddScoped<IResultService, ResultService>();
 builder.Services.AddScoped<IStudentPortalService, StudentPortalService>();
 builder.Services.AddScoped<IQuestionGenerationService, QuestionGenerationService>();
+builder.Services.AddScoped<IOpenQuestionReviewService, OpenQuestionReviewService>();
 builder.Services.AddHostedService<QuestionGenerationWorker>();
 
 // JWT Auth

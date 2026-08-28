@@ -17,4 +17,15 @@ public interface IEmailService
         decimal scorePercentage,
         bool passed,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Acuse de recibo para pruebas que quedan pendientes de corrección manual.
+    /// Sin parámetros de puntuación: así es estructuralmente imposible filtrar cifras
+    /// de un resultado que todavía no tiene veredicto.
+    /// </summary>
+    Task SendExamPendingReviewAsync(
+        string toEmail,
+        string toName,
+        string examTitle,
+        CancellationToken ct = default);
 }

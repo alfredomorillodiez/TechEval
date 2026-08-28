@@ -159,6 +159,7 @@ public class UserAnswerConfiguration : IEntityTypeConfiguration<UserAnswer>
     {
         builder.HasKey(a => a.Id);
         builder.Property(a => a.OpenAnswer).HasMaxLength(4000);
+        builder.Property(a => a.ReviewerComment).HasMaxLength(2000);
 
         builder.HasOne(a => a.Question)
             .WithMany()
@@ -181,6 +182,9 @@ public class ExamResultConfiguration : IEntityTypeConfiguration<ExamResult>
         builder.Property(r => r.CandidateName).IsRequired().HasMaxLength(200);
         builder.Property(r => r.CandidateEmail).IsRequired().HasMaxLength(200);
         builder.Property(r => r.ScorePercentage).HasPrecision(5, 2);
+        builder.Property(r => r.Status)
+            .IsRequired()
+            .HasDefaultValue(TechEval.Domain.Enums.ExamResultStatus.Reviewed);
 
         builder.HasOne(r => r.Exam)
             .WithMany()
@@ -193,10 +197,18 @@ public class ExamResultConfiguration : IEntityTypeConfiguration<ExamResult>
             .OnDelete(DeleteBehavior.SetNull)
             .IsRequired(false);
 
+        builder.HasOne(r => r.ReviewedByUser)
+            .WithMany()
+            .HasForeignKey(r => r.ReviewedByUserId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
         builder.HasIndex(r => r.CandidateEmail);
         builder.HasIndex(r => r.ExamId);
         builder.HasIndex(r => r.CompletedAt);
         builder.HasIndex(r => r.UserId);
+        builder.HasIndex(r => r.ReviewedByUserId);
+        builder.HasIndex(r => r.Status);
     }
 }
 

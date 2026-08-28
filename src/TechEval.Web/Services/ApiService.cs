@@ -160,8 +160,55 @@ public class ApiService
         await _http.PostAsJsonAsync($"api/exam/answer/{sessionId}", dto, JsonOptions);
     }
 
-    public Task<ExamResultDto?> SubmitExamAsync(SubmitExamDto dto)
-        => PostAsync<SubmitExamDto, ExamResultDto>("api/exam/submit", dto);
+    public Task<ExamSubmissionReceiptDto?> SubmitExamAsync(SubmitExamDto dto)
+        => PostAsync<SubmitExamDto, ExamSubmissionReceiptDto>("api/exam/submit", dto);
+
+    // Corrección manual de preguntas abiertas
+    public Task<List<PendingReviewSummaryDto>?> GetPendingReviewsAsync()
+        => GetAsync<List<PendingReviewSummaryDto>>("api/review/pending");
+
+    public Task<PendingReviewDetailDto?> GetReviewDetailAsync(int resultId)
+        => GetAsync<PendingReviewDetailDto>($"api/review/{resultId}");
+
+    /// <summary>
+    /// Devuelve el resultado corregido, o el código de estado cuando falla: la pantalla
+    /// necesita distinguir un 409 (ya corregido por otro admin) de un error cualquiera.
+    /// </summary>
+    public async Task<(ExamResultDto? Result, int StatusCode, string? Error)> SubmitReviewAsync(
+        int resultId, SubmitReviewDto dto)
+    {
+        try
+        {
+            var response = await _http.PostAsJsonAsync($"api/review/{resultId}", dto, JsonOptions);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError("POST api/review/{Id} → HTTP {Status}: {Body}",
+                    resultId, (int)response.StatusCode, body);
+                return (null, (int)response.StatusCode, ExtractError(body));
+            }
+            var result = await response.Content.ReadFromJsonAsync<ExamResultDto>(JsonOptions);
+            return (result, 200, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "POST api/review/{Id} failed", resultId);
+            return (null, 0, ex.Message);
+        }
+    }
+
+    private static string? ExtractError(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("error", out var e) ? e.GetString() : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     // HTTP helpers
     private async Task<TResponse?> GetAsync<TResponse>(string url)

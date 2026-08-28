@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TechEval.Domain.Entities;
+using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 using TechEval.Infrastructure.Data;
 
@@ -47,4 +48,23 @@ public class ExamResultRepository : BaseRepository<ExamResult>, IExamResultRepos
             .Include(r => r.Exam)
             .OrderByDescending(r => r.CompletedAt)
             .ToListAsync(ct);
+
+    // Orden ascendente a propósito: la espera del candidato marca la prioridad.
+    public async Task<IReadOnlyList<ExamResult>> GetPendingReviewAsync(CancellationToken ct = default)
+        => await Context.ExamResults
+            .Include(r => r.Exam)
+            .Include(r => r.ExamSession)
+                .ThenInclude(s => s!.UserAnswers)
+                    .ThenInclude(ua => ua.Question)
+            .Where(r => r.Status == ExamResultStatus.PendingReview)
+            .OrderBy(r => r.CompletedAt)
+            .ToListAsync(ct);
+
+    public async Task<ExamResult?> GetForReviewAsync(int id, CancellationToken ct = default)
+        => await Context.ExamResults
+            .Include(r => r.Exam)
+            .Include(r => r.ExamSession)
+                .ThenInclude(s => s!.UserAnswers)
+                    .ThenInclude(ua => ua.Question)
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
 }

@@ -1,0 +1,269 @@
+@page "/admin/results/{Id:int}/review"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Corregir prueba — TechEval</PageTitle>
+
+<div class="container-lg py-4">
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <a href="/admin/results/pending" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0 flex-grow-1">Corregir preguntas abiertas</h1>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_conflict)
+    {
+        <div class="alert alert-warning d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Este resultado ya ha sido corregido.</strong>
+                Es posible que otro administrador se haya adelantado.
+            </div>
+            <a href="/admin/results/pending" class="btn btn-warning btn-sm">Volver a la cola</a>
+        </div>
+    }
+    else if (_detail is null)
+    {
+        <div class="alert alert-warning">No se encontró el resultado.</div>
+    }
+    else
+    {
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <div class="row g-3 align-items-center">
+                    <div class="col-md-4">
+                        <p class="text-muted small mb-1">Candidato</p>
+                        <p class="fw-semibold mb-0">@_detail.CandidateName</p>
+                        <p class="text-muted small mb-0">@_detail.CandidateEmail</p>
+                    </div>
+                    <div class="col-md-4">
+                        <p class="text-muted small mb-1">Prueba</p>
+                        <p class="fw-semibold mb-0">@_detail.ExamTitle</p>
+                    </div>
+                    <div class="col-md-2">
+                        <p class="text-muted small mb-1">Tipo test</p>
+                        <p class="fw-semibold mb-0">@_detail.AutoScoredPoints pts</p>
+                    </div>
+                    <div class="col-md-2">
+                        <p class="text-muted small mb-1">Total de la prueba</p>
+                        <p class="fw-semibold mb-0">@_detail.TotalPoints pts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-info d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-info-circle me-2"></i>
+                Puntuación provisional:
+                <strong>@ProvisionalPoints / @_detail.TotalPoints pts</strong>
+                (@ProvisionalPercentage%)
+            </div>
+            <span class="small">Se confirmará al guardar la corrección.</span>
+        </div>
+
+        @foreach (var (answer, index) in _detail.Answers.Select((a, i) => (a, i + 1)))
+        {
+            var input = _inputs[answer.UserAnswerId];
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-body">
+                    <div class="d-flex gap-3">
+                        <span class="badge bg-secondary rounded-pill px-2 py-1 mt-1" style="min-width:2rem;text-align:center;">@index</span>
+                        <div class="flex-grow-1">
+                            <p class="fw-semibold mb-3">@answer.QuestionText</p>
+
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <p class="text-muted small mb-1">Respuesta del candidato</p>
+                                    <div class="px-3 py-2 rounded border bg-light" style="min-height:6rem;white-space:pre-wrap;">
+                                        @if (string.IsNullOrWhiteSpace(answer.OpenAnswer))
+                                        {
+                                            <span class="text-muted fst-italic">Sin respuesta</span>
+                                        }
+                                        else
+                                        {
+                                            @answer.OpenAnswer
+                                        }
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <p class="text-muted small mb-1">
+                                        <i class="bi bi-lightbulb me-1"></i> Respuesta de referencia
+                                    </p>
+                                    <div class="px-3 py-2 rounded border bg-white" style="min-height:6rem;white-space:pre-wrap;">
+                                        @if (string.IsNullOrWhiteSpace(answer.SampleAnswer))
+                                        {
+                                            <span class="text-muted fst-italic">Esta pregunta no tiene respuesta de referencia.</span>
+                                        }
+                                        else
+                                        {
+                                            @answer.SampleAnswer
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-3 mt-1">
+                                <div class="col-md-3">
+                                    <label class="form-label small fw-semibold mb-1">
+                                        Puntos (0 – @answer.MaxPoints)
+                                    </label>
+                                    <input type="number" class="form-control @(IsValid(answer) ? "" : "is-invalid")"
+                                           min="0" max="@answer.MaxPoints"
+                                           @bind="input.AwardedPoints" @bind:event="oninput" />
+                                    @if (!IsValid(answer))
+                                    {
+                                        <div class="invalid-feedback d-block">
+                                            Debe estar entre 0 y @answer.MaxPoints.
+                                        </div>
+                                    }
+                                </div>
+                                <div class="col-md-9">
+                                    <label class="form-label small fw-semibold mb-1">
+                                        Comentario para el candidato (opcional)
+                                    </label>
+                                    <input type="text" class="form-control" maxlength="2000"
+                                           placeholder="Por qué esta puntuación..."
+                                           @bind="input.ReviewerComment" @bind:event="oninput" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (_error is not null)
+        {
+            <div class="alert alert-danger">@_error</div>
+        }
+
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="text-muted small">
+                @if (!AllValid)
+                {
+                    <span class="text-danger">
+                        <i class="bi bi-exclamation-circle me-1"></i>
+                        Corrige las puntuaciones fuera de rango antes de guardar.
+                    </span>
+                }
+                else if (_detail.Answers.Count == 1)
+                {
+                    <span>Se corregirá la respuesta y se cerrará el resultado.</span>
+                }
+                else
+                {
+                    <span>Se corregirán las @_detail.Answers.Count respuestas de una sola vez.</span>
+                }
+            </div>
+            <div class="d-flex gap-2">
+                <a href="/admin/results/pending" class="btn btn-outline-secondary">Cancelar</a>
+                <button class="btn btn-success" disabled="@(!AllValid || _saving)" @onclick="SubmitAsync">
+                    @if (_saving)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                    }
+                    <i class="bi bi-check-lg me-1"></i> Guardar corrección y notificar
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true, _saving, _conflict;
+    private string? _error;
+    private PendingReviewDetailDto? _detail;
+    private readonly Dictionary<int, AnswerInput> _inputs = new();
+
+    private class AnswerInput
+    {
+        public int AwardedPoints { get; set; }
+        public string? ReviewerComment { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAdmin)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        _detail = await Api.GetReviewDetailAsync(Id);
+        if (_detail is not null)
+        {
+            foreach (var a in _detail.Answers)
+            {
+                // Las respuestas en blanco llegan pre-puntuadas a 0: el corrector solo confirma.
+                _inputs[a.UserAnswerId] = new AnswerInput
+                {
+                    AwardedPoints = a.AwardedPoints ?? 0,
+                    ReviewerComment = a.ReviewerComment
+                };
+            }
+        }
+        _loading = false;
+    }
+
+    private bool IsValid(ReviewableAnswerDto a)
+    {
+        var v = _inputs[a.UserAnswerId].AwardedPoints;
+        return v >= 0 && v <= a.MaxPoints;
+    }
+
+    private bool AllValid => _detail is not null && _detail.Answers.All(IsValid);
+
+    private int ProvisionalPoints
+        => (_detail?.AutoScoredPoints ?? 0) + _inputs.Values.Sum(i => i.AwardedPoints);
+
+    private decimal ProvisionalPercentage
+        => _detail is { TotalPoints: > 0 }
+            ? Math.Round((decimal)ProvisionalPoints / _detail.TotalPoints * 100, 2)
+            : 0;
+
+    private async Task SubmitAsync()
+    {
+        if (_detail is null || !AllValid) return;
+
+        _saving = true;
+        _error = null;
+
+        var payload = new SubmitReviewDto(
+            _detail.Answers
+                .Select(a => new ReviewAnswerInputDto(
+                    a.UserAnswerId,
+                    _inputs[a.UserAnswerId].AwardedPoints,
+                    string.IsNullOrWhiteSpace(_inputs[a.UserAnswerId].ReviewerComment)
+                        ? null
+                        : _inputs[a.UserAnswerId].ReviewerComment))
+                .ToList());
+
+        var (result, status, error) = await Api.SubmitReviewAsync(Id, payload);
+        _saving = false;
+
+        if (status == 409)
+        {
+            _conflict = true;
+            return;
+        }
+
+        if (result is null)
+        {
+            _error = error ?? "No se pudo guardar la corrección. Inténtalo de nuevo.";
+            return;
+        }
+
+        Nav.NavigateTo($"/admin/results/{Id}");
+    }
+}

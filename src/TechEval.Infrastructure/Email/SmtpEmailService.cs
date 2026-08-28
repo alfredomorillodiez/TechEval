@@ -46,6 +46,14 @@ public class SmtpEmailService : IEmailService
         await SendAsync(toEmail, toName, subject, body, ct);
     }
 
+    public async Task SendExamPendingReviewAsync(
+        string toEmail, string toName, string examTitle, CancellationToken ct = default)
+    {
+        var subject = $"Hemos recibido tu prueba: {examTitle}";
+        var body = BuildPendingReviewHtml(toName, examTitle);
+        await SendAsync(toEmail, toName, subject, body, ct);
+    }
+
     private async Task SendAsync(
         string toEmail, string toName, string subject, string body, CancellationToken ct)
     {
@@ -126,6 +134,32 @@ public class SmtpEmailService : IEmailService
                         {(passed ? "✅ APROBADO" : "❌ NO APROBADO")}
                     </div>
                 </div>
+                <p>Gracias por participar en el proceso de evaluación.</p>
+            </div>
+        </body>
+        </html>
+        """;
+
+    // Sin puntuación ni veredicto por diseño: la prueba contiene preguntas que aún nadie
+    // ha corregido, y adelantar una cifra parcial sería comunicar una nota falsa.
+    private static string BuildPendingReviewHtml(string name, string examTitle) => $"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"></head>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+                <h1 style="margin: 0;">TechEval Platform</h1>
+            </div>
+            <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
+                <h2>Hola, {name}</h2>
+                <p>Hemos recibido correctamente tu prueba <strong>{examTitle}</strong>.</p>
+                <div style="padding: 20px; background: #e0e7ff; border-radius: 8px; margin: 20px 0;">
+                    <p style="margin: 0;">
+                        Esta prueba incluye preguntas de respuesta abierta que requieren
+                        <strong>corrección manual</strong> por parte del equipo evaluador.
+                    </p>
+                </div>
+                <p>Te enviaremos el resultado por email en cuanto la corrección esté finalizada.</p>
                 <p>Gracias por participar en el proceso de evaluación.</p>
             </div>
         </body>

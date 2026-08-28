@@ -1,4 +1,5 @@
 using TechEval.Application.DTOs;
+using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 
 namespace TechEval.Application.Services;
@@ -29,7 +30,10 @@ public class StudentPortalService : IStudentPortalService
     public async Task<List<CompletedExamDto>> GetCompletedAsync(int userId, CancellationToken ct = default)
     {
         var completed = await _resultRepo.GetByUserAsync(userId, ct);
-        return completed.Select(r =>
-            new CompletedExamDto(r.Id, r.Exam.Title, r.ScorePercentage, r.Passed, r.CompletedAt)).ToList();
+        // Los pendientes de corrección viajan sin nota ni veredicto: la puntuación parcial
+        // no es la nota del alumno y mostrarla sería comunicarle un resultado falso.
+        return completed.Select(r => r.Status == ExamResultStatus.Reviewed
+            ? new CompletedExamDto(r.Id, r.Exam.Title, r.ScorePercentage, r.Passed, r.Status, r.CompletedAt)
+            : new CompletedExamDto(r.Id, r.Exam.Title, null, null, r.Status, r.CompletedAt)).ToList();
     }
 }

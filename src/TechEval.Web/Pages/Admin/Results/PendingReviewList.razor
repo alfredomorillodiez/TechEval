@@ -1,0 +1,117 @@
+@page "/admin/results/pending"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Correcciones pendientes — TechEval</PageTitle>
+
+<div class="container-lg py-4">
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <a href="/admin/results" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0 flex-grow-1">Correcciones pendientes</h1>
+        @if (_pending.Count > 0)
+        {
+            <span class="badge bg-warning text-dark fs-6">@_pending.Count en cola</span>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_pending.Count == 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center py-5">
+                <div class="display-4 mb-3">✅</div>
+                <h5>No hay correcciones pendientes</h5>
+                <p class="text-muted mb-0">
+                    Todas las pruebas con preguntas abiertas están corregidas.
+                </p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <p class="text-muted small mb-3">
+            Ordenadas por antigüedad: arriba las que llevan más tiempo esperando.
+        </p>
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Candidato</th>
+                                <th>Prueba</th>
+                                <th>Enviada</th>
+                                <th>Esperando</th>
+                                <th>Por corregir</th>
+                                <th class="text-end pe-3"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in _pending)
+                            {
+                                <tr>
+                                    <td class="ps-3">
+                                        <div class="fw-semibold">@p.CandidateName</div>
+                                        <div class="text-muted small">@p.CandidateEmail</div>
+                                    </td>
+                                    <td>@p.ExamTitle</td>
+                                    <td class="text-muted small text-nowrap">
+                                        @p.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy")<br />
+                                        <span style="font-size:.78rem;">@p.CompletedAt.ToLocalTime().ToString("HH:mm")</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge @WaitClass(p.DaysWaiting)">
+                                            @(p.DaysWaiting == 0 ? "Hoy" : p.DaysWaiting == 1 ? "1 día" : $"{p.DaysWaiting} días")
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">
+                                            @p.OpenAnswerCount @(p.OpenAnswerCount == 1 ? "respuesta" : "respuestas")
+                                        </span>
+                                    </td>
+                                    <td class="text-end pe-3">
+                                        <a href="/admin/results/@p.ResultId/review" class="btn btn-sm btn-primary">
+                                            <i class="bi bi-pencil-square me-1"></i> Corregir
+                                        </a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private List<PendingReviewSummaryDto> _pending = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAdmin)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        _pending = await Api.GetPendingReviewsAsync() ?? new();
+        _loading = false;
+    }
+
+    private static string WaitClass(int days) => days switch
+    {
+        >= 7 => "bg-danger",
+        >= 3 => "bg-warning text-dark",
+        _ => "bg-light text-dark border"
+    };
+}

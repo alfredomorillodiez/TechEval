@@ -1,5 +1,6 @@
 using TechEval.Application.DTOs;
 using TechEval.Domain.Entities;
+using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 
 namespace TechEval.Application.Services;
@@ -31,18 +32,18 @@ public class ResultService : IResultService
     public async Task<IReadOnlyList<ExamResultSummaryDto>> GetAllAsync(CancellationToken ct = default)
     {
         var results = await _resultRepo.GetAllWithDetailsAsync(ct);
-        return results.Select(r => new ExamResultSummaryDto(
-            r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
-            r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.CompletedAt)).ToList();
+        return results.Select(MapToSummary).ToList();
     }
 
     public async Task<IReadOnlyList<ExamResultSummaryDto>> GetByExamAsync(int examId, CancellationToken ct = default)
     {
         var results = await _resultRepo.GetByExamAsync(examId, ct);
-        return results.Select(r => new ExamResultSummaryDto(
-            r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
-            r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.CompletedAt)).ToList();
+        return results.Select(MapToSummary).ToList();
     }
+
+    private static ExamResultSummaryDto MapToSummary(ExamResult r) => new(
+        r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
+        r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.Status, r.CompletedAt);
 
     public async Task<ExamResultDto?> GetDetailAsync(int id, CancellationToken ct = default)
     {
@@ -63,14 +64,16 @@ public class ResultService : IResultService
                 ua.OpenAnswer,
                 correct?.Text,
                 ua.IsCorrect,
-                ua.Question?.Points ?? 0);
+                ua.Question?.Points ?? 0,
+                ua.AwardedPoints,
+                ua.ReviewerComment);
         }).ToList();
 
         return new ExamResultDto(
             result.Id, result.CandidateName, result.CandidateEmail,
             result.Exam?.Title ?? "",
             result.TotalPoints, result.ObtainedPoints,
-            result.ScorePercentage, result.Passed,
+            result.ScorePercentage, result.Passed, result.Status,
             result.CompletedAt, answerReviews);
     }
 
@@ -84,18 +87,22 @@ public class ResultService : IResultService
             r.CompletedAt.Year == DateTime.UtcNow.Year &&
             r.CompletedAt.Month == DateTime.UtcNow.Month).ToList();
 
-        var avgScore = thisMonth.Any()
-            ? Math.Round(thisMonth.Average(r => r.ScorePercentage), 1)
+        // Media y tasa de aprobación solo sobre lo ya corregido: un resultado pendiente
+        // lleva una puntuación parcial que hundiría la media e inflaría los suspensos.
+        var scored = thisMonth.Where(r => r.Status == ExamResultStatus.Reviewed).ToList();
+
+        var avgScore = scored.Any()
+            ? Math.Round(scored.Average(r => r.ScorePercentage), 1)
             : 0;
-        var passRate = thisMonth.Any()
-            ? (int)Math.Round((double)thisMonth.Count(r => r.Passed) / thisMonth.Count * 100)
+        var passRate = scored.Any()
+            ? (int)Math.Round((double)scored.Count(r => r.Passed == true) / scored.Count * 100)
             : 0;
+
+        var pendingReviewCount = allResults.Count(r => r.Status == ExamResultStatus.PendingReview);
 
         var recent = allResults
             .OrderByDescending(r => r.CompletedAt).Take(10)
-            .Select(r => new ExamResultSummaryDto(
-                r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
-                r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.CompletedAt))
+            .Select(MapToSummary)
             .ToList();
 
         return new DashboardStatsDto(
@@ -104,6 +111,7 @@ public class ResultService : IResultService
             thisMonth.Count,
             avgScore,
             passRate,
+            pendingReviewCount,
             recent);
     }
 }

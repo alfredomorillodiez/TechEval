@@ -1,5 +1,6 @@
 @page "/admin/results/prueba/{ExamId:int}"
 @using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
@@ -124,6 +125,7 @@
                             <option value="">Todos</option>
                             <option value="true">Aprobado</option>
                             <option value="false">Reprobado</option>
+                            <option value="pending">Pendiente de corrección</option>
                         </select>
                     </div>
                     <div class="col-6 col-md-2">
@@ -194,18 +196,34 @@
                                             <div class="text-muted small">@r.CandidateEmail</div>
                                         </td>
                                         <td>
-                                            <div class="d-flex align-items-center gap-2">
-                                                <div class="progress flex-grow-1" style="height:8px;">
-                                                    <div class="progress-bar @(r.Passed ? "bg-success" : "bg-danger")"
-                                                         style="width:@r.ScorePercentage%"></div>
+                                            @if (r.Status == ExamResultStatus.PendingReview)
+                                            {
+                                                <span class="text-muted small">Sin corregir</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="d-flex align-items-center gap-2">
+                                                    <div class="progress flex-grow-1" style="height:8px;">
+                                                        <div class="progress-bar @(r.Passed == true ? "bg-success" : "bg-danger")"
+                                                             style="width:@r.ScorePercentage%"></div>
+                                                    </div>
+                                                    <span class="fw-bold" style="min-width:3.5rem;">@r.ScorePercentage%</span>
                                                 </div>
-                                                <span class="fw-bold" style="min-width:3.5rem;">@r.ScorePercentage%</span>
-                                            </div>
+                                            }
                                         </td>
                                         <td>
-                                            <span class="badge @(r.Passed ? "bg-success" : "bg-danger")">
-                                                @(r.Passed ? "Aprobado" : "Reprobado")
-                                            </span>
+                                            @if (r.Status == ExamResultStatus.PendingReview)
+                                            {
+                                                <a href="/admin/results/pending" class="badge bg-secondary text-decoration-none">
+                                                    <i class="bi bi-hourglass-split me-1"></i> Pendiente de corrección
+                                                </a>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge @(r.Passed == true ? "bg-success" : "bg-danger")">
+                                                    @(r.Passed == true ? "Aprobado" : "Reprobado")
+                                                </span>
+                                            }
                                         </td>
                                         <td class="text-muted small text-nowrap">
                                             @r.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy")<br />
@@ -237,6 +255,8 @@
 
     // KPIs
     private int _passedCount;
+    private int _reviewedCount;
+    private int _pendingCount;
     private int _passRate;
     private decimal _avgScore;
     private decimal _maxScore;
@@ -268,14 +288,27 @@
         _loading = false;
     }
 
+    private bool MatchesOutcome(ExamResultSummaryDto r) => _fPassed switch
+    {
+        "" or null => true,
+        "pending" => r.Status == ExamResultStatus.PendingReview,
+        "true" => r.Status == ExamResultStatus.Reviewed && r.Passed == true,
+        "false" => r.Status == ExamResultStatus.Reviewed && r.Passed == false,
+        _ => true
+    };
+
     private void ComputeKpis()
     {
-        if (!_all.Any()) return;
-        _passedCount = _all.Count(r => r.Passed);
-        _passRate = (int)Math.Round((double)_passedCount / _all.Count * 100);
-        _avgScore = Math.Round(_all.Average(r => r.ScorePercentage), 1);
-        _maxScore = _all.Max(r => r.ScorePercentage);
-        _minScore = _all.Min(r => r.ScorePercentage);
+        // Solo sobre lo corregido: los pendientes llevan puntuación parcial.
+        var reviewed = _all.Where(r => r.Status == ExamResultStatus.Reviewed).ToList();
+        _reviewedCount = reviewed.Count;
+        _pendingCount = _all.Count - reviewed.Count;
+        if (!reviewed.Any()) return;
+        _passedCount = reviewed.Count(r => r.Passed == true);
+        _passRate = (int)Math.Round((double)_passedCount / reviewed.Count * 100);
+        _avgScore = Math.Round(reviewed.Average(r => r.ScorePercentage), 1);
+        _maxScore = reviewed.Max(r => r.ScorePercentage);
+        _minScore = reviewed.Min(r => r.ScorePercentage);
     }
 
     private void BuildDistribution()
@@ -290,9 +323,13 @@
             ("90 – 100%",90, 100, "bg-success"),
         };
 
+        // Los pendientes quedan fuera del histograma: su porcentaje es parcial y los
+        // amontonaría en los tramos bajos, dando una imagen falsa de la prueba.
+        var reviewed = _all.Where(x => x.Status == ExamResultStatus.Reviewed).ToList();
+
         _distribution = ranges.Select(r => new DistBucket(
             r.label,
-            _all.Count(x => x.ScorePercentage >= r.from && x.ScorePercentage <= r.to),
+            reviewed.Count(x => x.ScorePercentage >= r.from && x.ScorePercentage <= r.to),
             r.color
         )).ToList();
     }
@@ -303,9 +340,9 @@
             (string.IsNullOrEmpty(_fSearch) ||
                 r.CandidateName.Contains(_fSearch, StringComparison.OrdinalIgnoreCase) ||
                 r.CandidateEmail.Contains(_fSearch, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrEmpty(_fPassed) || r.Passed.ToString().ToLower() == _fPassed) &&
-            (_fScoreMin is null || r.ScorePercentage >= _fScoreMin) &&
-            (_fScoreMax is null || r.ScorePercentage <= _fScoreMax) &&
+            MatchesOutcome(r) &&
+            (_fScoreMin is null || (r.Status == ExamResultStatus.Reviewed && r.ScorePercentage >= _fScoreMin)) &&
+            (_fScoreMax is null || (r.Status == ExamResultStatus.Reviewed && r.ScorePercentage <= _fScoreMax)) &&
             (_fDateFrom is null || r.CompletedAt.ToLocalTime().Date >= _fDateFrom.Value.Date) &&
             (_fDateTo is null || r.CompletedAt.ToLocalTime().Date <= _fDateTo.Value.Date)
         ).ToList();

@@ -33,21 +33,9 @@ services:
       - Email__Password=${SENDGRID_API_KEY}
       - Email__FromEmail=noreply@yourdomain.com
       - AdminPassword=Admin@123!
-      - Ollama__BaseUrl=http://ollama:11434
-      - Ollama__Model=qwen2.5-coder:14b
     depends_on:
       sqlserver:
         condition: service_healthy
-      ollama:
-        condition: service_started
-
-  # Ollama — modelo de IA local para la generación de preguntas
-  ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
 
   web:
     build:
@@ -69,4 +57,3 @@ services:
 
 volumes:
   sqlserver_data:
-  ollama_data:

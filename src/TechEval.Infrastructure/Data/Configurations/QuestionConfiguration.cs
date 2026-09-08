@@ -14,9 +14,6 @@ public class QuestionConfiguration : IEntityTypeConfiguration<Question>
         builder.Property(q => q.Type).IsRequired();
         builder.Property(q => q.Difficulty).IsRequired();
         builder.Property(q => q.Points).HasDefaultValue(1);
-        builder.Property(q => q.QuestionReviewStatus)
-            .IsRequired()
-            .HasDefaultValue(TechEval.Domain.Enums.QuestionReviewStatus.Approved);
 
         builder.HasOne(q => q.Category)
             .WithMany(c => c.Questions)
@@ -31,7 +28,6 @@ public class QuestionConfiguration : IEntityTypeConfiguration<Question>
         builder.HasIndex(q => q.CategoryId);
         builder.HasIndex(q => q.Difficulty);
         builder.HasIndex(q => q.IsActive);
-        builder.HasIndex(q => q.QuestionReviewStatus);
     }
 }
 
@@ -51,7 +47,6 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.HasKey(c => c.Id);
         builder.Property(c => c.Name).IsRequired().HasMaxLength(100);
         builder.Property(c => c.Description).HasMaxLength(500);
-        builder.Property(c => c.AllowsAiGeneration).HasDefaultValue(true);
         builder.HasIndex(c => c.Name).IsUnique();
     }
 }
@@ -210,52 +205,5 @@ public class ExamResultConfiguration : IEntityTypeConfiguration<ExamResult>
         builder.HasIndex(r => r.UserId);
         builder.HasIndex(r => r.ReviewedByUserId);
         builder.HasIndex(r => r.Status);
-    }
-}
-
-public class QuestionGenerationJobConfiguration : IEntityTypeConfiguration<QuestionGenerationJob>
-{
-    public void Configure(EntityTypeBuilder<QuestionGenerationJob> builder)
-    {
-        builder.HasKey(j => j.Id);
-        builder.Property(j => j.Topic).IsRequired().HasMaxLength(500);
-        builder.Property(j => j.Difficulty).IsRequired();
-        builder.Property(j => j.Type).IsRequired();
-        builder.Property(j => j.Status).IsRequired();
-
-        builder.HasOne(j => j.Category)
-            .WithMany()
-            .HasForeignKey(j => j.CategoryId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasOne(j => j.CreatedByUser)
-            .WithMany()
-            .HasForeignKey(j => j.CreatedByUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasIndex(j => j.Status);
-    }
-}
-
-public class QuestionGenerationJobItemConfiguration : IEntityTypeConfiguration<QuestionGenerationJobItem>
-{
-    public void Configure(EntityTypeBuilder<QuestionGenerationJobItem> builder)
-    {
-        builder.HasKey(i => i.Id);
-        builder.Property(i => i.Status).IsRequired();
-        builder.Property(i => i.ErrorMessage).HasMaxLength(2000);
-
-        builder.HasOne(i => i.Job)
-            .WithMany(j => j.Items)
-            .HasForeignKey(i => i.JobId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        builder.HasOne(i => i.Question)
-            .WithMany()
-            .HasForeignKey(i => i.QuestionId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        builder.HasIndex(i => i.Status);
-        builder.HasIndex(i => i.JobId);
     }
 }

@@ -12,7 +12,6 @@ public class Question : AuditableEntity
     public int CategoryId { get; set; }
     public int Points { get; set; } = 1;
     public bool IsActive { get; set; } = true;
-    public QuestionReviewStatus QuestionReviewStatus { get; set; } = QuestionReviewStatus.Approved;
 
     // Para preguntas abiertas: respuesta de referencia para el corrector
     public string? SampleAnswer { get; set; }

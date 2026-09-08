@@ -17,8 +17,6 @@ public class AppDbContext : DbContext
     public DbSet<ExamSession> ExamSessions => Set<ExamSession>();
     public DbSet<UserAnswer> UserAnswers => Set<UserAnswer>();
     public DbSet<ExamResult> ExamResults => Set<ExamResult>();
-    public DbSet<QuestionGenerationJob> QuestionGenerationJobs => Set<QuestionGenerationJob>();
-    public DbSet<QuestionGenerationJobItem> QuestionGenerationJobItems => Set<QuestionGenerationJobItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

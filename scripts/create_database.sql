@@ -35,8 +35,6 @@ GO
 -- ============================================================
 -- Eliminar tablas (orden inverso de dependencias)
 -- ============================================================
-IF OBJECT_ID('dbo.QuestionGenerationJobItems', 'U') IS NOT NULL DROP TABLE dbo.QuestionGenerationJobItems;
-IF OBJECT_ID('dbo.QuestionGenerationJobs',     'U') IS NOT NULL DROP TABLE dbo.QuestionGenerationJobs;
 IF OBJECT_ID('dbo.ExamResults',   'U') IS NOT NULL DROP TABLE dbo.ExamResults;
 IF OBJECT_ID('dbo.UserAnswers',   'U') IS NOT NULL DROP TABLE dbo.UserAnswers;
 IF OBJECT_ID('dbo.ExamSessions',  'U') IS NOT NULL DROP TABLE dbo.ExamSessions;
@@ -79,7 +77,6 @@ CREATE TABLE dbo.Categories (
     Name              NVARCHAR(100) NOT NULL,
     Description       NVARCHAR(500) NOT NULL CONSTRAINT DF_Categories_Desc DEFAULT '',
     IsActive          BIT           NOT NULL CONSTRAINT DF_Categories_IsActive  DEFAULT 1,
-    AllowsAiGeneration BIT          NOT NULL CONSTRAINT DF_Categories_AllowsAi DEFAULT 1,
     CreatedAt         DATETIME2     NOT NULL CONSTRAINT DF_Categories_CreatedAt DEFAULT GETUTCDATE(),
     UpdatedAt         DATETIME2     NULL,
 
@@ -94,7 +91,6 @@ GO
 -- 3. Questions
 --    Type:               1 = MultipleChoice | 2 = OpenEnded
 --    Difficulty:         1 = Basic | 2 = Intermediate | 3 = Advanced
---    QuestionReviewStatus: 1 = Approved | 2 = PendingReview | 3 = Rejected
 -- ============================================================
 CREATE TABLE dbo.Questions (
     Id                   INT            NOT NULL IDENTITY(1,1),
@@ -104,7 +100,6 @@ CREATE TABLE dbo.Questions (
     CategoryId           INT            NOT NULL,
     Points               INT            NOT NULL CONSTRAINT DF_Questions_Points    DEFAULT 1,
     IsActive             BIT            NOT NULL CONSTRAINT DF_Questions_IsActive  DEFAULT 1,
-    QuestionReviewStatus INT            NOT NULL CONSTRAINT DF_Questions_ReviewStatus DEFAULT 1,
     SampleAnswer         NVARCHAR(4000) NULL,       -- Respuesta de referencia para preguntas abiertas
     CreatedAt            DATETIME2      NOT NULL CONSTRAINT DF_Questions_CreatedAt DEFAULT GETUTCDATE(),
     UpdatedAt            DATETIME2      NULL,
@@ -118,7 +113,6 @@ GO
 CREATE INDEX IX_Questions_CategoryId     ON dbo.Questions (CategoryId);
 CREATE INDEX IX_Questions_Difficulty     ON dbo.Questions (Difficulty);
 CREATE INDEX IX_Questions_IsActive       ON dbo.Questions (IsActive);
-CREATE INDEX IX_Questions_ReviewStatus   ON dbo.Questions (QuestionReviewStatus);
 GO
 
 -- ============================================================
@@ -288,59 +282,6 @@ CREATE INDEX IX_ExamResults_CompletedAt          ON dbo.ExamResults (CompletedAt
 CREATE INDEX IX_ExamResults_UserId               ON dbo.ExamResults (UserId);
 CREATE INDEX IX_ExamResults_ReviewedByUserId     ON dbo.ExamResults (ReviewedByUserId);
 CREATE INDEX IX_ExamResults_Status               ON dbo.ExamResults (Status);
-GO
-
--- ============================================================
--- 11. QuestionGenerationJobs  (solicitud de generación de preguntas por IA)
---    Difficulty: 1=Basic | 2=Intermediate | 3=Advanced
---    Type:       1=MultipleChoice | 2=OpenEnded
---    Status:     1=Queued | 2=Running | 3=Completed | 4=Failed
--- ============================================================
-CREATE TABLE dbo.QuestionGenerationJobs (
-    Id              INT           NOT NULL IDENTITY(1,1),
-    CategoryId      INT           NOT NULL,
-    Difficulty      INT           NOT NULL,
-    Type            INT           NOT NULL,
-    Topic           NVARCHAR(500) NOT NULL,
-    RequestedCount  INT           NOT NULL,
-    Status          INT           NOT NULL CONSTRAINT DF_QGJobs_Status DEFAULT 1,
-    CreatedByUserId INT           NOT NULL,
-    CompletedAt     DATETIME2     NULL,
-    CreatedAt       DATETIME2     NOT NULL CONSTRAINT DF_QGJobs_CreatedAt DEFAULT GETUTCDATE(),
-    UpdatedAt       DATETIME2     NULL,
-
-    CONSTRAINT PK_QuestionGenerationJobs PRIMARY KEY (Id),
-    CONSTRAINT FK_QGJobs_Categories FOREIGN KEY (CategoryId)
-        REFERENCES dbo.Categories (Id) ON DELETE NO ACTION ON UPDATE NO ACTION,
-    CONSTRAINT FK_QGJobs_Users FOREIGN KEY (CreatedByUserId)
-        REFERENCES dbo.Users (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
-);
-GO
-
-CREATE INDEX IX_QGJobs_Status ON dbo.QuestionGenerationJobs (Status);
-GO
-
--- ============================================================
--- 12. QuestionGenerationJobItems  (una fila por pregunta solicitada dentro de un job)
---    Status: 1=Pending | 2=Succeeded | 3=Failed
--- ============================================================
-CREATE TABLE dbo.QuestionGenerationJobItems (
-    Id           INT           NOT NULL IDENTITY(1,1),
-    JobId        INT           NOT NULL,
-    Status       INT           NOT NULL CONSTRAINT DF_QGJobItems_Status DEFAULT 1,
-    QuestionId   INT           NULL,
-    ErrorMessage NVARCHAR(2000) NULL,
-
-    CONSTRAINT PK_QuestionGenerationJobItems PRIMARY KEY (Id),
-    CONSTRAINT FK_QGJobItems_Jobs FOREIGN KEY (JobId)
-        REFERENCES dbo.QuestionGenerationJobs (Id) ON DELETE CASCADE ON UPDATE NO ACTION,
-    CONSTRAINT FK_QGJobItems_Questions FOREIGN KEY (QuestionId)
-        REFERENCES dbo.Questions (Id) ON DELETE SET NULL ON UPDATE NO ACTION
-);
-GO
-
-CREATE INDEX IX_QGJobItems_Status ON dbo.QuestionGenerationJobItems (Status);
-CREATE INDEX IX_QGJobItems_JobId  ON dbo.QuestionGenerationJobItems (JobId);
 GO
 
 -- ============================================================

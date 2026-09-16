@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change exam-results. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Corrección automática de preguntas de opción múltiple
 Al enviar un examen (`SubmitExamAsync`), el sistema SHALL evaluar automáticamente cada pregunta de tipo `MultipleChoice` comparando el `SelectedAnswerId` enviado por el candidato contra la respuesta marcada como `IsCorrect` en el banco de preguntas, marcando la respuesta del candidato (`UserAnswer.IsCorrect`) como verdadera o falsa y sumando los puntos de la pregunta (`Question.Points`) al total obtenido cuando coincide con la respuesta correcta.
 
@@ -88,7 +90,7 @@ El sistema SHALL permitir a usuarios con rol `Admin` consultar el listado comple
 - **THEN** ese resultado se expone con `Passed = null` y su estado de corrección, de modo que el consumidor pueda distinguirlo de un suspenso
 
 ### Requirement: Detalle de resultado con revisión de respuestas
-El sistema SHALL permitir a usuarios con rol `Admin` consultar el detalle de un resultado (`GET /api/results/{id}`), incluyendo el estado de corrección y, por cada pregunta de la sesión, el texto de la pregunta, la respuesta seleccionada o el texto abierto del candidato, la respuesta correcta esperada, si fue evaluada como correcta (o `null` si es una pregunta abierta pendiente), los puntos de la pregunta, los puntos otorgados (`AwardedPoints`, `null` si está pendiente) y el comentario del corrector cuando exista; si el resultado no existe, SHALL responder `404`.
+El sistema SHALL permitir a usuarios con rol `Admin` consultar el detalle de un resultado (`GET /api/results/{id}`), incluyendo el estado de corrección y, por cada pregunta de la sesión, el texto de la pregunta, la respuesta seleccionada o el texto abierto del candidato, la respuesta correcta esperada, si fue evaluada como correcta (o `null` si es una pregunta abierta pendiente), los puntos de la pregunta, los puntos otorgados (`AwardedPoints`, `null` si está pendiente) y el comentario del corrector cuando exista; si el resultado no existe, SHALL responder `404`. El enunciado, la respuesta seleccionada, la correcta y los puntos de la pregunta SHALL leerse de la copia congelada en la `UserAnswer` y no de la pregunta actual del banco.
 
 #### Scenario: Consulta de detalle de un resultado existente
 - **WHEN** un administrador solicita `GET /api/results/{id}` para un `id` de resultado existente
@@ -101,6 +103,11 @@ El sistema SHALL permitir a usuarios con rol `Admin` consultar el detalle de un 
 #### Scenario: Consulta de detalle de un resultado inexistente
 - **WHEN** un administrador solicita `GET /api/results/{id}` para un `id` que no corresponde a ningún resultado
 - **THEN** el sistema responde `404 Not Found`
+
+#### Scenario: El detalle no cambia al editar la pregunta
+- **GIVEN** un resultado cuyo detalle muestra el enunciado y las opciones de una pregunta
+- **WHEN** un administrador edita esa pregunta en el banco y se vuelve a consultar el detalle
+- **THEN** el sistema SHALL devolver el mismo enunciado, la misma opción elegida, la misma opción correcta y los mismos puntos máximos que antes de la edición
 
 ### Requirement: Estado de corrección del resultado
 El sistema SHALL registrar en cada `ExamResult` un estado `Status` de tipo `ExamResultStatus` con los valores `PendingReview` y `Reviewed`. Al enviar un examen, el sistema SHALL fijar `Status = PendingReview` si y solo si el examen contiene al menos una pregunta de tipo `OpenQuestion`, con independencia de lo que el candidato haya respondido; en cualquier otro caso SHALL fijar `Status = Reviewed`. Mientras `Status` sea `PendingReview`, `ScorePercentage` y `ObtainedPoints` reflejan únicamente la parte ya corregida automáticamente y `Passed` SHALL ser `null`.
@@ -144,4 +151,3 @@ El sistema SHALL calcular `ObtainedPoints` como la suma de los `AwardedPoints` d
 - **GIVEN** un resultado en el que el candidato acertó una pregunta de test que valía 1 punto, con `AwardedPoints = 1` registrado
 - **WHEN** un administrador edita esa pregunta y le asigna 5 puntos, y después se recalcula el resultado al cerrar su corrección manual
 - **THEN** el sistema SHALL seguir contabilizando 1 punto por esa respuesta, manteniendo la coherencia con el `TotalPoints` congelado en el envío
-

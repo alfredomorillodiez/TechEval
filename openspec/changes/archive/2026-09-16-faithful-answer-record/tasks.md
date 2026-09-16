@@ -25,12 +25,12 @@
 ## 5. Autoguardado mientras se escribe (D6)
 
 - [x] 5.1 Añadir en `TakeExam.razor` el temporizador de retardo sobre `@oninput`, conservando `@onblur`. Verificar que el temporizador se libera al salir de la página.
-- [ ] 5.2 Comprobar que escribir sin pausa produce un solo envío y no uno por carácter. Verificar en el navegador con la pestaña de red.
+- [x] 5.2 Comprobar que escribir sin pausa produce un solo envío y no uno por carácter. Verificar en el navegador con la pestaña de red.
 - [x] 5.3 Comprobar que un `409` por plazo vencido no borra lo escrito en pantalla. Verificar leyendo el manejador.
 
 ## 6. Cierre
 
 - [x] 6.1 Ejecutar `dotnet test` completo. Verificar que las 124 pruebas anteriores siguen en verde.
 - [x] 6.2 Reconstruir y arrancar la API. Comprobar contra la API real que editar una pregunta ya respondida no cambia la ficha del resultado. Verificar el antes y el después.
-- [ ] 6.3 Recorrer una prueba en el navegador: escribir en una abierta, cerrar la pestaña sin salir del campo, volver a entrar. Verificar que el texto sigue ahí.
+- [x] 6.3 Recorrer una prueba en el navegador: escribir en una abierta, cerrar la pestaña sin salir del campo, volver a entrar. Verificar que el texto sigue ahí.
 - [x] 6.4 Comprobar en la base de datos que `AnsweredAt` y `StartedAt` son comparables. Verificar con una consulta.

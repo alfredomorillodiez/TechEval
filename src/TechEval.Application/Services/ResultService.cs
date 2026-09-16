@@ -82,39 +82,37 @@ public class ResultService : IResultService
 
     public async Task<DashboardStatsDto> GetDashboardStatsAsync(CancellationToken ct = default)
     {
-        var allResults = await _resultRepo.GetAllWithDetailsAsync(ct);
-        var allExams = await _examRepo.GetWithStatsAsync(ct);
-        var totalQuestions = await _questionRepo.CountAsync(q => q.IsActive, ct);
+        // El rango del mes se calcula una vez, aquí. Antes el filtro comparaba año y mes
+        // contra el reloj dentro de la consulta, y eso no puede usar el índice de
+        // CompletedAt. Un rango sí.
+        var ahora = DateTime.UtcNow;
+        var desde = new DateTime(ahora.Year, ahora.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var hasta = desde.AddMonths(1);
 
-        var thisMonth = allResults.Where(r =>
-            r.CompletedAt.Year == DateTime.UtcNow.Year &&
-            r.CompletedAt.Month == DateTime.UtcNow.Month).ToList();
+        // Cuatro consultas agregadas en lugar de traerse el histórico entero y el árbol
+        // completo de exámenes para contarlo en memoria.
+        var mes = await _resultRepo.GetPeriodStatsAsync(desde, hasta, ct);
+        var activeExams = await _examRepo.CountActiveAsync(ct);
+        var totalQuestions = await _questionRepo.CountAsync(q => q.IsActive, ct);
+        var pendingReviewCount = await _resultRepo.CountPendingReviewAsync(ct);
+        var recent = await _resultRepo.GetRecentAsync(10, ct);
 
         // Media y tasa de aprobación solo sobre lo ya corregido: un resultado pendiente
         // lleva una puntuación parcial que hundiría la media e inflaría los suspensos.
-        var scored = thisMonth.Where(r => r.Status == ExamResultStatus.Reviewed).ToList();
-
-        var avgScore = scored.Any()
-            ? Math.Round(scored.Average(r => r.ScorePercentage), 1)
+        var avgScore = mes.Scored > 0
+            ? Math.Round(mes.ScoreSum / mes.Scored, 1)
             : 0;
-        var passRate = scored.Any()
-            ? (int)Math.Round((double)scored.Count(r => r.Passed == true) / scored.Count * 100)
+        var passRate = mes.Scored > 0
+            ? (int)Math.Round((double)mes.Passed / mes.Scored * 100)
             : 0;
-
-        var pendingReviewCount = allResults.Count(r => r.Status == ExamResultStatus.PendingReview);
-
-        var recent = allResults
-            .OrderByDescending(r => r.CompletedAt).Take(10)
-            .Select(MapToSummary)
-            .ToList();
 
         return new DashboardStatsDto(
-            allExams.Count(e => e.IsActive),
+            activeExams,
             totalQuestions,
-            thisMonth.Count,
+            mes.Total,
             avgScore,
             passRate,
             pendingReviewCount,
-            recent);
+            recent.Select(MapToSummary).ToList());
     }
 }

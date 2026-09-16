@@ -67,4 +67,40 @@ public class ExamResultRepository : BaseRepository<ExamResult>, IExamResultRepos
                 .ThenInclude(s => s!.UserAnswers)
                     .ThenInclude(ua => ua.Question)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
+
+    public async Task<PeriodResultStats> GetPeriodStatsAsync(
+        DateTime desde, DateTime hasta, CancellationToken ct = default)
+    {
+        // Las cuatro cifras salen del mismo filtro, así que van en un solo recorrido.
+        // El promedio no se pide aquí: sobre un conjunto vacío AVG devuelve nulo, y el
+        // redondeo debe hacerse una sola vez, al final.
+        var agregado = await Context.ExamResults
+            .Where(r => r.CompletedAt >= desde && r.CompletedAt < hasta)
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Scored = g.Count(r => r.Status == ExamResultStatus.Reviewed),
+                ScoreSum = g.Sum(r => r.Status == ExamResultStatus.Reviewed ? r.ScorePercentage : 0m),
+                Passed = g.Count(r => r.Status == ExamResultStatus.Reviewed && r.Passed == true)
+            })
+            .FirstOrDefaultAsync(ct);
+
+        // Sin filas en el periodo no hay grupo, y eso es un periodo vacío, no un error.
+        return agregado is null
+            ? new PeriodResultStats(0, 0, 0m, 0)
+            : new PeriodResultStats(agregado.Total, agregado.Scored, agregado.ScoreSum, agregado.Passed);
+    }
+
+    public async Task<int> CountPendingReviewAsync(CancellationToken ct = default)
+        => await Context.ExamResults
+            .CountAsync(r => r.Status == ExamResultStatus.PendingReview, ct);
+
+    public async Task<IReadOnlyList<ExamResult>> GetRecentAsync(
+        int count, CancellationToken ct = default)
+        => await Context.ExamResults
+            .Include(r => r.Exam)
+            .OrderByDescending(r => r.CompletedAt)
+            .Take(count)
+            .ToListAsync(ct);
 }

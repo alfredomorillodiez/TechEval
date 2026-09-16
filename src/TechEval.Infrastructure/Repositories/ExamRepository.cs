@@ -29,4 +29,7 @@ public class ExamRepository : BaseRepository<Exam>, IExamRepository
                     .ThenInclude(s => s!.ExamResult)
             .OrderByDescending(e => e.CreatedAt)
             .ToListAsync(ct);
+
+    public async Task<int> CountActiveAsync(CancellationToken ct = default)
+        => await Context.Exams.CountAsync(e => e.IsActive, ct);
 }

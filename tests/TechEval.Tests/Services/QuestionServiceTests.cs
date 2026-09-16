@@ -66,7 +66,7 @@ public class QuestionServiceTests
 
         var act = async () => await _sut.CreateAsync(dto);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
+        await act.Should().ThrowAsync<TechEval.Application.ValidationException>()
             .WithMessage("*exactamente 1 respuesta correcta*");
     }
 
@@ -85,7 +85,7 @@ public class QuestionServiceTests
 
         var act = async () => await _sut.CreateAsync(dto);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
+        await act.Should().ThrowAsync<TechEval.Application.ValidationException>()
             .WithMessage("*exactamente 4 respuestas*");
     }
 

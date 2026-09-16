@@ -44,15 +44,10 @@ public class QuestionsController : ControllerBase
     [ProducesResponseType(409)]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateQuestionDto dto, CancellationToken ct)
     {
-        try
-        {
-            var result = await _service.UpdateAsync(id, dto, ct);
-            return result is null ? NotFound() : Ok(result);
-        }
-        catch (AnswerInUseException ex)
-        {
-            return Conflict(new { error = ex.Message });
-        }
+        // El 409 de `AnswerInUseException` lo produce ErrorHandlingMiddleware. El código de
+        // estado se decide en un solo sitio para que el mismo error no se mapee de dos formas.
+        var result = await _service.UpdateAsync(id, dto, ct);
+        return result is null ? NotFound() : Ok(result);
     }
 
     [HttpDelete("{id:int}")]

@@ -29,15 +29,9 @@ public class ReviewController : ControllerBase
     [ProducesResponseType(409)]
     public async Task<IActionResult> GetDetail(int resultId, CancellationToken ct)
     {
-        try
-        {
-            var detail = await _service.GetDetailAsync(resultId, ct);
-            return detail is null ? NotFound() : Ok(detail);
-        }
-        catch (AlreadyReviewedException ex)
-        {
-            return Conflict(new { error = ex.Message });
-        }
+        // El 409 de `AlreadyReviewedException` lo produce ErrorHandlingMiddleware.
+        var detail = await _service.GetDetailAsync(resultId, ct);
+        return detail is null ? NotFound() : Ok(detail);
     }
 
     /// <summary>
@@ -51,19 +45,8 @@ public class ReviewController : ControllerBase
     public async Task<IActionResult> SubmitReview(
         int resultId, [FromBody] SubmitReviewDto dto, CancellationToken ct)
     {
-        try
-        {
-            var result = await _service.SubmitReviewAsync(resultId, dto, GetCurrentUserId(), ct);
-            return Ok(result);
-        }
-        catch (AlreadyReviewedException ex)
-        {
-            return Conflict(new { error = ex.Message });
-        }
-        catch (InvalidReviewException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        var result = await _service.SubmitReviewAsync(resultId, dto, GetCurrentUserId(), ct);
+        return Ok(result);
     }
 
     private int GetCurrentUserId()

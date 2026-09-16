@@ -29,7 +29,7 @@ public class ExamServiceTests
 
         var act = async () => await _sut.GenerateAsync(dto, createdByUserId: 1);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
+        await act.Should().ThrowAsync<TechEval.Application.ValidationException>()
             .WithMessage("*suficientes preguntas*");
     }
 

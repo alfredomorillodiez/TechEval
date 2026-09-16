@@ -10,7 +10,7 @@ namespace TechEval.Application.Services;
 /// Los identificadores de sesión son secuenciales, así que el número por sí solo nunca
 /// puede valer como prueba de propiedad.
 /// </summary>
-public class SessionAccessDeniedException : Exception
+public class SessionAccessDeniedException : ForbiddenException
 {
     public SessionAccessDeniedException(string message) : base(message) { }
 }
@@ -18,7 +18,7 @@ public class SessionAccessDeniedException : Exception
 /// <summary>
 /// Se lanza cuando el plazo del examen ya venció: la API la traduce a 409.
 /// </summary>
-public class ExamTimeExpiredException : Exception
+public class ExamTimeExpiredException : ConflictException
 {
     public ExamTimeExpiredException(string message) : base(message) { }
 }
@@ -70,7 +70,7 @@ public class ExamTokenService : IExamTokenService
     public async Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
-            ?? throw new InvalidOperationException("Examen no encontrado.");
+            ?? throw new NotFoundException("Examen no encontrado.");
 
         var secureToken = _tokenService.GenerateSecureToken();
         var expiresAt = DateTime.UtcNow.AddHours(dto.ExpirationHours);
@@ -97,7 +97,7 @@ public class ExamTokenService : IExamTokenService
     public async Task<BulkSendResultDto> SendExamBulkAsync(BulkSendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
-            ?? throw new InvalidOperationException("Examen no encontrado.");
+            ?? throw new NotFoundException("Examen no encontrado.");
 
         var results = new List<BulkSendItemResultDto>();
 
@@ -257,14 +257,16 @@ public class ExamTokenService : IExamTokenService
     {
         var sessions = await _sessionRepo.FindAsync(s => s.Id == dto.SessionId, ct);
         var session = sessions.FirstOrDefault()
-            ?? throw new InvalidOperationException("Sesión no encontrada.");
+            ?? throw new NotFoundException("Sesión no encontrada.");
 
         var examToken = await _tokenRepo.GetWithExamAndSessionAsync(
             (await _tokenRepo.GetByIdAsync(session.ExamTokenId, ct))!.Token, ct)!
+            // Invariante interna, no error del cliente: una sesión existente siempre tiene
+            // token. Si se llega aquí, los datos están rotos y eso es un 500, no un 404.
             ?? throw new InvalidOperationException("Token no encontrado.");
 
         var exam = await _examRepo.GetWithQuestionsAsync(examToken.ExamId, ct)!
-            ?? throw new InvalidOperationException("Examen no encontrado.");
+            ?? throw new NotFoundException("Examen no encontrado.");
 
         EnsureOwnedBy(examToken, userId);
 

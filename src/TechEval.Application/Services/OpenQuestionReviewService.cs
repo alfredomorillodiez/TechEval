@@ -7,13 +7,13 @@ using TechEval.Domain.Interfaces.Services;
 namespace TechEval.Application.Services;
 
 /// <summary>Se lanza cuando el resultado ya fue corregido: la API la traduce a 409.</summary>
-public class AlreadyReviewedException : Exception
+public class AlreadyReviewedException : ConflictException
 {
     public AlreadyReviewedException(string message) : base(message) { }
 }
 
 /// <summary>Se lanza cuando la corrección no es válida: la API la traduce a 400.</summary>
-public class InvalidReviewException : Exception
+public class InvalidReviewException : ValidationException
 {
     public InvalidReviewException(string message) : base(message) { }
 }

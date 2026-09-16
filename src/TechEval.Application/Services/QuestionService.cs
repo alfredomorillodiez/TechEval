@@ -9,7 +9,7 @@ namespace TechEval.Application.Services;
 /// Se lanza al intentar eliminar una opción que algún candidato ya eligió: la API la
 /// traduce a 409. Sin ella, el intento llegaba a la base de datos y volvía como un 500.
 /// </summary>
-public class AnswerInUseException : Exception
+public class AnswerInUseException : ConflictException
 {
     public AnswerInUseException(string message) : base(message) { }
 }
@@ -143,9 +143,9 @@ public class QuestionService : IQuestionService
         if (type == QuestionType.MultipleChoice)
         {
             if (answers.Count != 4)
-                throw new InvalidOperationException("Las preguntas tipo test deben tener exactamente 4 respuestas.");
+                throw new ValidationException("Las preguntas tipo test deben tener exactamente 4 respuestas.");
             if (answers.Count(a => a.IsCorrect) != 1)
-                throw new InvalidOperationException("Las preguntas tipo test deben tener exactamente 1 respuesta correcta.");
+                throw new ValidationException("Las preguntas tipo test deben tener exactamente 1 respuesta correcta.");
         }
     }
 

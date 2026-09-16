@@ -49,7 +49,7 @@ public class ExamService : IExamService
     {
         var questions = await _questionRepo.FindAsync(q => dto.QuestionIds.Contains(q.Id) && q.IsActive, ct);
         if (questions.Count != dto.QuestionIds.Count)
-            throw new InvalidOperationException("Algunas preguntas no existen o están inactivas.");
+            throw new ValidationException("Algunas preguntas no existen o están inactivas.");
 
         var exam = new Exam
         {
@@ -76,7 +76,7 @@ public class ExamService : IExamService
             dto.QuestionCount, dto.CategoryIds, dto.Difficulty, ct);
 
         if (questions.Count < dto.QuestionCount)
-            throw new InvalidOperationException(
+            throw new ValidationException(
                 $"No hay suficientes preguntas disponibles. Se encontraron {questions.Count} de {dto.QuestionCount} solicitadas.");
 
         var exam = new Exam

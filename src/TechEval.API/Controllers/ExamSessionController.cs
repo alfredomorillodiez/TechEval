@@ -43,19 +43,10 @@ public class ExamSessionController : ControllerBase
     public async Task<IActionResult> SaveAnswer(
         int sessionId, [FromBody] SubmitAnswerDto dto, CancellationToken ct)
     {
-        try
-        {
-            await _tokenService.SaveDraftAnswerAsync(sessionId, CurrentUserId(), dto, ct);
-            return Ok();
-        }
-        catch (SessionAccessDeniedException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = ex.Message });
-        }
-        catch (ExamTimeExpiredException ex)
-        {
-            return Conflict(new { error = ex.Message });
-        }
+        // Los 403 y 409 los produce ErrorHandlingMiddleware, que es el único sitio donde una
+        // excepción se convierte en código de estado.
+        await _tokenService.SaveDraftAnswerAsync(sessionId, CurrentUserId(), dto, ct);
+        return Ok();
     }
 
     /// <summary>Envía el examen completo y devuelve los resultados</summary>
@@ -65,15 +56,8 @@ public class ExamSessionController : ControllerBase
     [ProducesResponseType(403)]
     public async Task<IActionResult> Submit([FromBody] SubmitExamDto dto, CancellationToken ct)
     {
-        try
-        {
-            var result = await _tokenService.SubmitExamAsync(dto, CurrentUserId(), ct);
-            return Ok(result);
-        }
-        catch (SessionAccessDeniedException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = ex.Message });
-        }
+        var result = await _tokenService.SubmitExamAsync(dto, CurrentUserId(), ct);
+        return Ok(result);
     }
 
     private int CurrentUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

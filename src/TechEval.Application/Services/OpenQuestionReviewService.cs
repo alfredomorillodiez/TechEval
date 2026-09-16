@@ -121,6 +121,7 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
         int passingScore = exam?.PassingScorePercentage ?? 0;
 
         decimal pct = 0;
+        bool passed = false;
 
         // Todas las escrituras en una transacción. Sin ella, el repositorio confirma en cada
         // operación: una corrección de tres abiertas son cuatro confirmaciones sueltas, y un
@@ -148,9 +149,11 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
                 ? Math.Round((decimal)obtained / result.TotalPoints * 100, 2)
                 : 0;
 
+            passed = pct >= passingScore;
+
             result.ObtainedPoints = obtained;
             result.ScorePercentage = pct;
-            result.Passed = pct >= passingScore;
+            result.Passed = passed;
             result.Status = ExamResultStatus.Reviewed;
             result.ReviewedAt = DateTime.UtcNow;
             result.ReviewedByUserId = reviewedByUserId;
@@ -164,7 +167,7 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
         {
             await _emailService.SendExamResultAsync(
                 result.CandidateEmail, result.CandidateName,
-                result.Exam?.Title ?? "", pct, result.Passed.Value, ct);
+                result.Exam?.Title ?? "", pct, passed, ct);
         }
         catch
         {

@@ -86,7 +86,13 @@ docker-compose --profile dev up -d
 
 > Las cuentas de alumno se crean solas al abrir una invitación. La contraseña inicial es la parte local del email (`alejandro.robles@ejemplo.com` → usuario `alejandro.robles`, contraseña `alejandro.robles`), y se puede entrar en `/login` indistintamente con el email o con el usuario.
 
-> **Aviso**: `docker-compose.yml` lleva escritas la contraseña de `sa`, la clave JWT y la contraseña del administrador. Solo sirven para desarrollo. Cámbialas antes de desplegar.
+> **Antes de levantar el stack**, copia `.env.example` a `.env` y rellena sus valores. Ni `docker-compose.yml` ni `appsettings.json` llevan secretos: si falta alguno, el arranque para y dice cuál.
+>
+> ```bash
+> cp .env.example .env    # y edita los valores
+> ```
+>
+> **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. Ver `openspec/changes/secrets-out-of-the-repo/README.md`.
 
 ---
 
@@ -149,12 +155,12 @@ Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`ap
 | Clave | Descripción | Por defecto |
 |-------|-------------|-------------|
 | `ConnectionStrings:DefaultConnection` | Cadena de conexión a SQL Server | `Server=localhost;Database=TechEvalDb;…` |
-| `Jwt:SecretKey` | Clave de firma HMAC-SHA256 — **cambiar en producción** | `TechEval_SuperSecretKey_…` |
+| `Jwt:SecretKey` | Clave de firma HMAC-SHA256 — **obligatoria, sin valor por defecto** | vacío |
 | `Jwt:ExpirationHours` | Vigencia del token de sesión | `8` |
 | `Email:*` | Host, puerto, credenciales y remitente SMTP | vacío |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
-| `AdminPassword` | Contraseña del administrador creado en el primer arranque | `Admin@123!` |
+| `AdminPassword` | Contraseña del administrador creado en el primer arranque — **obligatoria** | vacío |
 | `Jwt:Issuer` / `Jwt:Audience` | Emisor y destinatario del token | `TechEvalAPI` / `TechEvalClient` |
 
 ---

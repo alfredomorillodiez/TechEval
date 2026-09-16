@@ -779,7 +779,7 @@ Las claves se leen de `appsettings.json`, se sobrescriben por entorno (`appsetti
 | Clave | Descripción | Por defecto |
 |-------|-------------|-------------|
 | `ConnectionStrings:DefaultConnection` | Cadena de conexión a SQL Server | `Server=localhost;Database=TechEvalDb;…` |
-| `Jwt:SecretKey` | Clave de firma HMAC-SHA256 | `TechEval_SuperSecretKey_…` |
+| `Jwt:SecretKey` | Clave de firma HMAC-SHA256 — obligatoria, sin valor por defecto | vacío |
 | `Jwt:Issuer` / `Jwt:Audience` | Emisor y audiencia validados en cada petición | `TechEvalAPI` / `TechEvalClient` |
 | `Jwt:ExpirationHours` | Vigencia del token | `8` |
 | `Email:Host` · `Port` · `UserName` · `Password` · `FromEmail` · `FromName` · `EnableSsl` | Configuración SMTP | vacío |

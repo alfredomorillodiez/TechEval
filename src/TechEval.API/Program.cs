@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
+using TechEval.API;
 using TechEval.API.Middleware;
 using TechEval.Application.Services;
 using TechEval.Infrastructure;
@@ -12,6 +13,11 @@ using TechEval.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
+// Antes que nada: un despliegue sin secretos para aquí, en vez de arrancar con los valores
+// de desarrollo, que están publicados en el repositorio.
+if (!builder.Environment.IsDevelopment())
+    StartupSecrets.Validate(builder.Configuration);
 
 // Serilog
 Log.Logger = new LoggerConfiguration()
@@ -126,8 +132,13 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var adminHash = PasswordHasher.Hash(builder.Configuration["AdminPassword"] ?? "Admin@123!");
-    await DbSeeder.SeedAsync(context, adminHash);
+    // Sin valor por defecto: fuera de desarrollo, StartupSecrets ya paró el arranque si
+    // falta. En desarrollo lo trae appsettings.Development.json.
+    var adminPassword = builder.Configuration["AdminPassword"]
+        ?? throw new InvalidOperationException(
+            "Falta `AdminPassword`. Sin ella no se puede sembrar el administrador.");
+
+    await DbSeeder.SeedAsync(context, PasswordHasher.Hash(adminPassword));
 }
 
 app.Run();

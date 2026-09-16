@@ -4,7 +4,7 @@ services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     environment:
-      SA_PASSWORD: "TechEval_DB_2024!"
+      SA_PASSWORD: "${SA_PASSWORD:?define SA_PASSWORD en tu .env — ver .env.example}"
       ACCEPT_EULA: "Y"
       MSSQL_PID: "Developer"
     ports:
@@ -12,7 +12,7 @@ services:
     volumes:
       - sqlserver_data:/var/opt/mssql
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P TechEval_DB_2024! -Q 'SELECT 1'"]
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P $$SA_PASSWORD -Q 'SELECT 1'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -25,14 +25,14 @@ services:
       - "5000:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=TechEvalDb;User Id=sa;Password=TechEval_DB_2024!;TrustServerCertificate=True;
-      - Jwt__SecretKey=TechEval_SuperSecretKey_ChangeInProduction_2024!
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=TechEvalDb;User Id=sa;Password=${SA_PASSWORD:?define SA_PASSWORD en tu .env};TrustServerCertificate=True;
+      - Jwt__SecretKey=${JWT_SECRET_KEY:?define JWT_SECRET_KEY en tu .env — ver .env.example}
       - Email__Host=smtp.sendgrid.net
       - Email__Port=587
       - Email__UserName=apikey
-      - Email__Password=${SENDGRID_API_KEY}
-      - Email__FromEmail=noreply@yourdomain.com
-      - AdminPassword=Admin@123!
+      - Email__Password=${SENDGRID_API_KEY:?define SENDGRID_API_KEY en tu .env}
+      - Email__FromEmail=${EMAIL_FROM:?define EMAIL_FROM en tu .env}
+      - AdminPassword=${ADMIN_PASSWORD:?define ADMIN_PASSWORD en tu .env}
     depends_on:
       sqlserver:
         condition: service_healthy

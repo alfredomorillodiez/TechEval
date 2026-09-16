@@ -16,5 +16,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\TechEval.Application\TechEval.Application.csproj" />
     <ProjectReference Include="..\..\src\TechEval.Infrastructure\TechEval.Infrastructure.csproj" />
+    <!-- La API entra aquí por dos motivos. Uno: probar el validador de secretos del arranque.
+         Dos: sin esta referencia `dotnet test` no reconstruía el ejecutable de la API, así que
+         una verificación manual podía arrancar un binario anterior al cambio recién probado. -->
+    <ProjectReference Include="..\..\src\TechEval.API\TechEval.API.csproj" />
   </ItemGroup>
 </Project>

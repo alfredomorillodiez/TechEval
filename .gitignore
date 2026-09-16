@@ -480,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Configuración local del desarrollador: puede contener credenciales reales.
+# Estuvo versionada por error hasta 2026-09-16; ver openspec/changes/secrets-out-of-the-repo.
+appsettings.Local.json

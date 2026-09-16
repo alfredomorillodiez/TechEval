@@ -5,14 +5,32 @@ using TechEval.Domain.Interfaces.Services;
 
 namespace TechEval.Application.Services;
 
+/// <summary>
+/// Se lanza cuando la sesión no pertenece a quien llama: la API la traduce a 403.
+/// Los identificadores de sesión son secuenciales, así que el número por sí solo nunca
+/// puede valer como prueba de propiedad.
+/// </summary>
+public class SessionAccessDeniedException : Exception
+{
+    public SessionAccessDeniedException(string message) : base(message) { }
+}
+
+/// <summary>
+/// Se lanza cuando el plazo del examen ya venció: la API la traduce a 409.
+/// </summary>
+public class ExamTimeExpiredException : Exception
+{
+    public ExamTimeExpiredException(string message) : base(message) { }
+}
+
 public interface IExamTokenService
 {
     Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default);
     Task<BulkSendResultDto> SendExamBulkAsync(BulkSendExamDto dto, string baseUrl, CancellationToken ct = default);
     Task<ExamTokenValidationDto> ValidateTokenAsync(string token, CancellationToken ct = default);
     Task<ExamSessionInfoDto?> StartSessionAsync(string token, CancellationToken ct = default);
-    Task<ExamSubmissionReceiptDto> SubmitExamAsync(SubmitExamDto dto, CancellationToken ct = default);
-    Task SaveDraftAnswerAsync(int sessionId, SubmitAnswerDto answer, CancellationToken ct = default);
+    Task<ExamSubmissionReceiptDto> SubmitExamAsync(SubmitExamDto dto, int userId, CancellationToken ct = default);
+    Task SaveDraftAnswerAsync(int sessionId, int userId, SubmitAnswerDto answer, CancellationToken ct = default);
 }
 
 public class ExamTokenService : IExamTokenService
@@ -164,7 +182,10 @@ public class ExamTokenService : IExamTokenService
             Email = email,
             Username = username,
             Name = name,
-            PasswordHash = PasswordHasher.Hash(username),
+            // Sin contraseña utilizable a propósito. Derivarla del email convertía un dato
+            // que circula en cualquier proceso de selección en la llave del portal del
+            // candidato. Su acceso es el enlace de la invitación, que ya lo autentica.
+            PasswordHash = string.Empty,
             IsAdmin = false,
             IsActive = true
         };
@@ -195,8 +216,19 @@ public class ExamTokenService : IExamTokenService
         return BuildSessionInfo(examToken);
     }
 
-    public async Task SaveDraftAnswerAsync(int sessionId, SubmitAnswerDto dto, CancellationToken ct = default)
+    public async Task SaveDraftAnswerAsync(
+        int sessionId, int userId, SubmitAnswerDto dto, CancellationToken ct = default)
     {
+        var token = await _tokenRepo.GetBySessionIdAsync(sessionId, ct)
+            ?? throw new SessionAccessDeniedException("Sesión no encontrada.");
+
+        EnsureOwnedBy(token, userId);
+
+        // Guardar fuera de plazo es lo que hace posible congelar el temporizador del
+        // navegador y seguir trabajando. El envío tardío sí se acepta, pero vacío.
+        if (IsPastDeadline(token))
+            throw new ExamTimeExpiredException("El tiempo de la prueba ha terminado.");
+
         var existing = await _answerRepo.FindAsync(
             a => a.ExamSessionId == sessionId && a.QuestionId == dto.QuestionId, ct);
 
@@ -220,7 +252,8 @@ public class ExamTokenService : IExamTokenService
         }
     }
 
-    public async Task<ExamSubmissionReceiptDto> SubmitExamAsync(SubmitExamDto dto, CancellationToken ct = default)
+    public async Task<ExamSubmissionReceiptDto> SubmitExamAsync(
+        SubmitExamDto dto, int userId, CancellationToken ct = default)
     {
         var sessions = await _sessionRepo.FindAsync(s => s.Id == dto.SessionId, ct);
         var session = sessions.FirstOrDefault()
@@ -232,6 +265,14 @@ public class ExamTokenService : IExamTokenService
 
         var exam = await _examRepo.GetWithQuestionsAsync(examToken.ExamId, ct)!
             ?? throw new InvalidOperationException("Examen no encontrado.");
+
+        EnsureOwnedBy(examToken, userId);
+
+        // Fuera de plazo el envío se acepta, pero vacío: la prueba se cierra y se puntúa con
+        // lo que ya estuviera guardado. Rechazarlo castigaría al candidato al que se le cayó
+        // la conexión, que perdería el examen entero por un corte de red. Aceptar su
+        // contenido dejaría entrar por aquí lo que `answer` ya no deja escribir.
+        bool fueraDePlazo = IsPastDeadline(examToken, exam.TimeLimitMinutes);
 
         // El envío es idempotente. El temporizador y un clic del candidato pueden coincidir,
         // y ExamResult es uno a uno con ExamSession: el segundo INSERT reventaría. Se mira el
@@ -263,7 +304,7 @@ public class ExamTokenService : IExamTokenService
         // reanudación y del envío repetido tuvieron que tolerar.
         await _unitOfWork.ExecuteInTransactionAsync(async token =>
         {
-            obtained = await WriteAnswersAsync(dto, exam, session, token);
+            obtained = await WriteAnswersAsync(dto, exam, session, fueraDePlazo, token);
 
             pct = totalPoints > 0 ? Math.Round((decimal)obtained / totalPoints * 100, 2) : 0;
             passed = status == Domain.Enums.ExamResultStatus.Reviewed
@@ -313,14 +354,27 @@ public class ExamTokenService : IExamTokenService
     /// Escribe la respuesta de cada pregunta del examen y acumula los puntos de las de test.
     /// </summary>
     private async Task<int> WriteAnswersAsync(
-        SubmitExamDto dto, Exam exam, ExamSession session, CancellationToken ct)
+        SubmitExamDto dto, Exam exam, ExamSession session, bool fueraDePlazo, CancellationToken ct)
     {
         int acumulado = 0;
 
         foreach (var eq in exam.ExamQuestions.OrderBy(eq => eq.Order))
         {
             var q = eq.Question!;
-            var submitted = dto.Answers.FirstOrDefault(a => a.QuestionId == q.Id);
+
+            var existing = await _answerRepo.FindAsync(
+                a => a.ExamSessionId == session.Id && a.QuestionId == q.Id, ct);
+            var guardada = existing.FirstOrDefault();
+
+            // Fuera de plazo se puntúa lo que ya estuviera guardado y se descarta lo que
+            // traiga el envío. El contenido guardado se conserva tal cual: sustituirlo por
+            // el del envío dejaría entrar por aquí lo que `answer` ya no deja escribir, y
+            // sustituirlo por nada destruiría el trabajo legítimo del candidato.
+            var submitted = fueraDePlazo
+                ? (guardada is null
+                    ? null
+                    : new SubmitAnswerDto(q.Id, guardada.SelectedAnswerId, guardada.OpenAnswer))
+                : dto.Answers.FirstOrDefault(a => a.QuestionId == q.Id);
 
             bool? isCorrect = null;
             int? awardedPoints = null;
@@ -343,12 +397,9 @@ public class ExamTokenService : IExamTokenService
                 awardedPoints = 0;
             }
 
-            var existing = await _answerRepo.FindAsync(
-                a => a.ExamSessionId == session.Id && a.QuestionId == q.Id, ct);
-
-            if (existing.Any())
+            if (guardada is not null)
             {
-                var answer = existing.First();
+                var answer = guardada;
                 answer.SelectedAnswerId = submitted?.SelectedAnswerId;
                 answer.OpenAnswer = submitted?.OpenAnswer;
                 answer.IsCorrect = isCorrect;
@@ -410,6 +461,33 @@ public class ExamTokenService : IExamTokenService
     /// <summary>La prueba se envió: ya no se entra, ni con el enlace ni desde el portal.</summary>
     private static bool IsSessionFinished(ExamToken token)
         => token.ExamSession is not null && !HasOpenSession(token);
+
+    /// <summary>
+    /// Margen que absorbe la latencia de la red y el auto-envío del temporizador, que
+    /// dispara en el cero exacto del cliente. Holgado para cualquier latencia real y
+    /// despreciable como ventana de fraude.
+    /// </summary>
+    private static readonly TimeSpan GraciaDePlazo = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Comprueba que la sesión es de quien llama. Un `UserId` nulo se trata como ajeno:
+    /// dueño desconocido es dueño distinto, y un fallo de autorización debe cerrar.
+    /// </summary>
+    private static void EnsureOwnedBy(ExamToken token, int userId)
+    {
+        if (token.UserId is null || token.UserId != userId)
+            throw new SessionAccessDeniedException("Esta sesión de examen no te pertenece.");
+    }
+
+    /// <summary>El plazo del examen, medido por el reloj del servidor y con su margen.</summary>
+    private static bool IsPastDeadline(ExamToken token, int? timeLimitMinutes = null)
+    {
+        var minutos = timeLimitMinutes ?? token.Exam?.TimeLimitMinutes ?? 0;
+        if (token.ExamSession is null || minutos <= 0) return false;
+
+        var limite = token.ExamSession.StartedAt.AddMinutes(minutos).Add(GraciaDePlazo);
+        return DateTime.UtcNow > limite;
+    }
 
     private static ExamSessionInfoDto BuildSessionInfo(ExamToken token) => new(
         token.ExamSession!.Id,

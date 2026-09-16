@@ -197,6 +197,46 @@ public class ExamTokenServiceTests
     }
 
     [Fact]
+    public async Task Validate_AlumnoNuevo_SeAprovisionaSinContrasenaUtilizable()
+    {
+        // Derivarla del email convertía un dato que circula en cualquier proceso de
+        // selección en la llave del portal del candidato.
+        _userRepo.Setup(r => r.FindAsync(It.IsAny<Expression<Func<User, bool>>>(), default))
+            .ReturnsAsync(new List<User>());
+
+        User? creado = null;
+        _userRepo.Setup(r => r.AddAsync(It.IsAny<User>(), default))
+            .ReturnsAsync((User u, CancellationToken _) => { u.Id = 5; creado = u; return u; });
+
+        ConfigurarToken();
+        await _sut.ValidateTokenAsync("tok");
+
+        creado.Should().NotBeNull();
+        creado!.Email.Should().Be("ana@test.com");
+        creado.Username.Should().Be("ana");
+        creado.PasswordHash.Should().BeEmpty();
+
+        // Y esa cuenta no deja entrar ni con la parte local de su email ni con nada.
+        PasswordHasher.Verify("ana", creado.PasswordHash).IsValid.Should().BeFalse();
+        PasswordHasher.Verify("ana@test.com", creado.PasswordHash).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Validate_AlumnoExistente_NoTocaSuContrasena()
+    {
+        _userRepo.Setup(r => r.FindAsync(It.IsAny<Expression<Func<User, bool>>>(), default))
+            .ReturnsAsync(new List<User>
+            {
+                new() { Id = 5, Email = "ana@test.com", Name = "Ana", PasswordHash = "hash-existente" }
+            });
+
+        ConfigurarToken();
+        await _sut.ValidateTokenAsync("tok");
+
+        _userRepo.Verify(r => r.AddAsync(It.IsAny<User>(), default), Times.Never);
+    }
+
+    [Fact]
     public async Task Validate_TokenInexistente_SeRechaza()
     {
         _tokenRepo.Setup(r => r.GetWithExamAndSessionAsync("nada", default)).ReturnsAsync((ExamToken?)null);

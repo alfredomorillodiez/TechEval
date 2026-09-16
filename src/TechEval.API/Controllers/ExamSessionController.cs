@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
@@ -29,19 +31,50 @@ public class ExamSessionController : ControllerBase
     }
 
     /// <summary>Guarda una respuesta parcial (auto-guardado)</summary>
+    /// <remarks>
+    /// Exige el JWT de alumno que devuelve la validación del enlace. El identificador de
+    /// sesión es secuencial, así que por sí solo nunca puede valer como prueba de propiedad.
+    /// </remarks>
     [HttpPost("answer/{sessionId:int}")]
+    [Authorize(Roles = "Alumno")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(403)]
+    [ProducesResponseType(409)]
     public async Task<IActionResult> SaveAnswer(
         int sessionId, [FromBody] SubmitAnswerDto dto, CancellationToken ct)
     {
-        await _tokenService.SaveDraftAnswerAsync(sessionId, dto, ct);
-        return Ok();
+        try
+        {
+            await _tokenService.SaveDraftAnswerAsync(sessionId, CurrentUserId(), dto, ct);
+            return Ok();
+        }
+        catch (SessionAccessDeniedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = ex.Message });
+        }
+        catch (ExamTimeExpiredException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
     }
 
     /// <summary>Envía el examen completo y devuelve los resultados</summary>
     [HttpPost("submit")]
+    [Authorize(Roles = "Alumno")]
+    [ProducesResponseType(typeof(ExamSubmissionReceiptDto), 200)]
+    [ProducesResponseType(403)]
     public async Task<IActionResult> Submit([FromBody] SubmitExamDto dto, CancellationToken ct)
     {
-        var result = await _tokenService.SubmitExamAsync(dto, ct);
-        return Ok(result);
+        try
+        {
+            var result = await _tokenService.SubmitExamAsync(dto, CurrentUserId(), ct);
+            return Ok(result);
+        }
+        catch (SessionAccessDeniedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = ex.Message });
+        }
     }
+
+    private int CurrentUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

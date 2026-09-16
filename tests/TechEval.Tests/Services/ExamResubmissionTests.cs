@@ -62,7 +62,7 @@ public class ExamResubmissionTests
         _tokenRepo.Setup(r => r.GetWithExamAndSessionAsync("tok", default))
             .ReturnsAsync(new ExamToken
             {
-                Id = 1, Token = "tok", ExamId = 7, Exam = exam,
+                Id = 1, Token = "tok", ExamId = 7, Exam = exam, UserId = 5,
                 CandidateName = "Ana", CandidateEmail = "ana@test.com"
             });
         _examRepo.Setup(r => r.GetWithQuestionsAsync(7, default)).ReturnsAsync(exam);
@@ -108,7 +108,7 @@ public class ExamResubmissionTests
         var receipt = await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto>
         {
             new(1, 11, null)
-        }));
+        }), userId: 5);
 
         receipt.ResultId.Should().Be(previo.Id);
         receipt.ExamTitle.Should().Be("Prueba");
@@ -136,7 +136,7 @@ public class ExamResubmissionTests
                 }
             });
 
-        var receipt = await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto>()));
+        var receipt = await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto>()), userId: 5);
 
         receipt.CompletedAt.Kind.Should().Be(DateTimeKind.Utc);
     }
@@ -146,7 +146,7 @@ public class ExamResubmissionTests
     {
         ResultadoPrevio();
 
-        await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }));
+        await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }), userId: 5);
 
         _resultRepo.Verify(r => r.AddAsync(It.IsAny<ExamResult>(), default), Times.Never);
     }
@@ -156,7 +156,7 @@ public class ExamResubmissionTests
     {
         ResultadoPrevio();
 
-        await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }));
+        await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }), userId: 5);
 
         _answerRepo.Verify(r => r.AddAsync(It.IsAny<UserAnswer>(), default), Times.Never);
         _answerRepo.Verify(r => r.UpdateAsync(It.IsAny<UserAnswer>(), default), Times.Never);
@@ -168,7 +168,7 @@ public class ExamResubmissionTests
     {
         ResultadoPrevio();
 
-        await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }));
+        await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }), userId: 5);
 
         _email.Verify(e => e.SendExamResultAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -186,7 +186,7 @@ public class ExamResubmissionTests
         var receipt = await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto>
         {
             new(1, 999, null)
-        }));
+        }), userId: 5);
 
         receipt.ObtainedPoints.Should().Be(5);
         receipt.ScorePercentage.Should().Be(100m);
@@ -203,7 +203,7 @@ public class ExamResubmissionTests
         var receipt = await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto>
         {
             new(1, 11, null)
-        }));
+        }), userId: 5);
 
         receipt.ResultId.Should().Be(previo.Id);
         _resultRepo.Verify(r => r.AddAsync(It.IsAny<ExamResult>(), default), Times.Never);
@@ -217,7 +217,7 @@ public class ExamResubmissionTests
         var receipt = await _sut.SubmitExamAsync(new SubmitExamDto(1, new List<SubmitAnswerDto>
         {
             new(1, 11, null)
-        }));
+        }), userId: 5);
 
         receipt.Status.Should().Be(ExamResultStatus.PendingReview);
         receipt.TotalPoints.Should().BeNull();

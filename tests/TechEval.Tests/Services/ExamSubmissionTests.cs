@@ -75,7 +75,7 @@ public class ExamSubmissionTests
         _tokenRepo.Setup(r => r.GetWithExamAndSessionAsync("tok", default))
             .ReturnsAsync(new ExamToken
             {
-                Id = 1, Token = "tok", ExamId = 7, Exam = exam,
+                Id = 1, Token = "tok", ExamId = 7, Exam = exam, UserId = 5,
                 CandidateName = "Ana", CandidateEmail = "ana@test.com"
             });
         _examRepo.Setup(r => r.GetWithQuestionsAsync(7, default)).ReturnsAsync(exam);
@@ -105,7 +105,7 @@ public class ExamSubmissionTests
         {
             new(1, 11, null),   // acierta
             new(2, 122, null)   // falla
-        }));
+        }), userId: 5);
 
         receipt.Status.Should().Be(ExamResultStatus.Reviewed);
         _persisted!.Status.Should().Be(ExamResultStatus.Reviewed);
@@ -128,7 +128,7 @@ public class ExamSubmissionTests
         {
             new(1, 11, null),
             new(2, null, "Mi respuesta razonada")
-        }));
+        }), userId: 5);
 
         receipt.Status.Should().Be(ExamResultStatus.PendingReview);
         _persisted!.Passed.Should().BeNull();
@@ -157,7 +157,7 @@ public class ExamSubmissionTests
             new(1, 11, null),
             new(2, null, ""),
             new(3, null, "   ")   // solo espacios cuenta como en blanco
-        }));
+        }), userId: 5);
 
         // La composición del examen manda: sigue requiriendo validación humana.
         receipt.Status.Should().Be(ExamResultStatus.PendingReview);
@@ -176,7 +176,7 @@ public class ExamSubmissionTests
         {
             new(1, 11, null),   // acierta → 3
             new(2, 122, null)   // falla   → 0
-        }));
+        }), userId: 5);
 
         _saved.Single(a => a.QuestionId == 1).AwardedPoints.Should().Be(3);
         _saved.Single(a => a.QuestionId == 2).AwardedPoints.Should().Be(0);
@@ -189,7 +189,7 @@ public class ExamSubmissionTests
         SetupExam(TestQuestion(1, 5, 11));
 
         var receipt = await _sut.SubmitExamAsync(
-            new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }));
+            new SubmitExamDto(1, new List<SubmitAnswerDto> { new(1, 11, null) }), userId: 5);
 
         // El acuse no expone respuestas correctas ni evaluación por pregunta:
         // el endpoint de envío es anónimo.

@@ -187,7 +187,7 @@ public class TransactionalWritesTests
             TokenRepo.Setup(r => r.GetWithExamAndSessionAsync("tok", default))
                 .ReturnsAsync(new ExamToken
                 {
-                    Id = 1, Token = "tok", ExamId = 7, Exam = exam,
+                    Id = 1, Token = "tok", ExamId = 7, Exam = exam, UserId = 5,
                     CandidateName = "Ana", CandidateEmail = "ana@test.com"
                 });
             ExamRepo.Setup(r => r.GetWithQuestionsAsync(7, default)).ReturnsAsync(exam);
@@ -205,7 +205,7 @@ public class TransactionalWritesTests
     {
         var f = new SubmitFixture();
 
-        await f.Sut.SubmitExamAsync(f.Envio());
+        await f.Sut.SubmitExamAsync(f.Envio(), userId: 5);
 
         f.Uow.Executed.Should().BeTrue();
         f.Uow.Committed.Should().BeTrue();
@@ -218,7 +218,7 @@ public class TransactionalWritesTests
         f.ResultRepo.Setup(r => r.AddAsync(It.IsAny<ExamResult>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("conexión perdida"));
 
-        var act = () => f.Sut.SubmitExamAsync(f.Envio());
+        var act = () => f.Sut.SubmitExamAsync(f.Envio(), userId: 5);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         f.Uow.RolledBack.Should().BeTrue();
@@ -234,7 +234,7 @@ public class TransactionalWritesTests
         f.SessionRepo.Setup(r => r.UpdateAsync(It.IsAny<ExamSession>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("tiempo de espera agotado"));
 
-        var act = () => f.Sut.SubmitExamAsync(f.Envio());
+        var act = () => f.Sut.SubmitExamAsync(f.Envio(), userId: 5);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         f.Uow.RolledBack.Should().BeTrue();
@@ -247,7 +247,7 @@ public class TransactionalWritesTests
         f.SessionRepo.Setup(r => r.UpdateAsync(It.IsAny<ExamSession>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("fallo"));
 
-        var act = () => f.Sut.SubmitExamAsync(f.Envio());
+        var act = () => f.Sut.SubmitExamAsync(f.Envio(), userId: 5);
         await act.Should().ThrowAsync<InvalidOperationException>();
 
         f.Email.Verify(e => e.SendExamResultAsync(
@@ -267,7 +267,7 @@ public class TransactionalWritesTests
             .Callback(() => confirmadaAlNotificar = f.Uow.Committed)
             .Returns(Task.CompletedTask);
 
-        await f.Sut.SubmitExamAsync(f.Envio());
+        await f.Sut.SubmitExamAsync(f.Envio(), userId: 5);
 
         confirmadaAlNotificar.Should().BeTrue(
             "mantener la transacción abierta mientras se espera al SMTP bloquearía filas");
@@ -289,7 +289,7 @@ public class TransactionalWritesTests
                 }
             });
 
-        await f.Sut.SubmitExamAsync(f.Envio());
+        await f.Sut.SubmitExamAsync(f.Envio(), userId: 5);
 
         f.Uow.Executed.Should().BeFalse("la salida anticipada no escribe nada");
     }

@@ -110,7 +110,7 @@ public class ExamTokenConfiguration : IEntityTypeConfiguration<ExamToken>
         builder.Property(t => t.CandidateEmail).IsRequired().HasMaxLength(200);
         builder.HasIndex(t => t.Token).IsUnique();
         builder.Ignore(t => t.IsExpired);
-        builder.Ignore(t => t.IsValid);
+        builder.Ignore(t => t.CanStart);
 
         builder.HasOne(t => t.Exam)
             .WithMany(e => e.ExamTokens)

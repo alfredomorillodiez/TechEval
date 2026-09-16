@@ -34,11 +34,24 @@
                         {
                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                 <div>
-                                    <div class="fw-semibold">@exam.ExamTitle</div>
-                                    <small class="text-muted">Expira: @exam.ExpiresAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</small>
+                                    <div class="fw-semibold">
+                                        @exam.ExamTitle
+                                        @if (exam.InProgress)
+                                        {
+                                            <span class="badge bg-warning text-dark ms-2">Empezada</span>
+                                        }
+                                    </div>
+                                    @if (exam.InProgress)
+                                    {
+                                        <small class="text-muted">Tienes esta prueba a medias</small>
+                                    }
+                                    else
+                                    {
+                                        <small class="text-muted">Expira: @exam.ExpiresAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</small>
+                                    }
                                 </div>
                                 <button class="btn btn-primary btn-sm" @onclick="() => StartExam(exam.Token)">
-                                    Comenzar <i class="bi bi-arrow-right ms-1"></i>
+                                    @(exam.InProgress ? "Continuar" : "Comenzar") <i class="bi bi-arrow-right ms-1"></i>
                                 </button>
                             </li>
                         }

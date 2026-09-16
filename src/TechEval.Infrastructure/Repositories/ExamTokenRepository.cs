@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TechEval.Domain.Entities;
+using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 using TechEval.Infrastructure.Data;
 
@@ -25,10 +26,18 @@ public class ExamTokenRepository : BaseRepository<ExamToken>, IExamTokenReposito
                 .ThenInclude(s => s!.ExamResult)
             .FirstOrDefaultAsync(t => t.Token == token, ct);
 
+    // Pendiente es lo que el alumno todavía puede resolver: la invitación sin usar y en
+    // plazo, o la prueba que dejó a medias. Filtrar solo por !IsUsed escondía del portal
+    // la prueba en curso, que es justo la que el alumno necesita encontrar para volver.
     public async Task<IReadOnlyList<ExamToken>> GetPendingByUserAsync(int userId, CancellationToken ct = default)
         => await Context.ExamTokens
             .Include(t => t.Exam)
-            .Where(t => t.UserId == userId && !t.IsUsed && t.ExpiresAt > DateTime.UtcNow)
+            .Include(t => t.ExamSession)
+            .Where(t => t.UserId == userId
+                && ((!t.IsUsed && t.ExpiresAt > DateTime.UtcNow)
+                    || (t.ExamSession != null
+                        && t.ExamSession.Status == SessionStatus.InProgress
+                        && t.ExamSession.ExamResult == null)))
             .OrderByDescending(t => t.CreatedAt)
             .ToListAsync(ct);
 }

@@ -17,6 +17,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 - **Generación de exámenes** — manual o automática con preguntas aleatorias por categoría y dificultad
 - **Envío por email** — enlace único por candidato con expiración configurable; envío masivo a múltiples candidatos desde CSV o lista manual
 - **Examen del candidato** — temporizador, auto-guardado de respuestas y envío automático al agotar el tiempo
+- **Reanudación de la prueba** — una recarga, un cierre de pestaña o una pérdida de red no expulsan al candidato: vuelve a sus preguntas con las respuestas que ya tenía y con el tiempo restante que calcula el servidor. La invitación caducada no corta una prueba ya empezada
 - **Corrección automática** — para preguntas tipo test; preguntas abiertas pendientes de revisión manual
 - **Dashboard de resultados** — historial, estadísticas y detalle por candidato, con filtros combinables
 
@@ -34,7 +35,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 - **Dos roles** — `Admin` (consola de administración) y `Alumno` (portal propio)
 - **Aprovisionamiento automático** — al abrir por primera vez el enlace de invitación se crea la cuenta del alumno a partir del email del candidato
 - **Auto-login desde la invitación** — validar el token devuelve un JWT con rol `Alumno`; el candidato no necesita credenciales para hacer la prueba
-- **Portal del alumno** (`/portal`) — sus pruebas pendientes (con fecha de expiración y acceso directo a comenzarlas) y su historial de pruebas realizadas con nota y aprobado/suspenso
+- **Portal del alumno** (`/portal`) — sus pruebas pendientes (sin empezar, con fecha de expiración, o a medias con acceso directo a continuarlas) y su historial de pruebas realizadas con nota y aprobado/suspenso
 - **Aislamiento por usuario** — cada alumno ve únicamente sus propias invitaciones y resultados
 
 ---

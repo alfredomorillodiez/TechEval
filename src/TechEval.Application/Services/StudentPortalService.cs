@@ -24,7 +24,12 @@ public class StudentPortalService : IStudentPortalService
     public async Task<List<PendingExamDto>> GetPendingAsync(int userId, CancellationToken ct = default)
     {
         var pending = await _tokenRepo.GetPendingByUserAsync(userId, ct);
-        return pending.Select(t => new PendingExamDto(t.Token, t.Exam.Title, t.ExpiresAt)).ToList();
+        // La marca distingue "sin empezar" de "a medias": el portal ofrece una acción u otra.
+        return pending.Select(t => new PendingExamDto(
+            t.Token,
+            t.Exam.Title,
+            t.ExpiresAt,
+            t.ExamSession is not null && t.ExamSession.Status == SessionStatus.InProgress)).ToList();
     }
 
     public async Task<List<CompletedExamDto>> GetCompletedAsync(int userId, CancellationToken ct = default)

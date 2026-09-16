@@ -7,6 +7,7 @@ using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 using TechEval.Domain.Interfaces.Services;
+using TechEval.Tests;
 
 namespace TechEval.Tests.Services;
 
@@ -18,6 +19,7 @@ public class OpenQuestionReviewServiceTests
     private readonly Mock<IRepository<UserAnswer>> _answerRepo = new();
     private readonly Mock<IEmailService> _email = new();
     private readonly Mock<IResultService> _resultService = new();
+    private readonly FakeUnitOfWork _uow = new();
 
     private readonly OpenQuestionReviewService _sut;
 
@@ -33,7 +35,7 @@ public class OpenQuestionReviewServiceTests
 
         _sut = new OpenQuestionReviewService(
             _resultRepo.Object, _examRepo.Object, _answerRepo.Object,
-            _email.Object, _resultService.Object);
+            _email.Object, _resultService.Object, _uow);
     }
 
     /// <summary>Prueba de 10 pts: una de test de 5 acertada (congelada) y una abierta de 5.</summary>

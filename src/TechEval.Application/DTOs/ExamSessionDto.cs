@@ -2,13 +2,22 @@ using TechEval.Domain.Enums;
 
 namespace TechEval.Application.DTOs;
 
+/// <summary>
+/// Estado completo de una sesión de examen, tanto al empezarla como al reanudarla.
+/// `RemainingSeconds` lo calcula el servidor desde `StartedAt`: si lo calculase el cliente,
+/// recargar la página devolvería el tiempo completo y la prueba no tendría límite real.
+/// `SavedAnswers` reutiliza `SubmitAnswerDto` a propósito — ese record no tiene sitio para
+/// `IsCorrect` ni para la puntuación, así que no puede filtrar el solucionario.
+/// </summary>
 public record ExamSessionInfoDto(
     int SessionId,
     string ExamTitle,
     string CandidateName,
     int TimeLimitMinutes,
     DateTime StartedAt,
-    List<SessionQuestionDto> Questions);
+    int RemainingSeconds,
+    List<SessionQuestionDto> Questions,
+    List<SubmitAnswerDto> SavedAnswers);
 
 public record SessionQuestionDto(
     int QuestionId,

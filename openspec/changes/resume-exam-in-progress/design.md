@@ -79,6 +79,18 @@ Esa forma cumple sola el requisito de no revelar el solucionario: no hay sitio d
 
 **Alternativa descartada**: un endpoint nuevo `GET /api/exam/session/{id}`. Tras este cambio, `POST /api/exam/start/{token}` ya es idempotente y devuelve exactamente lo que hace falta. Un endpoint más sería otra superficie pública que vigilar.
 
+### Una sesión con resultado nunca es reanudable
+
+"Reanudable" no es `Status == InProgress` a secas. También exige que la sesión no tenga todavía `ExamResult`.
+
+El motivo está en `SubmitExamAsync`: escribe el resultado en una confirmación y el estado de la sesión en otra, porque `BaseRepository` confirma en cada operación. Entre las dos hay una ventana. Si el proceso cae ahí, queda una sesión con resultado y marcada `InProgress`.
+
+Antes de este cambio esa ventana era invisible: el candidato no podía volver de ninguna manera. El arreglo la hace alcanzable, y sin esta comprobación el candidato entraría, la prueba se auto-enviaría y el segundo `ExamResult` chocaría con la relación uno a uno. Un 500 imposible de diagnosticar.
+
+`GetWithExamAndSessionAsync` ya carga `ExamSession.ExamResult`, así que la comprobación no cuesta ninguna consulta. `IsSessionFinished` se define como el complemento exacto de `HasOpenSession` para que no quede un tercer estado sin cubrir.
+
+La causa de fondo —la falta de unidad de trabajo— es un hallazgo aparte.
+
 ### Tiempo agotado: se devuelve cero y el cliente auto-envía
 
 Si el candidato vuelve cuando ya no queda tiempo, el servidor devuelve la sesión con `RemainingSeconds = 0`. El auto-envío del temporizador —que ya existe— dispara de inmediato con lo que hubiera guardado.

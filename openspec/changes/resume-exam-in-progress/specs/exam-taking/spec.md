@@ -37,6 +37,12 @@ El sistema SHALL exponer un endpoint público (sin autenticación) que permita c
 - **THEN** el sistema responde con `isValid = false` y el mensaje "Este examen ya ha sido completado."
 - **AND** el rechazo se apoya en el estado de la sesión, no en `IsUsed` por sí solo
 
+#### Scenario: Sesión en curso que ya tiene resultado
+- **GIVEN** una `ExamSession` en estado `InProgress` que sin embargo ya tiene un `ExamResult` asociado, porque el envío se interrumpió entre la escritura del resultado y la del estado
+- **WHEN** el candidato solicita `GET /api/exam/validate/{token}`
+- **THEN** el sistema responde con `isValid = false` y el mensaje "Este examen ya ha sido completado."
+- **AND** una sesión con resultado NUNCA se considera reanudable, sea cual sea su estado
+
 ### Requirement: Inicio de sesión de examen de un solo uso
 El sistema SHALL crear como máximo una `ExamSession` por cada `ExamToken`. Al iniciar la sesión, el sistema MUST marcar el token como usado para impedir que genere una segunda sesión. Mientras esa sesión siga en estado `InProgress`, el sistema SHALL devolverla al candidato que vuelve, en lugar de rechazarlo o de crear otra.
 
@@ -65,6 +71,12 @@ El sistema SHALL crear como máximo una `ExamSession` por cada `ExamToken`. Al i
 - **WHEN** el candidato solicita `POST /api/exam/start/{token}`
 - **THEN** el sistema devuelve el detalle de la sesión existente
 - **AND** la expiración de la invitación no interrumpe una prueba ya empezada
+
+#### Scenario: Intento de reanudar una sesión que ya tiene resultado
+- **GIVEN** una `ExamSession` en estado `InProgress` con un `ExamResult` ya asociado
+- **WHEN** el candidato solicita `POST /api/exam/start/{token}`
+- **THEN** el sistema MUST rechazar la operación, sin devolver la sesión y sin crear otra
+- **AND** así se impide un segundo `ExamResult` sobre la misma sesión, que la relación uno a uno no admite
 
 #### Scenario: Intento de iniciar sesión con token inválido, expirado o ya usado
 - **GIVEN** un token que no existe, un token expirado sin sesión asociada, o un token cuya sesión está en estado `Completed`

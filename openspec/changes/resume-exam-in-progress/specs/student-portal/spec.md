@@ -20,6 +20,12 @@ El sistema SHALL exponer un endpoint que devuelva, para el alumno autenticado (i
 - **WHEN** solicita el listado de pruebas pendientes
 - **THEN** el sistema responde `200 OK` sin incluir esa invitación
 
+#### Scenario: La prueba con resultado no vuelve a la lista aunque su sesión siga en curso
+- **GIVEN** un alumno autenticado con un `ExamToken` cuya `ExamSession` está en estado `InProgress` pero ya tiene un `ExamResult` asociado
+- **WHEN** solicita el listado de pruebas pendientes
+- **THEN** el sistema responde `200 OK` sin incluir esa invitación
+- **AND** una sesión con resultado se trata como terminada, sea cual sea su estado
+
 #### Scenario: Alumno sin pruebas pendientes
 - **GIVEN** un alumno autenticado sin ningún `ExamToken` resoluble
 - **WHEN** solicita el listado de pruebas pendientes

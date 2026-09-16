@@ -274,13 +274,46 @@ else if (_state == ExamState.Completed)
         if (!string.IsNullOrEmpty(validation.AuthToken))
             await Auth.LoginAsync(validation.AuthToken, validation.CandidateName ?? string.Empty, isAdmin: false);
 
+        // El backend devuelve SessionId cuando la prueba ya estaba empezada. En ese caso no
+        // hay bienvenida que mostrar: el candidato vuelve de una recarga y espera continuar.
+        var resuming = validation.SessionId is not null;
+
         var session = await Api.StartSessionAsync(Token);
         if (session is null) { _state = ExamState.Invalid; _errorMessage = "Error al iniciar sesión."; return; }
 
         _sessionInfo = session;
-        _remainingSeconds = session.TimeLimitMinutes * 60;
+        // El tiempo lo mide el servidor. Inicializarlo con TimeLimitMinutes daría una prueba
+        // nueva completa en cada recarga.
+        _remainingSeconds = session.RemainingSeconds;
         _drafts = session.Questions.Select(q => new DraftAnswer { QuestionId = q.QuestionId }).ToList();
-        _state = ExamState.Welcome;
+        RestoreSavedAnswers(session);
+
+        if (!resuming) { _state = ExamState.Welcome; return; }
+
+        if (_remainingSeconds <= 0)
+        {
+            // Volvió fuera de plazo: se cierra con lo que tenga guardado, sin preguntar.
+            _state = ExamState.InProgress;
+            await SubmitExamAsync();
+            return;
+        }
+
+        StartExam();
+    }
+
+    /// <summary>
+    /// Vuelca en los borradores lo que el candidato ya tenía guardado. Sin esto, el envío
+    /// posterior mandaría respuestas vacías y borraría su trabajo.
+    /// </summary>
+    private void RestoreSavedAnswers(ExamSessionInfoDto session)
+    {
+        foreach (var saved in session.SavedAnswers)
+        {
+            var draft = GetDraft(saved.QuestionId);
+            if (draft is null) continue;
+            draft.SelectedAnswerId = saved.SelectedAnswerId;
+            draft.OpenAnswer = saved.OpenAnswer;
+        }
     }
 
     private void StartExam()
@@ -327,6 +360,11 @@ else if (_state == ExamState.Completed)
 
     private async Task SubmitExamAsync()
     {
+        // El temporizador puede llegar a cero con el envío manual todavía en vuelo. El
+        // servidor ya tolera el duplicado, pero la petición que no sale es mejor que la
+        // que se descarta.
+        if (_submitting) return;
+
         _showConfirm = false;
         _submitting = true;
         _timer?.Stop();

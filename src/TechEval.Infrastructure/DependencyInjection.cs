@@ -23,6 +23,7 @@ public static class DependencyInjection
                 b => b.MigrationsAssembly("TechEval.Infrastructure")));
 
         // Repositories
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped(typeof(IRepository<>), typeof(BaseRepository<>));
         services.AddScoped<IQuestionRepository, QuestionRepository>();
         services.AddScoped<IExamRepository, ExamRepository>();

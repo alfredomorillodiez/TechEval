@@ -8,6 +8,7 @@ using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 using TechEval.Domain.Interfaces.Services;
+using TechEval.Tests;
 
 namespace TechEval.Tests.Services;
 
@@ -24,6 +25,7 @@ public class ExamSubmissionTests
     private readonly Mock<IRepository<User>> _userRepo = new();
     private readonly Mock<IEmailService> _email = new();
     private readonly Mock<ITokenService> _tokens = new();
+    private readonly FakeUnitOfWork _uow = new();
 
     private readonly List<UserAnswer> _saved = new();
     private ExamResult? _persisted;
@@ -44,12 +46,17 @@ public class ExamSubmissionTests
         _answerRepo.Setup(r => r.AddAsync(It.IsAny<UserAnswer>(), default))
             .ReturnsAsync((UserAnswer a, CancellationToken _) => { _saved.Add(a); return a; });
 
+        // Sin resultado previo: estas pruebas cubren el primer envío. El reenvío tiene las
+        // suyas en ExamResubmissionTests.
+        _resultRepo.Setup(r => r.FindAsync(It.IsAny<Expression<Func<ExamResult, bool>>>(), default))
+            .ReturnsAsync(new List<ExamResult>());
+
         _resultRepo.Setup(r => r.AddAsync(It.IsAny<ExamResult>(), default))
             .ReturnsAsync((ExamResult r, CancellationToken _) => { _persisted = r; r.Id = 99; return r; });
 
         _sut = new ExamTokenService(
             _tokenRepo.Object, _examRepo.Object, _sessionRepo.Object, _answerRepo.Object,
-            _resultRepo.Object, _userRepo.Object, _email.Object, _tokens.Object);
+            _resultRepo.Object, _userRepo.Object, _email.Object, _tokens.Object, _uow);
     }
 
     private void SetupExam(params Question[] questions)

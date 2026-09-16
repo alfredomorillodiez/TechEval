@@ -25,6 +25,7 @@ public class ExamTokenService : IExamTokenService
     private readonly IRepository<User> _userRepo;
     private readonly IEmailService _emailService;
     private readonly ITokenService _tokenService;
+    private readonly IUnitOfWork _unitOfWork;
 
     public ExamTokenService(
         IExamTokenRepository tokenRepo,
@@ -34,8 +35,10 @@ public class ExamTokenService : IExamTokenService
         IExamResultRepository resultRepo,
         IRepository<User> userRepo,
         IEmailService emailService,
-        ITokenService tokenService)
+        ITokenService tokenService,
+        IUnitOfWork unitOfWork)
     {
+        _unitOfWork = unitOfWork;
         _tokenRepo = tokenRepo;
         _examRepo = examRepo;
         _sessionRepo = sessionRepo;
@@ -122,10 +125,16 @@ public class ExamTokenService : IExamTokenService
         var examToken = await _tokenRepo.GetWithExamAndSessionAsync(token, ct);
         if (examToken is null)
             return new ExamTokenValidationDto(false, "Token no válido.", null, null, null, null);
-        if (examToken.IsExpired)
-            return new ExamTokenValidationDto(false, "El enlace ha expirado.", null, null, null, null);
-        if (examToken.IsUsed)
+
+        // El estado de la sesión manda sobre el del token. Un token usado con la sesión
+        // todavía abierta es el caso normal de quien recarga la página, y debe poder volver.
+        if (IsSessionFinished(examToken))
             return new ExamTokenValidationDto(false, "Este examen ya ha sido completado.", null, null, null, null);
+
+        // ExpiresAt es el plazo para EMPEZAR, no para terminar: una prueba ya abierta la
+        // gobierna su tiempo límite, así que la expiración solo cierra la puerta de entrada.
+        if (!HasOpenSession(examToken) && examToken.IsExpired)
+            return new ExamTokenValidationDto(false, "El enlace ha expirado.", null, null, null, null);
 
         var user = await GetOrCreateStudentAsync(examToken.CandidateEmail, examToken.CandidateName, ct);
         if (examToken.UserId != user.Id)
@@ -165,11 +174,15 @@ public class ExamTokenService : IExamTokenService
     public async Task<ExamSessionInfoDto?> StartSessionAsync(string token, CancellationToken ct = default)
     {
         var examToken = await _tokenRepo.GetWithExamAndSessionAsync(token, ct);
-        if (examToken is null || !examToken.IsValid) return null;
+        if (examToken is null) return null;
 
-        // Si ya existe sesión en progreso, devolverla
-        if (examToken.ExamSession is not null)
+        // Reanudación: la sesión abierta se devuelve tal cual, sin tocar StartedAt ni las
+        // respuestas ya guardadas. Va antes que CanStart porque un token con sesión está
+        // usado por definición, y CanStart lo rechazaría.
+        if (HasOpenSession(examToken))
             return BuildSessionInfo(examToken);
+
+        if (!examToken.CanStart) return null;
 
         examToken.IsUsed = true;
         examToken.UsedAt = DateTime.UtcNow;
@@ -220,18 +233,93 @@ public class ExamTokenService : IExamTokenService
         var exam = await _examRepo.GetWithQuestionsAsync(examToken.ExamId, ct)!
             ?? throw new InvalidOperationException("Examen no encontrado.");
 
+        // El envío es idempotente. El temporizador y un clic del candidato pueden coincidir,
+        // y ExamResult es uno a uno con ExamSession: el segundo INSERT reventaría. Se mira el
+        // resultado y no el estado de la sesión, para cubrir también el caso en que el envío
+        // anterior se interrumpió entre escribir el resultado y marcar la sesión cerrada.
+        var yaEnviado = await _resultRepo.FindAsync(r => r.ExamSessionId == session.Id, ct);
+        if (yaEnviado.Count > 0)
+            return BuildReceipt(yaEnviado[0], exam.Title);
+
         // El estado lo decide la composición del examen, no lo que responda el candidato:
         // así es predecible desde que se monta la prueba y un humano siempre valida
         // una prueba con abiertas, incluso si el candidato no escribió nada.
         bool hasOpenQuestions = exam.ExamQuestions
             .Any(eq => eq.Question?.Type == Domain.Enums.QuestionType.OpenEnded);
 
-        int totalPoints = 0, obtained = 0;
+        int totalPoints = exam.ExamQuestions.Sum(eq => eq.Question?.Points ?? 0);
+        int obtained = 0;
+
+        decimal pct = 0;
+        var status = hasOpenQuestions
+            ? Domain.Enums.ExamResultStatus.PendingReview
+            : Domain.Enums.ExamResultStatus.Reviewed;
+        bool? passed = null;
+        ExamResult result = null!;
+
+        // Respuestas, resultado y cierre de la sesión en una sola transacción. Sin ella, el
+        // repositorio confirma en cada operación y un fallo a mitad dejaba una sesión con
+        // resultado y todavía marcada InProgress: la ventana que los arreglos de la
+        // reanudación y del envío repetido tuvieron que tolerar.
+        await _unitOfWork.ExecuteInTransactionAsync(async token =>
+        {
+            obtained = await WriteAnswersAsync(dto, exam, session, token);
+
+            pct = totalPoints > 0 ? Math.Round((decimal)obtained / totalPoints * 100, 2) : 0;
+            passed = status == Domain.Enums.ExamResultStatus.Reviewed
+                ? pct >= exam.PassingScorePercentage
+                : null;
+
+            result = new ExamResult
+            {
+                ExamSessionId = session.Id,
+                ExamId = exam.Id,
+                CandidateName = examToken.CandidateName,
+                CandidateEmail = examToken.CandidateEmail,
+                UserId = examToken.UserId,
+                TotalPoints = totalPoints,
+                ObtainedPoints = obtained,
+                ScorePercentage = pct,
+                Passed = passed,
+                Status = status
+            };
+
+            await _resultRepo.AddAsync(result, token);
+
+            session.Status = Domain.Enums.SessionStatus.Completed;
+            session.CompletedAt = DateTime.UtcNow;
+            await _sessionRepo.UpdateAsync(session, token);
+        }, ct);
+
+        // El correo va después de confirmar, y fuera de la transacción: mantenerla abierta
+        // mientras se espera al SMTP bloquearía filas durante segundos.
+        if (status == Domain.Enums.ExamResultStatus.PendingReview)
+        {
+            // Acuse sin cifras: el resultado definitivo se envía al cerrar la corrección.
+            await _emailService.SendExamPendingReviewAsync(
+                examToken.CandidateEmail, examToken.CandidateName, exam.Title, ct);
+
+            return BuildReceipt(result, exam.Title);
+        }
+
+        await _emailService.SendExamResultAsync(
+            examToken.CandidateEmail, examToken.CandidateName,
+            exam.Title, pct, passed!.Value, ct);
+
+        return BuildReceipt(result, exam.Title);
+    }
+
+    /// <summary>
+    /// Escribe la respuesta de cada pregunta del examen y acumula los puntos de las de test.
+    /// </summary>
+    private async Task<int> WriteAnswersAsync(
+        SubmitExamDto dto, Exam exam, ExamSession session, CancellationToken ct)
+    {
+        int acumulado = 0;
 
         foreach (var eq in exam.ExamQuestions.OrderBy(eq => eq.Order))
         {
             var q = eq.Question!;
-            totalPoints += q.Points;
             var submitted = dto.Answers.FirstOrDefault(a => a.QuestionId == q.Id);
 
             bool? isCorrect = null;
@@ -246,7 +334,7 @@ public class ExamTokenService : IExamTokenService
                 // Congelado aquí: recalcular más tarde contra Question.Points daría otra
                 // nota si alguien edita la pregunta entre el envío y la corrección.
                 awardedPoints = isCorrect == true ? q.Points : 0;
-                obtained += awardedPoints.Value;
+                acumulado += awardedPoints.Value;
             }
             else if (string.IsNullOrWhiteSpace(submitted?.OpenAnswer))
             {
@@ -283,53 +371,45 @@ public class ExamTokenService : IExamTokenService
             }
         }
 
-        decimal pct = totalPoints > 0 ? Math.Round((decimal)obtained / totalPoints * 100, 2) : 0;
-        var status = hasOpenQuestions
-            ? Domain.Enums.ExamResultStatus.PendingReview
-            : Domain.Enums.ExamResultStatus.Reviewed;
-        bool? passed = status == Domain.Enums.ExamResultStatus.Reviewed
-            ? pct >= exam.PassingScorePercentage
-            : null;
-
-        var result = new ExamResult
-        {
-            ExamSessionId = session.Id,
-            ExamId = exam.Id,
-            CandidateName = examToken.CandidateName,
-            CandidateEmail = examToken.CandidateEmail,
-            UserId = examToken.UserId,
-            TotalPoints = totalPoints,
-            ObtainedPoints = obtained,
-            ScorePercentage = pct,
-            Passed = passed,
-            Status = status
-        };
-
-        await _resultRepo.AddAsync(result, ct);
-
-        session.Status = Domain.Enums.SessionStatus.Completed;
-        session.CompletedAt = DateTime.UtcNow;
-        await _sessionRepo.UpdateAsync(session, ct);
-
-        if (status == Domain.Enums.ExamResultStatus.PendingReview)
-        {
-            // Acuse sin cifras: el resultado definitivo se envía al cerrar la corrección.
-            await _emailService.SendExamPendingReviewAsync(
-                examToken.CandidateEmail, examToken.CandidateName, exam.Title, ct);
-
-            return new ExamSubmissionReceiptDto(
-                result.Id, exam.Title, status,
-                null, null, null, null, result.CompletedAt);
-        }
-
-        await _emailService.SendExamResultAsync(
-            examToken.CandidateEmail, examToken.CandidateName,
-            exam.Title, pct, passed!.Value, ct);
-
-        return new ExamSubmissionReceiptDto(
-            result.Id, exam.Title, status,
-            totalPoints, obtained, pct, passed, result.CompletedAt);
+        return acumulado;
     }
+
+    /// <summary>
+    /// Acuse de un resultado ya guardado. Un resultado pendiente de corrección viaja sin
+    /// cifras: adelantar la puntuación parcial sería comunicarle al candidato una nota falsa.
+    /// </summary>
+    private static ExamSubmissionReceiptDto BuildReceipt(ExamResult result, string examTitle)
+    {
+        // SQL Server devuelve DateTime sin zona, así que el acuse de un resultado releído
+        // perdería la marca UTC que sí lleva el del primer envío. El cliente vería dos
+        // horas distintas para el mismo hecho. Sobre un valor ya UTC no cambia nada.
+        var completedAt = DateTime.SpecifyKind(result.CompletedAt, DateTimeKind.Utc);
+
+        return result.Status == Domain.Enums.ExamResultStatus.PendingReview
+            ? new ExamSubmissionReceiptDto(
+                result.Id, examTitle, result.Status,
+                null, null, null, null, completedAt)
+            : new ExamSubmissionReceiptDto(
+                result.Id, examTitle, result.Status,
+                result.TotalPoints, result.ObtainedPoints,
+                result.ScorePercentage, result.Passed, completedAt);
+    }
+
+    /// <summary>
+    /// La sesión existe y el candidato todavía puede volver a ella.
+    /// El resultado se comprueba además del estado porque SubmitExamAsync los escribe en dos
+    /// confirmaciones distintas: si el proceso cae entre ambas, queda una sesión con
+    /// ExamResult y todavía marcada InProgress. Sin esta comprobación esa sesión se daría
+    /// por reanudable, y el segundo envío chocaría con la relación uno a uno del resultado.
+    /// </summary>
+    private static bool HasOpenSession(ExamToken token)
+        => token.ExamSession is not null
+        && token.ExamSession.Status == Domain.Enums.SessionStatus.InProgress
+        && token.ExamSession.ExamResult is null;
+
+    /// <summary>La prueba se envió: ya no se entra, ni con el enlace ni desde el portal.</summary>
+    private static bool IsSessionFinished(ExamToken token)
+        => token.ExamSession is not null && !HasOpenSession(token);
 
     private static ExamSessionInfoDto BuildSessionInfo(ExamToken token) => new(
         token.ExamSession!.Id,
@@ -337,6 +417,7 @@ public class ExamTokenService : IExamTokenService
         token.CandidateName,
         token.Exam.TimeLimitMinutes,
         token.ExamSession.StartedAt,
+        RemainingSecondsOf(token),
         token.Exam.ExamQuestions.OrderBy(eq => eq.Order).Select(eq => new SessionQuestionDto(
             eq.QuestionId,
             eq.Question!.Text,
@@ -345,5 +426,28 @@ public class ExamTokenService : IExamTokenService
             eq.Order,
             eq.Question.Answers.OrderBy(a => a.Order)
                 .Select(a => new AnswerOptionDto(a.Id, a.Text, a.Order)).ToList()
-        )).ToList());
+        )).ToList(),
+        SavedAnswersOf(token));
+
+    /// <summary>
+    /// Tiempo que le queda al candidato, medido por el reloj del servidor. Nunca negativo:
+    /// quien vuelve fuera de plazo recibe cero y el cliente envía de inmediato.
+    /// </summary>
+    private static int RemainingSecondsOf(ExamToken token)
+    {
+        var deadline = token.ExamSession!.StartedAt.AddMinutes(token.Exam.TimeLimitMinutes);
+        var remaining = (deadline - DateTime.UtcNow).TotalSeconds;
+        return remaining <= 0 ? 0 : (int)Math.Floor(remaining);
+    }
+
+    /// <summary>
+    /// Lo que el candidato ya tenía guardado. Sin esto, un envío posterior a la recarga
+    /// mandaría borradores vacíos y borraría su trabajo, porque SubmitExamAsync escribe
+    /// la respuesta de cada pregunta del examen, esté o no rellena.
+    /// </summary>
+    private static List<SubmitAnswerDto> SavedAnswersOf(ExamToken token)
+        => token.ExamSession!.UserAnswers
+            .OrderBy(ua => ua.QuestionId)
+            .Select(ua => new SubmitAnswerDto(ua.QuestionId, ua.SelectedAnswerId, ua.OpenAnswer))
+            .ToList();
 }

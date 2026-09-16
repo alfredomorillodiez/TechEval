@@ -33,19 +33,22 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
     private readonly IRepository<UserAnswer> _answerRepo;
     private readonly IEmailService _emailService;
     private readonly IResultService _resultService;
+    private readonly IUnitOfWork _unitOfWork;
 
     public OpenQuestionReviewService(
         IExamResultRepository resultRepo,
         IExamRepository examRepo,
         IRepository<UserAnswer> answerRepo,
         IEmailService emailService,
-        IResultService resultService)
+        IResultService resultService,
+        IUnitOfWork unitOfWork)
     {
         _resultRepo = resultRepo;
         _examRepo = examRepo;
         _answerRepo = answerRepo;
         _emailService = emailService;
         _resultService = resultService;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<IReadOnlyList<PendingReviewSummaryDto>> GetPendingAsync(CancellationToken ct = default)
@@ -114,36 +117,45 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
         // estado intermedio de "a medio corregir".
         ValidateReview(openAnswers, submitted);
 
-        var byId = openAnswers.ToDictionary(ua => ua.Id);
-        foreach (var input in submitted)
-        {
-            var answer = byId[input.UserAnswerId];
-            answer.AwardedPoints = input.AwardedPoints;
-            answer.ReviewerComment = input.ReviewerComment;
-            answer.IsCorrect = input.AwardedPoints >= (answer.Question?.Points ?? 0)
-                && (answer.Question?.Points ?? 0) > 0;
-            await _answerRepo.UpdateAsync(answer, ct);
-        }
-
-        // Suma sobre AwardedPoints, no sobre Question.Points: los puntos de test quedaron
-        // congelados en el envío y no deben moverse si la pregunta se editó entretanto.
-        var allAnswers = result.ExamSession?.UserAnswers ?? new List<UserAnswer>();
-        int obtained = allAnswers.Sum(ua => ua.AwardedPoints ?? 0);
-
         var exam = await _examRepo.GetByIdAsync(result.ExamId, ct);
         int passingScore = exam?.PassingScorePercentage ?? 0;
 
-        decimal pct = result.TotalPoints > 0
-            ? Math.Round((decimal)obtained / result.TotalPoints * 100, 2)
-            : 0;
+        decimal pct = 0;
 
-        result.ObtainedPoints = obtained;
-        result.ScorePercentage = pct;
-        result.Passed = pct >= passingScore;
-        result.Status = ExamResultStatus.Reviewed;
-        result.ReviewedAt = DateTime.UtcNow;
-        result.ReviewedByUserId = reviewedByUserId;
-        await _resultRepo.UpdateAsync(result, ct);
+        // Todas las escrituras en una transacción. Sin ella, el repositorio confirma en cada
+        // operación: una corrección de tres abiertas son cuatro confirmaciones sueltas, y un
+        // fallo a mitad dejaba puntuaciones escritas con el resultado sin cerrar. El spec
+        // promete que o se corrige todo o no se modifica nada; esto lo hace cierto.
+        await _unitOfWork.ExecuteInTransactionAsync(async token =>
+        {
+            var byId = openAnswers.ToDictionary(ua => ua.Id);
+            foreach (var input in submitted)
+            {
+                var answer = byId[input.UserAnswerId];
+                answer.AwardedPoints = input.AwardedPoints;
+                answer.ReviewerComment = input.ReviewerComment;
+                answer.IsCorrect = input.AwardedPoints >= (answer.Question?.Points ?? 0)
+                    && (answer.Question?.Points ?? 0) > 0;
+                await _answerRepo.UpdateAsync(answer, token);
+            }
+
+            // Suma sobre AwardedPoints, no sobre Question.Points: los puntos de test quedaron
+            // congelados en el envío y no deben moverse si la pregunta se editó entretanto.
+            var allAnswers = result.ExamSession?.UserAnswers ?? new List<UserAnswer>();
+            int obtained = allAnswers.Sum(ua => ua.AwardedPoints ?? 0);
+
+            pct = result.TotalPoints > 0
+                ? Math.Round((decimal)obtained / result.TotalPoints * 100, 2)
+                : 0;
+
+            result.ObtainedPoints = obtained;
+            result.ScorePercentage = pct;
+            result.Passed = pct >= passingScore;
+            result.Status = ExamResultStatus.Reviewed;
+            result.ReviewedAt = DateTime.UtcNow;
+            result.ReviewedByUserId = reviewedByUserId;
+            await _resultRepo.UpdateAsync(result, token);
+        }, ct);
 
         // Después del cierre y sin revertir: una corrección válida no debe perderse
         // porque el SMTP esté caído. SmtpEmailService ya registra el fallo en el log

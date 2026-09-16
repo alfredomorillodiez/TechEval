@@ -1,6 +1,12 @@
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: Gestión del banco de preguntas desde la interfaz
+**Reason**: El requisito obligaba a ofrecer desde el listado el acceso a la generación por IA y a la bandeja de revisión. Los dos desaparecen con el modelo local. Se sustituye por «Gestión manual del banco de preguntas desde la interfaz», que exige lo contrario: que esos accesos no existan.
+**Migration**: El alta de preguntas es manual, en `/admin/questions/new`. No hay equivalente automático.
+
+## ADDED Requirements
+
+### Requirement: Gestión manual del banco de preguntas desde la interfaz
 El sistema SHALL permitir crear, editar y listar preguntas del banco desde la interfaz de administración, adaptando el formulario según el tipo de pregunta seleccionado. El alta de preguntas SHALL ser exclusivamente manual, sin ofrecer ningún acceso a generación por IA ni a bandeja de revisión de preguntas generadas.
 
 #### Scenario: Listado filtrable de preguntas

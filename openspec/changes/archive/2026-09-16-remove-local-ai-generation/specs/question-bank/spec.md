@@ -1,6 +1,12 @@
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: Filtrado de preguntas del banco
+**Reason**: El requisito excluía del listado las preguntas con `QuestionReviewStatus = PendingReview` o `Rejected`. Ese estado solo existía para las preguntas que generaba el modelo local, que se retira, y ya no existe en el código.
+**Migration**: El listado filtra ahora solo por `IsActive`. Ver «Filtrado de preguntas activas del banco».
+
+## ADDED Requirements
+
+### Requirement: Filtrado de preguntas activas del banco
 El sistema SHALL permitir listar preguntas filtrando de forma combinable por categoría, nivel de dificultad y tipo de pregunta, devolviendo únicamente preguntas activas (`IsActive = true`) por defecto.
 
 #### Scenario: Filtro combinado por categoría y dificultad
@@ -12,6 +18,8 @@ El sistema SHALL permitir listar preguntas filtrando de forma combinable por cat
 - **GIVEN** un banco de preguntas existente
 - **WHEN** se solicita `GET /api/questions` sin parámetros de filtro
 - **THEN** el sistema SHALL devolver el listado resumido de todas las preguntas activas, independientemente de categoría, dificultad o tipo
+
+## MODIFIED Requirements
 
 ### Requirement: Visualización de fecha y hora de creación y actualización de una pregunta
 El sistema SHALL exponer y mostrar, en la pantalla de edición de una pregunta, la fecha y hora exactas (con precisión de minutos) de creación (`CreatedAt`) y, si existe, de última actualización (`UpdatedAt`) de la pregunta, expresadas en UTC.

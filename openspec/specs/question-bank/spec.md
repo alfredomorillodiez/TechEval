@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change question-bank. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Creación de categorías con nombre único
 El sistema SHALL permitir a un administrador crear una categoría de preguntas con nombre y descripción, y MUST rechazar la creación de una categoría cuyo nombre coincida (a nivel de base de datos) con el de una categoría existente.
 
@@ -42,24 +44,6 @@ El sistema SHALL permitir crear preguntas de tipo `OpenEnded` con un campo opcio
 - **WHEN** incluye un texto de `SampleAnswer` como referencia de corrección
 - **THEN** el sistema crea la pregunta sin exigir respuestas de opción múltiple y persiste el texto de referencia junto a la pregunta
 
-### Requirement: Filtrado de preguntas del banco
-El sistema SHALL permitir listar preguntas filtrando de forma combinable por categoría, nivel de dificultad y tipo de pregunta, devolviendo únicamente preguntas activas y con revisión aprobada (`QuestionReviewStatus = Approved`) por defecto.
-
-#### Scenario: Filtro combinado por categoría y dificultad
-- **GIVEN** un banco de preguntas con múltiples categorías y niveles de dificultad
-- **WHEN** se solicita `GET /api/questions?categoryId=1&difficulty=Advanced`
-- **THEN** el sistema SHALL devolver únicamente las preguntas activas y aprobadas de la categoría 1 con dificultad `Advanced`, ordenadas por nombre de categoría y dificultad
-
-#### Scenario: Filtro sin parámetros
-- **GIVEN** un banco de preguntas existente
-- **WHEN** se solicita `GET /api/questions` sin parámetros de filtro
-- **THEN** el sistema SHALL devolver el listado resumido de todas las preguntas activas y aprobadas, independientemente de categoría, dificultad o tipo
-
-#### Scenario: Preguntas pendientes de revisión o rechazadas quedan excluidas
-- **GIVEN** un banco de preguntas con algunas preguntas en `QuestionReviewStatus = PendingReview` o `QuestionReviewStatus = Rejected`
-- **WHEN** se solicita `GET /api/questions` con o sin filtros de categoría, dificultad o tipo
-- **THEN** el sistema SHALL excluir esas preguntas del resultado en todos los casos, de forma que nunca queden disponibles para la creación manual o generación automática de pruebas mientras no estén aprobadas
-
 ### Requirement: Baja lógica (soft delete) de preguntas
 El sistema SHALL dar de baja una pregunta marcándola como inactiva (`IsActive = false`) en lugar de eliminarla físicamente, preservando su historial de resultados asociado.
 
@@ -95,7 +79,7 @@ El sistema MUST validar la consistencia de los datos de categorías y preguntas 
 - **THEN** el sistema SHALL rechazar la operación por la restricción de clave foránea entre `Question` y `Category`, sin persistir la pregunta
 
 ### Requirement: Visualización de fecha y hora de creación y actualización de una pregunta
-El sistema SHALL exponer y mostrar, en la pantalla de edición de una pregunta, la fecha y hora exactas (con precisión de minutos) de creación (`CreatedAt`) y, si existe, de última actualización (`UpdatedAt`) de la pregunta, expresadas en UTC, tanto para preguntas creadas manualmente como generadas por IA.
+El sistema SHALL exponer y mostrar, en la pantalla de edición de una pregunta, la fecha y hora exactas (con precisión de minutos) de creación (`CreatedAt`) y, si existe, de última actualización (`UpdatedAt`) de la pregunta, expresadas en UTC.
 
 #### Scenario: Pregunta con fecha de creación y sin actualizaciones posteriores
 - **GIVEN** una pregunta creada y nunca modificada desde su creación
@@ -107,3 +91,54 @@ El sistema SHALL exponer y mostrar, en la pantalla de edición de una pregunta, 
 - **WHEN** un administrador abre su pantalla de edición
 - **THEN** el sistema SHALL mostrar tanto la fecha y hora de creación como la de última actualización, ambas en UTC con precisión de minutos
 
+### Requirement: Filtrado de preguntas activas del banco
+El sistema SHALL permitir listar preguntas filtrando de forma combinable por categoría, nivel de dificultad y tipo de pregunta, devolviendo únicamente preguntas activas (`IsActive = true`) por defecto.
+
+#### Scenario: Filtro combinado por categoría y dificultad
+- **GIVEN** un banco de preguntas con múltiples categorías y niveles de dificultad
+- **WHEN** se solicita `GET /api/questions?categoryId=1&difficulty=Advanced`
+- **THEN** el sistema SHALL devolver únicamente las preguntas activas de la categoría 1 con dificultad `Advanced`, ordenadas por nombre de categoría y dificultad
+
+#### Scenario: Filtro sin parámetros
+- **GIVEN** un banco de preguntas existente
+- **WHEN** se solicita `GET /api/questions` sin parámetros de filtro
+- **THEN** el sistema SHALL devolver el listado resumido de todas las preguntas activas, independientemente de categoría, dificultad o tipo
+
+### Requirement: Edición de una pregunta sin destruir su histórico de respuestas
+El sistema SHALL permitir modificar una pregunta existente —enunciado, categoría, dificultad, puntos, respuesta modelo y opciones— sin borrar y recrear sus opciones de respuesta. Cada opción recibida SHALL emparejarse con la existente por su identificador y actualizarse en su sitio; una opción sin identificador SHALL tratarse como nueva. El sistema MUST conservar el identificador de toda opción que algún candidato ya haya elegido, porque `UserAnswer.SelectedAnswerId` la referencia y perderla destruiría el registro de lo que ese candidato respondió.
+
+#### Scenario: Edición de una pregunta que nadie ha respondido todavía
+- **GIVEN** una pregunta tipo test cuyas opciones no están referenciadas por ninguna `UserAnswer`
+- **WHEN** un administrador guarda cambios en su enunciado y en el texto de sus opciones
+- **THEN** el sistema actualiza la pregunta y sus opciones, y registra `UpdatedAt`
+- **AND** los identificadores de las opciones no cambian
+
+#### Scenario: Edición de una pregunta ya respondida por candidatos
+- **GIVEN** una pregunta tipo test con al menos una opción ya elegida en una `UserAnswer`
+- **WHEN** un administrador corrige el enunciado o el texto de las opciones y guarda
+- **THEN** el sistema SHALL completar la edición correctamente
+- **AND** el sistema SHALL NOT emitir ningún borrado sobre las opciones existentes
+- **AND** las respuestas ya registradas siguen apuntando a la misma opción
+
+#### Scenario: Cambio del veredicto de una opción ya elegida
+- **GIVEN** una pregunta tipo test ya respondida cuya opción marcada como correcta resultó ser errónea
+- **WHEN** un administrador cambia cuál de las opciones es la correcta y guarda
+- **THEN** el sistema actualiza el campo `IsCorrect` de las opciones afectadas sin recrearlas
+- **AND** los resultados ya cerrados conservan la puntuación que se les otorgó, porque se congela en `UserAnswer.AwardedPoints`
+
+#### Scenario: Añadir una opción nueva a una pregunta existente
+- **GIVEN** una pregunta a la que se añade una opción que no tenía
+- **WHEN** el administrador guarda con una opción sin identificador
+- **THEN** el sistema crea esa opción y conserva las anteriores con su identificador
+
+#### Scenario: Eliminar una opción que nadie ha elegido
+- **GIVEN** una pregunta con una opción que ninguna `UserAnswer` referencia
+- **WHEN** el administrador guarda sin incluir esa opción
+- **THEN** el sistema borra esa opción y mantiene el resto
+
+#### Scenario: Intento de eliminar una opción ya elegida por un candidato
+- **GIVEN** una pregunta con una opción referenciada por al menos una `UserAnswer`
+- **WHEN** el administrador guarda sin incluir esa opción, por ejemplo al convertir la pregunta a respuesta abierta
+- **THEN** el sistema MUST rechazar la operación con un conflicto y un mensaje que explique que esa opción ya ha sido elegida por candidatos
+- **AND** el sistema SHALL NOT modificar nada de la pregunta: ni el enunciado, ni las otras opciones
+- **AND** el rechazo SHALL NOT llegar como un error interno del servidor

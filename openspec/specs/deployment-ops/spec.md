@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change deployment-ops. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Levantamiento del stack completo con Docker Compose
 El sistema SHALL permitir levantar la plataforma completa (base de datos, API y frontend) con un único comando de Docker Compose, garantizando que cada servicio solo arranque cuando sus dependencias estén realmente disponibles.
 
@@ -85,8 +87,6 @@ El sistema SHALL ofrecer `scripts/seed_questions_examen.sql` para poblar `TechEv
 - **WHEN** se ejecuta `scripts/seed_questions_examen.sql`
 - **THEN** el sistema SHALL añadir los `DEFAULT CONSTRAINT` faltantes en `Categories.CreatedAt`, `Categories.IsActive`, `Questions.CreatedAt` y `Questions.IsActive` únicamente si no existen ya, sin fallar ni duplicar restricciones
 
-
-
 ### Requirement: Script SQL aditivo añade las columnas de corrección manual sin pérdida de datos
 El sistema SHALL ofrecer `scripts/add_review_columns.sql` para actualizar el esquema de una base de datos `TechEvalDb` ya existente con las columnas necesarias para la corrección manual (`ExamResults.Status`, `ExamResults.ReviewedAt`, `ExamResults.ReviewedByUserId`, `UserAnswers.AwardedPoints`, `UserAnswers.ReviewerComment`), siguiendo el patrón idempotente y no destructivo ya establecido en `scripts/add_user_link_columns.sql`. El script SHALL poder ejecutarse varias veces sin error y SHALL preservar todos los datos existentes.
 
@@ -115,3 +115,41 @@ El sistema SHALL mantener `scripts/create_database.sql` alineado con el modelo, 
 #### Scenario: Creación desde cero incluye las columnas de corrección
 - **WHEN** se ejecuta `scripts/create_database.sql` sobre un servidor sin la base de datos
 - **THEN** las tablas `ExamResults` y `UserAnswers` SHALL crearse ya con las columnas de estado, trazabilidad de corrección y puntuación otorgada, sin necesidad de ejecutar después el script aditivo
+
+### Requirement: Los secretos llegan por configuración, no por el repositorio
+El repositorio NEVER SHALL contener el valor de un secreto de producción: contraseñas de base de datos, claves de firma, contraseñas de cuenta ni credenciales de servicios externos. Los ficheros versionados SHALL declarar el **nombre** de cada secreto y dejar su valor vacío o expresado como una variable de entorno sin valor por defecto.
+
+El sistema MUST negarse a arrancar fuera del entorno de desarrollo si falta cualquier secreto obligatorio, o si alguno conserva el valor documentado para desarrollo. Un despliegue mal configurado SHALL parar en seco con un mensaje que nombre lo que falta, y NEVER SHALL arrancar con un valor por defecto conocido.
+
+Los valores de desarrollo MAY estar versionados en el fichero de configuración de desarrollo, porque son públicos por definición y el arranque en producción los rechaza explícitamente.
+
+#### Scenario: Arranque en producción sin la clave de firma
+- **GIVEN** un despliegue con el entorno distinto de desarrollo y sin valor para la clave JWT
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST detener el arranque con un error que nombre la clave que falta
+- **AND** el sistema SHALL NOT generar ni asumir ninguna clave
+
+#### Scenario: Arranque en producción con el valor de desarrollo
+- **GIVEN** un despliegue con el entorno distinto de desarrollo y una clave JWT igual a la documentada para desarrollo
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST detener el arranque, porque un valor público no sirve como secreto
+
+#### Scenario: Arranque en producción sin contraseña de administrador
+- **GIVEN** un despliegue con el entorno distinto de desarrollo y sin valor para la contraseña del administrador
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST detener el arranque
+- **AND** el sistema SHALL NOT sembrar el administrador con ninguna contraseña por defecto
+
+#### Scenario: Arranque en desarrollo
+- **GIVEN** el entorno de desarrollo y los valores documentados en su fichero de configuración
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST arrancar con normalidad, sin exigir variables de entorno adicionales
+
+#### Scenario: Arranque del stack con variables sin definir
+- **GIVEN** una máquina sin las variables de entorno que declara `docker-compose.yml`
+- **WHEN** se levanta el stack
+- **THEN** Compose MUST fallar nombrando la variable que falta, en lugar de sustituirla por una cadena vacía
+
+#### Scenario: El fichero de configuración local no viaja en el repositorio
+- **WHEN** se inspecciona el contenido versionado del repositorio
+- **THEN** el fichero de configuración local del desarrollador SHALL NOT estar entre los ficheros seguidos por git

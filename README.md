@@ -82,9 +82,9 @@ docker-compose --profile dev up -d
 | Web (Blazor) | http://localhost:5001 |
 | MailHog (emails) | http://localhost:8025 |
 
-**Credenciales por defecto:** `admin@techeval.com` / `Admin@123!`
+**Administrador:** `admin@techeval.com`. Su contraseña sale de `AdminPassword`, que **no tiene valor por defecto**. En desarrollo la trae `appsettings.Development.json` con el valor público `Admin@123!`. Fuera de desarrollo, la API se niega a arrancar si falta, y también si conserva ese valor de desarrollo.
 
-> Las cuentas de alumno se crean solas al abrir una invitación. La contraseña inicial es la parte local del email (`alejandro.robles@ejemplo.com` → usuario `alejandro.robles`, contraseña `alejandro.robles`), y se puede entrar en `/login` indistintamente con el email o con el usuario.
+> Las cuentas de alumno se crean solas al abrir una invitación, y **nacen sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña era la parte local de su email, así que cualquiera que conociese el email entraba en su portal.
 
 > **Antes de levantar el stack**, copia `.env.example` a `.env` y rellena sus valores. Ni `docker-compose.yml` ni `appsettings.json` llevan secretos: si falta alguno, el arranque para y dice cuál.
 >
@@ -92,7 +92,7 @@ docker-compose --profile dev up -d
 > cp .env.example .env    # y edita los valores
 > ```
 >
-> **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. Ver `openspec/changes/secrets-out-of-the-repo/README.md`.
+> **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. La lista de los cuatro valores está en `openspec/changes/archive/2026-09-16-secrets-out-of-the-repo/README.md`.
 
 ---
 

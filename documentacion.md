@@ -739,7 +739,7 @@ GET /api/exam/validate/{token}
     └── Respuesta con authToken: JWT firmado con rol Alumno (auto-login)
 ```
 
-Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`, contraseña inicial `alejandro.robles`.
+Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`. La cuenta nace **sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña inicial era esa misma parte local, así que quien conociera el email entraba en el portal del candidato.
 
 ### Sesión y navegación
 
@@ -785,7 +785,7 @@ Las claves se leen de `appsettings.json`, se sobrescriben por entorno (`appsetti
 | `Email:Host` · `Port` · `UserName` · `Password` · `FromEmail` · `FromName` · `EnableSsl` | Configuración SMTP | vacío |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
-| `AdminPassword` | Contraseña del admin creado en el primer arranque | `Admin@123!` |
+| `AdminPassword` | Contraseña del admin creado en el primer arranque — **obligatoria, sin valor por defecto** | vacío |
 | `Ollama:BaseUrl` · `Model` · `Temperature` · `RepeatPenalty` · `NumCtx` · `NumPredict` | Configuración del modelo de IA (ver sección 8) | ver sección 8 |
 | `Serilog:MinimumLevel` | Nivel de log por defecto y overrides | `Information` |
 
@@ -877,8 +877,7 @@ dotnet run
 - API: http://localhost:5000
 - Swagger: http://localhost:5000/swagger
 
-**Admin por defecto:** `admin@techeval.com` / `Admin@123!`
-(configurado en `appsettings.json` → `AdminPassword`)
+**Admin:** `admin@techeval.com`. La contraseña sale de `AdminPassword`, sin valor por defecto. En desarrollo la trae `appsettings.Development.json` con el valor público `Admin@123!`. Fuera de desarrollo, la API no arranca si falta, ni si conserva ese valor de desarrollo.
 
 #### 7. Arrancar el frontend Blazor
 
@@ -968,7 +967,10 @@ QuestionGenerationJobItems ── FK → QuestionGenerationJobs (CASCADE), Quest
 
 #### Contraseña de administrador
 
-El script inserta el usuario admin con contraseña `Admin@123!` hasheada en SHA-256.  
+El script inserta el usuario admin con contraseña `Admin@123!` hasheada en SHA-256.
+
+> **Desde el 16·09·2026 el algoritmo es PBKDF2-HMAC-SHA256**, no SHA-256. El hash de SHA-256 sigue sirviendo para entrar, y se reescribe solo en el primer inicio de sesión correcto. Por eso el guion de abajo todavía vale, pero deja la cuenta con el formato antiguo hasta ese primer acceso. Lo limpio es dejar que la API cree el administrador en el primer arranque a partir de `AdminPassword`.
+
 Para usar una contraseña diferente, genera el hash con PowerShell antes de ejecutar el script:
 
 ```powershell

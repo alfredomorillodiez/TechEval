@@ -39,10 +39,20 @@ public class QuestionsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
+    [ProducesResponseType(typeof(QuestionDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateQuestionDto dto, CancellationToken ct)
     {
-        var result = await _service.UpdateAsync(id, dto, ct);
-        return result is null ? NotFound() : Ok(result);
+        try
+        {
+            var result = await _service.UpdateAsync(id, dto, ct);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (AnswerInUseException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
     }
 
     [HttpDelete("{id:int}")]

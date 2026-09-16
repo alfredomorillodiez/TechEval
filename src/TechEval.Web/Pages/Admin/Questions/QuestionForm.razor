@@ -200,7 +200,7 @@
                 _createdAt = q.CreatedAt;
                 _updatedAt = q.UpdatedAt;
                 _answers = q.Answers.Select(a => new AnswerModel
-                    { Text = a.Text, IsCorrect = a.IsCorrect, Order = a.Order }).ToList();
+                    { Id = a.Id, Text = a.Text, IsCorrect = a.IsCorrect, Order = a.Order }).ToList();
             }
         }
 
@@ -228,17 +228,30 @@
         { _error = "Marca la respuesta correcta."; return; }
 
         _saving = true;
-        var answerDtos = _answers.Select(a => new CreateAnswerDto(a.Text, a.IsCorrect, a.Order)).ToList();
 
         if (_isEdit)
         {
-            await Api.UpdateQuestionAsync(Id!.Value, new UpdateQuestionDto(
-                _text, _type, _difficulty, _categoryId, _points, true, _sampleAnswer, answerDtos));
+            // El identificador de cada opción viaja de vuelta: es lo que permite al servidor
+            // actualizarla en su sitio en vez de borrarla y recrearla. Una opción sin Id es nueva.
+            var updateDtos = _answers
+                .Select(a => new UpdateAnswerDto(a.Id, a.Text, a.IsCorrect, a.Order)).ToList();
+
+            var updated = await Api.UpdateQuestionAsync(Id!.Value, new UpdateQuestionDto(
+                _text, _type, _difficulty, _categoryId, _points, true, _sampleAnswer, updateDtos));
+
+            if (updated is null)
+            {
+                _error = "No se pudo guardar. Si la pregunta ya ha sido respondida por candidatos, "
+                       + "no se pueden eliminar sus opciones: da la pregunta de baja y crea una nueva.";
+                _saving = false;
+                return;
+            }
         }
         else
         {
+            var createDtos = _answers.Select(a => new CreateAnswerDto(a.Text, a.IsCorrect, a.Order)).ToList();
             await Api.CreateQuestionAsync(new CreateQuestionDto(
-                _text, _type, _difficulty, _categoryId, _points, _sampleAnswer, answerDtos));
+                _text, _type, _difficulty, _categoryId, _points, _sampleAnswer, createDtos));
         }
 
         _saving = false;
@@ -247,6 +260,8 @@
 
     private class AnswerModel
     {
+        // Null en una opción nueva. En una existente, el identificador que la conserva viva.
+        public int? Id { get; set; }
         public string Text { get; set; } = string.Empty;
         public bool IsCorrect { get; set; }
         public int Order { get; set; }

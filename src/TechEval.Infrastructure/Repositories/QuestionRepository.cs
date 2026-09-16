@@ -54,4 +54,12 @@ public class QuestionRepository : BaseRepository<Question>, IQuestionRepository
         // ORDER BY NEWID() en SQL Server via EF
         return await query.OrderBy(_ => Guid.NewGuid()).Take(count).ToListAsync(ct);
     }
+
+    public async Task<IReadOnlyList<int>> GetReferencedAnswerIdsAsync(
+        int questionId, CancellationToken ct = default)
+        => await Context.UserAnswers
+            .Where(ua => ua.QuestionId == questionId && ua.SelectedAnswerId != null)
+            .Select(ua => ua.SelectedAnswerId!.Value)
+            .Distinct()
+            .ToListAsync(ct);
 }

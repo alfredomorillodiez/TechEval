@@ -18,4 +18,11 @@ public interface IQuestionRepository : IRepository<Question>
         List<int>? categoryIds,
         DifficultyLevel? difficulty,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Identificadores de las opciones de esta pregunta que algún candidato ya eligió.
+    /// Borrarlas rompería la clave foránea de `UserAnswer.SelectedAnswerId` y, con ella,
+    /// el registro de lo que ese candidato respondió.
+    /// </summary>
+    Task<IReadOnlyList<int>> GetReferencedAnswerIdsAsync(int questionId, CancellationToken ct = default);
 }

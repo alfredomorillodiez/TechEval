@@ -1,0 +1,37 @@
+# Compila la solución y ejecuta la batería en cada subida y en cada solicitud de
+# incorporación. Antes de esto nada comprobaba el código al subirlo: las pruebas valían
+# lo que valiera acordarse de ejecutarlas.
+#
+# La restauración funciona sin credenciales porque el repositorio trae su propio
+# `NuGet.config`. Sin él, hereda los feeds privados de la organización y falla con 401.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  build-and-test:
+    name: Compilar y probar
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restaurar dependencias
+        run: dotnet restore TechEval.sln
+
+      - name: Compilar
+        # Sin restaurar otra vez: si la restauración falló, este paso no debe taparlo.
+        run: dotnet build TechEval.sln --configuration Release --no-restore
+
+      - name: Ejecutar las pruebas
+        run: dotnet test TechEval.sln --configuration Release --no-build --verbosity normal

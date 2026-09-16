@@ -159,7 +159,12 @@ using (var scope = app.Services.CreateScope())
         ?? throw new InvalidOperationException(
             "Falta `AdminPassword`. Sin ella no se puede sembrar el administrador.");
 
-    await DbSeeder.SeedAsync(context, PasswordHasher.Hash(adminPassword));
+    // El contenido de ejemplo solo en desarrollo: en un despliegue de cliente esas cinco
+    // categorías y tres preguntas entran en su banco real y cuesta distinguirlas.
+    await DbSeeder.SeedAsync(
+        context,
+        PasswordHasher.Hash(adminPassword),
+        seedSampleContent: app.Environment.IsDevelopment());
 }
 
 app.Run();

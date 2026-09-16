@@ -110,14 +110,19 @@ Editar `src/TechEval.API/appsettings.json`:
 }
 ```
 
-### 2. Aplicar migraciones
+### 2. Crear el esquema
+
+**Obligatorio antes del primer arranque.** La API ya no crea el esquema: si no lo encuentra, para y dice qué ejecutar.
 
 ```bash
-cd src/TechEval.Infrastructure
-dotnet ef database update --startup-project ../TechEval.API
+sqlcmd -S localhost -i scripts/create_database.sql
 ```
 
-Como alternativa, `scripts/create_database.sql` crea el esquema completo desde cero. Sobre una base de datos **ya existente** creada con una versión anterior, aplica los scripts incrementales por orden. Todos son idempotentes:
+> **El proyecto no usa migraciones de EF Core.** Hasta el 16·09·2026 la aplicación creaba el esquema desde el modelo con `EnsureCreated`, y eso dejaba las migraciones permanentemente inservibles: su tabla de historial nunca llegaba a existir, así que un `dotnet ef database update` fallaba siempre. Los guiones de `scripts/` son la única forma de crear y actualizar el esquema.
+
+El guion crea **solo el esquema**. El administrador lo siembra la API en su primer arranque, a partir de `AdminPassword`.
+
+Sobre una base de datos **ya existente** creada con una versión anterior, aplica los guiones incrementales por orden. Todos son idempotentes:
 
 ```bash
 # Cuentas de alumno: Users.Username, ExamTokens.UserId, ExamResults.UserId
@@ -128,7 +133,12 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_review_columns.sql
 
 # Retirada del pipeline de IA (solo en bases de datos anteriores a su eliminación)
 sqlcmd -S localhost -d TechEvalDb -i scripts/remove_ai_generation.sql
+
+# Copia de lo preguntado en UserAnswers (D7)
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_answer_snapshot_columns.sql
 ```
+
+Una prueba de la batería compara el modelo con `create_database.sql` y falla si dejan de coincidir, para que una columna nueva no se quede fuera del guion.
 
 ### 3. Configurar email (desarrollo)
 

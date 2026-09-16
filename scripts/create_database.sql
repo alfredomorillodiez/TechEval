@@ -5,12 +5,14 @@
 -- Uso:
 --   1. Ejecutar en SQL Server Management Studio (SSMS) o
 --      sqlcmd -S <servidor> -i scripts/create_database.sql
---   2. Alternativa a las migraciones de EF Core.
---      Si ya usas "dotnet ef database update", no ejecutes esto.
+--   2. Es la UNICA forma de crear el esquema. La aplicacion ya no lo crea al arrancar,
+--      y el proyecto no usa migraciones de EF Core: crearlo desde el modelo dejaba a
+--      las migraciones sin su tabla de historial y por tanto sin poder aplicarse nunca.
 --
--- Contraseña admin por defecto: Admin@123!
---   (SHA-256 hex: 6cf0ea55e5fd5e692e007b16339a83f4319370cdb8b6193c1630820119cbba50)
---   Cámbiala en producción: UPDATE Users SET PasswordHash = '<nuevo_hash>' WHERE Email = 'admin@techeval.com'
+-- Este guion NO crea el usuario administrador. Lo siembra la API en su primer arranque
+-- a partir de `AdminPassword`, que no tiene valor por defecto. El hash es
+-- PBKDF2-HMAC-SHA256 desde el 16-09-2026, asi que un hash SHA-256 escrito a mano aqui
+-- quedaria en el formato antiguo hasta el primer inicio de sesion correcto.
 -- ============================================================
 
 SET QUOTED_IDENTIFIER ON;
@@ -231,6 +233,14 @@ CREATE TABLE dbo.UserAnswers (
     IsCorrect        BIT            NULL,       -- NULL hasta corrección (abiertas)
     AwardedPoints    INT            NULL,       -- puntos congelados; NULL en abiertas sin corregir
     ReviewerComment  NVARCHAR(2000) NULL,       -- comentario del corrector (abiertas)
+
+    -- Copia de lo que se le preguntó al candidato, congelada en el envío. Sin ella, editar
+    -- una pregunta cambiaba hacia atrás lo que constaba en los exámenes ya cerrados.
+    QuestionTextSnapshot       NVARCHAR(2000) NULL,
+    SelectedAnswerTextSnapshot NVARCHAR(1000) NULL,
+    CorrectAnswerTextSnapshot  NVARCHAR(1000) NULL,
+    QuestionPointsSnapshot     INT            NULL,
+
     AnsweredAt       DATETIME2      NOT NULL CONSTRAINT DF_UserAnswers_AnsweredAt DEFAULT GETUTCDATE(),
 
     CONSTRAINT PK_UserAnswers PRIMARY KEY (Id),
@@ -285,85 +295,23 @@ CREATE INDEX IX_ExamResults_Status               ON dbo.ExamResults (Status);
 GO
 
 -- ============================================================
--- DATOS INICIALES (SEED)
+-- Este guion crea el ESQUEMA y nada mas.
+--
+-- Antes sembraba aqui un administrador con un hash SHA-256 de la contrasena publica de
+-- desarrollo. Eso esquivaba la proteccion de secretos: como ya existia un usuario, la API
+-- no llegaba a aplicar AdminPassword, y el despliegue quedaba con una cuenta cuya
+-- contrasena conoce cualquiera que haya leido el repositorio.
+--
+-- Quien crea el administrador es la API, en su primer arranque, a partir de AdminPassword.
+-- Fuera de desarrollo se niega a arrancar si esa clave falta o si conserva el valor
+-- publicado para desarrollo.
+--
+-- Tambien sembraba cinco categorias y tres preguntas de ejemplo. En el banco de un cliente
+-- eso es basura. En desarrollo las siembra la propia API.
+--
+-- Para cargar el banco de preguntas de verdad:
+--   sqlcmd -S <servidor> -i scripts/seed_questions_examen.sql
 -- ============================================================
 
--- ── Usuario administrador ──────────────────────────────────
--- Contraseña: Admin@123!
--- Hash SHA-256: 6cf0ea55e5fd5e692e007b16339a83f4319370cdb8b6193c1630820119cbba50
--- Para generar un hash diferente (PowerShell):
---   $p = "NuevaContraseña"; [BitConverter]::ToString(
---     [System.Security.Cryptography.SHA256]::Create().ComputeHash(
---       [Text.Encoding]::UTF8.GetBytes($p))).Replace("-","").ToLower()
-IF NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Email = 'admin@techeval.com')
-BEGIN
-    INSERT INTO dbo.Users (Email, PasswordHash, Name, IsAdmin, IsActive)
-    VALUES (
-        'admin@techeval.com',
-        '6cf0ea55e5fd5e692e007b16339a83f4319370cdb8b6193c1630820119cbba50',
-        'Administrador',
-        1, 1
-    );
-    PRINT 'Usuario admin creado.';
-END
-GO
-
--- ── Categorías ────────────────────────────────────────────
-IF NOT EXISTS (SELECT 1 FROM dbo.Categories)
-BEGIN
-    INSERT INTO dbo.Categories (Name, Description)
-    VALUES
-        ('SQL',          'Consultas, diseño de BD, optimización'),
-        ('C#',           'Programación orientada a objetos, LINQ, async'),
-        ('APIs REST',    'Diseño de APIs, HTTP, autenticación'),
-        ('Arquitectura', 'Patrones de diseño, Clean Architecture, SOLID'),
-        ('DevOps',       'Docker, CI/CD, despliegue');
-    PRINT '5 categorías creadas.';
-END
-GO
-
--- ── Preguntas de ejemplo ───────────────────────────────────
-IF NOT EXISTS (SELECT 1 FROM dbo.Questions)
-BEGIN
-    DECLARE @sqlCat INT = (SELECT Id FROM dbo.Categories WHERE Name = 'SQL');
-    DECLARE @csCat  INT = (SELECT Id FROM dbo.Categories WHERE Name = 'C#');
-
-    -- Pregunta 1: SQL tipo test (básica)
-    INSERT INTO dbo.Questions (Text, Type, Difficulty, CategoryId, Points)
-    VALUES ('¿Qué cláusula SQL se usa para filtrar grupos de registros?', 1, 1, @sqlCat, 1);
-
-    DECLARE @q1 INT = SCOPE_IDENTITY();
-    INSERT INTO dbo.Answers (QuestionId, Text, IsCorrect, [Order]) VALUES
-        (@q1, 'WHERE',    0, 1),
-        (@q1, 'HAVING',   1, 2),
-        (@q1, 'GROUP BY', 0, 3),
-        (@q1, 'ORDER BY', 0, 4);
-
-    -- Pregunta 2: SQL abierta (intermedia)
-    INSERT INTO dbo.Questions (Text, Type, Difficulty, CategoryId, Points, SampleAnswer)
-    VALUES (
-        '¿Cuál es la diferencia entre INNER JOIN y LEFT JOIN?',
-        2, 2, @sqlCat, 3,
-        'INNER JOIN devuelve solo las filas que tienen coincidencia en ambas tablas. ' +
-        'LEFT JOIN devuelve todas las filas de la tabla izquierda y las coincidencias ' +
-        'de la derecha (NULL si no hay coincidencia).'
-    );
-
-    -- Pregunta 3: C# tipo test (básica)
-    INSERT INTO dbo.Questions (Text, Type, Difficulty, CategoryId, Points)
-    VALUES ('¿Qué palabra clave de C# permite ejecutar código de forma asíncrona sin bloquear el hilo?',
-            1, 1, @csCat, 1);
-
-    DECLARE @q3 INT = SCOPE_IDENTITY();
-    INSERT INTO dbo.Answers (QuestionId, Text, IsCorrect, [Order]) VALUES
-        (@q3, 'parallel',   0, 1),
-        (@q3, 'await',      1, 2),
-        (@q3, 'async only', 0, 3),
-        (@q3, 'thread',     0, 4);
-
-    PRINT '3 preguntas de ejemplo creadas.';
-END
-GO
-
-PRINT '✓ TechEvalDb lista para usar.';
+PRINT 'Esquema de TechEvalDb creado. El administrador lo siembra la API al arrancar.';
 GO

@@ -654,19 +654,19 @@ Editar `src/TechEval.API/appsettings.json`:
 }
 ```
 
-#### 3. Crear y aplicar migraciones
+#### 3. Crear el esquema
+
+**Obligatorio antes del primer arranque.** La API ya no crea el esquema; si no lo encuentra, para y dice qué ejecutar.
 
 ```bash
-cd src/TechEval.Infrastructure
-
-# Crear migración inicial
-dotnet ef migrations add InitialCreate --startup-project ../TechEval.API
-
-# Aplicar a la BD (también se hace automáticamente al arrancar la API)
-dotnet ef database update --startup-project ../TechEval.API
+sqlcmd -S localhost -i scripts/create_database.sql
 ```
 
-Sobre una base de datos ya creada con una versión anterior, aplica los scripts incrementales de la [sección 11](#11-scripts-sql).
+> **El proyecto no usa migraciones de EF Core.** Hasta el 16·09·2026 la aplicación llamaba a `EnsureCreated` al arrancar, y eso dejaba las migraciones permanentemente inservibles: `__EFMigrationsHistory` nunca llegaba a existir, así que la primera migración fallaba. Elegir ahora las migraciones obligaría a cuadrar una migración inicial contra bases ya creadas sin historial, con riesgo de pérdida de datos, a cambio de una comodidad que este equipo no estaba usando.
+
+El guion crea **solo el esquema**. El administrador lo siembra la API en su primer arranque a partir de `AdminPassword`. Las categorías y preguntas de ejemplo solo se siembran en desarrollo.
+
+Sobre una base de datos ya creada con una versión anterior, aplica los guiones incrementales de la [sección 11](#11-scripts-sql).
 
 #### 4. Configurar email
 

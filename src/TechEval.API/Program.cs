@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
@@ -78,6 +79,20 @@ builder.Services.AddCors(o => o.AddPolicy("BlazorPolicy", p =>
 }));
 
 // Swagger
+builder.Services.AddTechEvalRateLimiting();
+
+// Detrás de un proxy inverso, todas las peticiones llegan con la dirección del proxy y el
+// cupo se comparte entre todos los candidatos. Con la lista de proxies de confianza vacía
+// —el valor por defecto— la cabecera se ignora, que es lo correcto sin proxy delante:
+// confiar en `X-Forwarded-For` de cualquiera permite inventarse el origen y saltarse el
+// límite. Ver el apartado del README sobre el despliegue detrás de un proxy.
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownProxies.Clear();
+    o.KnownNetworks.Clear();
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -122,8 +137,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "TechEval API v1"));
 }
 
+app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 app.UseCors("BlazorPolicy");
+
+// Antes de la autenticación: el rechazo por ritmo no debe costar ni una verificación de
+// contraseña, que es justo el gasto del que protege.
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

@@ -157,6 +157,11 @@ public class UserAnswerConfiguration : IEntityTypeConfiguration<UserAnswer>
         builder.Property(a => a.OpenAnswer).HasMaxLength(4000);
         builder.Property(a => a.ReviewerComment).HasMaxLength(2000);
 
+        // Mismas longitudes que sus originales: Question.Text y Answer.Text.
+        builder.Property(a => a.QuestionTextSnapshot).HasMaxLength(2000);
+        builder.Property(a => a.SelectedAnswerTextSnapshot).HasMaxLength(1000);
+        builder.Property(a => a.CorrectAnswerTextSnapshot).HasMaxLength(1000);
+
         builder.HasOne(a => a.Question)
             .WithMany()
             .HasForeignKey(a => a.QuestionId)

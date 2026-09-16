@@ -163,6 +163,16 @@ Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`ap
 | `AdminPassword` | Contraseña del administrador creado en el primer arranque — **obligatoria** | vacío |
 | `Jwt:Issuer` / `Jwt:Audience` | Emisor y destinatario del token | `TechEvalAPI` / `TechEvalClient` |
 
+### Límite de ritmo
+
+`POST /api/auth/login` admite 10 peticiones por minuto y dirección de origen. `GET /api/exam/validate/{token}` admite 60. Al superarlo, la API responde `429` con una cabecera `Retry-After`.
+
+El motivo es el coste: verificar una contraseña cuesta cientos de milisegundos de CPU desde que el hash es PBKDF2, así que un volumen moderado de intentos deja al servidor sin hilos aunque ninguno acierte.
+
+> **Si despliegas detrás de un proxy inverso**, declara sus direcciones en `ForwardedHeadersOptions`. Sin hacerlo, todas las peticiones llegan con la dirección del proxy: el cupo se comparte entre todos los candidatos y el primero que llegue agota el de los demás.
+>
+> No confíes en `X-Forwarded-For` de cualquier origen. Sin restringir qué proxies pueden fijarla, cualquiera se inventa su dirección y se salta el límite. Por eso la lista de proxies de confianza va vacía por defecto y la cabecera se ignora.
+
 ---
 
 ## Arquitectura

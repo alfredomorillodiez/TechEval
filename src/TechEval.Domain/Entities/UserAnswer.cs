@@ -15,7 +15,18 @@ public class UserAnswer
     public int? AwardedPoints { get; set; }
     public string? ReviewerComment { get; set; }
 
-    public DateTime AnsweredAt { get; set; } = DateTime.Now;
+    // Copia de lo que se le preguntó al candidato, congelada en el envío por el mismo
+    // motivo que AwardedPoints: la pregunta del banco se puede editar después, y las
+    // fichas de resultados leían de ella. Editar una errata reescribía hacia atrás lo
+    // que constaba que se preguntó en cada examen ya cerrado.
+    // Opcionales porque las respuestas anteriores al cambio no las tienen hasta que el
+    // guion de esquema las rellena.
+    public string? QuestionTextSnapshot { get; set; }
+    public string? SelectedAnswerTextSnapshot { get; set; }
+    public string? CorrectAnswerTextSnapshot { get; set; }
+    public int? QuestionPointsSnapshot { get; set; }
+
+    public DateTime AnsweredAt { get; set; } = DateTime.UtcNow;
 
     public ExamSession ExamSession { get; set; } = null!;
     public Question Question { get; set; } = null!;

@@ -82,9 +82,13 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
             .Select(ua => new ReviewableAnswerDto(
                 ua.Id,
                 ua.QuestionId,
-                ua.Question?.Text ?? "",
+                // El enunciado y los puntos, tal como se le formularon: juzgar la respuesta
+                // contra una pregunta editada después sería juzgarla contra otra pregunta.
+                // SampleAnswer sí sale del banco, porque es guía del corrector y no algo
+                // que el candidato llegara a ver.
+                ua.QuestionTextSnapshot ?? ua.Question?.Text ?? "",
                 ua.OpenAnswer,
-                ua.Question?.Points ?? 0,
+                MaxPointsOf(ua),
                 ua.AwardedPoints,
                 ua.ReviewerComment,
                 ua.Question?.SampleAnswer))
@@ -135,8 +139,8 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
                 var answer = byId[input.UserAnswerId];
                 answer.AwardedPoints = input.AwardedPoints;
                 answer.ReviewerComment = input.ReviewerComment;
-                answer.IsCorrect = input.AwardedPoints >= (answer.Question?.Points ?? 0)
-                    && (answer.Question?.Points ?? 0) > 0;
+                answer.IsCorrect = input.AwardedPoints >= MaxPointsOf(answer)
+                    && MaxPointsOf(answer) > 0;
                 await _answerRepo.UpdateAsync(answer, token);
             }
 
@@ -178,6 +182,14 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
             ?? throw new InvalidOperationException("No se pudo recuperar el resultado corregido.");
     }
 
+    /// <summary>
+    /// Los puntos máximos que se le mostraron al corrector. No los de la pregunta actual:
+    /// puede haberse editado después del envío, y entonces la pantalla enseñaría un máximo
+    /// y la validación exigiría otro.
+    /// </summary>
+    private static int MaxPointsOf(UserAnswer ua)
+        => ua.QuestionPointsSnapshot ?? ua.Question?.Points ?? 0;
+
     private static void ValidateReview(
         IReadOnlyList<UserAnswer> openAnswers, IReadOnlyList<ReviewAnswerInputDto> submitted)
     {
@@ -200,7 +212,7 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
         var byId = openAnswers.ToDictionary(a => a.Id);
         foreach (var input in submitted)
         {
-            int max = byId[input.UserAnswerId].Question?.Points ?? 0;
+            int max = MaxPointsOf(byId[input.UserAnswerId]);
             if (input.AwardedPoints < 0 || input.AwardedPoints > max)
                 throw new InvalidReviewException(
                     $"Los puntos otorgados deben estar entre 0 y {max} (recibido: {input.AwardedPoints}).");

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,6 +18,8 @@ public class ExamSessionController : ControllerBase
 
     /// <summary>Valida el token, aprovisiona/reutiliza la cuenta del alumno y devuelve un JWT de auto-login</summary>
     [HttpGet("validate/{token}")]
+    [EnableRateLimiting(RateLimiting.ExamLinkPolicy)]
+    [ProducesResponseType(429)]
     public async Task<IActionResult> Validate(string token, CancellationToken ct)
         => Ok(await _tokenService.ValidateTokenAsync(token, ct));
 

@@ -237,7 +237,7 @@ public class ExamTokenService : IExamTokenService
             var answer = existing.First();
             answer.SelectedAnswerId = dto.SelectedAnswerId;
             answer.OpenAnswer = dto.OpenAnswer;
-            answer.AnsweredAt = DateTime.Now;
+            answer.AnsweredAt = DateTime.UtcNow;
             await _answerRepo.UpdateAsync(answer, ct);
         }
         else
@@ -381,11 +381,16 @@ public class ExamTokenService : IExamTokenService
             bool? isCorrect = null;
             int? awardedPoints = null;
 
+            // Copia de lo que se le preguntó, congelada aquí por el mismo motivo que
+            // AwardedPoints. Sin ella, editar la pregunta más tarde cambiaría hacia atrás
+            // lo que la ficha del resultado dice que se preguntó.
+            var selectedAnswer = submitted?.SelectedAnswerId is int sel
+                ? q.Answers.FirstOrDefault(a => a.Id == sel)
+                : null;
+            var correctAnswer = q.Answers.FirstOrDefault(a => a.IsCorrect);
+
             if (q.Type == Domain.Enums.QuestionType.MultipleChoice)
             {
-                var selectedAnswer = submitted?.SelectedAnswerId is int sel
-                    ? q.Answers.FirstOrDefault(a => a.Id == sel)
-                    : null;
                 isCorrect = selectedAnswer?.IsCorrect ?? false;
                 // Congelado aquí: recalcular más tarde contra Question.Points daría otra
                 // nota si alguien edita la pregunta entre el envío y la corrección.
@@ -406,6 +411,10 @@ public class ExamTokenService : IExamTokenService
                 answer.OpenAnswer = submitted?.OpenAnswer;
                 answer.IsCorrect = isCorrect;
                 answer.AwardedPoints = awardedPoints;
+                answer.QuestionTextSnapshot = q.Text;
+                answer.SelectedAnswerTextSnapshot = selectedAnswer?.Text;
+                answer.CorrectAnswerTextSnapshot = correctAnswer?.Text;
+                answer.QuestionPointsSnapshot = q.Points;
                 answer.AnsweredAt = DateTime.UtcNow;
                 await _answerRepo.UpdateAsync(answer, ct);
             }
@@ -419,6 +428,10 @@ public class ExamTokenService : IExamTokenService
                     OpenAnswer = submitted?.OpenAnswer,
                     IsCorrect = isCorrect,
                     AwardedPoints = awardedPoints,
+                    QuestionTextSnapshot = q.Text,
+                    SelectedAnswerTextSnapshot = selectedAnswer?.Text,
+                    CorrectAnswerTextSnapshot = correctAnswer?.Text,
+                    QuestionPointsSnapshot = q.Points,
                     AnsweredAt = DateTime.UtcNow
                 }, ct);
             }

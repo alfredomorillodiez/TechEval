@@ -259,6 +259,11 @@ else if (_state == ExamState.Completed)
 
     private List<DraftAnswer> _drafts = new();
     private System.Timers.Timer? _timer;
+
+    // Un retardo por pregunta: el candidato puede saltar entre dos abiertas, y el de una
+    // no debe cancelar el de la otra.
+    private static readonly TimeSpan AutoSaveDelay = TimeSpan.FromSeconds(2);
+    private readonly Dictionary<int, CancellationTokenSource> _autoSaveDelays = new();
     private int _remainingSeconds;
 
     protected override async Task OnInitializedAsync()
@@ -347,13 +352,54 @@ else if (_state == ExamState.Completed)
     private void UpdateOpenAnswer(int questionId, string? text)
     {
         var draft = GetDraft(questionId);
-        if (draft is not null) draft.OpenAnswer = text;
+        if (draft is null) return;
+        draft.OpenAnswer = text;
+        ScheduleAutoSave(questionId);
+    }
+
+    // Antes solo se guardaba al perder el foco: cerrar el navegador mientras se escribía,
+    // sin salir del campo, perdía la respuesta entera. Guardar en cada pulsación sería una
+    // llamada por carácter, así que el envío espera a que el candidato pare de teclear.
+    // El `@onblur` se conserva: cubre a quien escribe y salta de campo antes del retardo.
+    private void ScheduleAutoSave(int questionId)
+    {
+        CancelPendingAutoSave(questionId);
+
+        var cts = new CancellationTokenSource();
+        _autoSaveDelays[questionId] = cts;
+        _ = DelayThenAutoSaveAsync(questionId, cts.Token);
+    }
+
+    private async Task DelayThenAutoSaveAsync(int questionId, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(AutoSaveDelay, ct);
+            await AutoSave(questionId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Llegó otra pulsación antes de vencer el retardo. Guarda ella.
+        }
+    }
+
+    private void CancelPendingAutoSave(int questionId)
+    {
+        if (!_autoSaveDelays.Remove(questionId, out var pending)) return;
+        pending.Cancel();
+        pending.Dispose();
     }
 
     private async Task AutoSave(int questionId)
     {
+        CancelPendingAutoSave(questionId);
+
         var draft = GetDraft(questionId);
         if (draft is null) return;
+
+        // Un rechazo por plazo vencido no se trata aquí a propósito. `SaveAnswerAsync` no
+        // lanza ante un 409, y el borrador sigue en pantalla: el envío final puntúa con lo
+        // último que entró en plazo. Borrar el texto castigaría al candidato dos veces.
         await Api.SaveAnswerAsync(_sessionInfo!.SessionId, new SubmitAnswerDto(
             questionId, draft.SelectedAnswerId, draft.OpenAnswer));
     }
@@ -368,6 +414,10 @@ else if (_state == ExamState.Completed)
         _showConfirm = false;
         _submitting = true;
         _timer?.Stop();
+
+        // Un retardo pendiente escribiría en una sesión ya cerrada. El cuerpo del envío
+        // lleva los borradores completos, así que no se pierde nada al cancelarlos.
+        foreach (var id in _autoSaveDelays.Keys.ToList()) CancelPendingAutoSave(id);
 
         var answers = _drafts.Select(d => new SubmitAnswerDto(
             d.QuestionId, d.SelectedAnswerId, d.OpenAnswer)).ToList();
@@ -393,7 +443,19 @@ else if (_state == ExamState.Completed)
         return "bg-primary";
     }
 
-    public void Dispose() { _timer?.Dispose(); }
+    public void Dispose()
+    {
+        _timer?.Dispose();
+
+        // Sin esto, salir de la página con un retardo en vuelo dejaría una llamada que
+        // escribe en una sesión que el candidato ya abandonó.
+        foreach (var pending in _autoSaveDelays.Values)
+        {
+            pending.Cancel();
+            pending.Dispose();
+        }
+        _autoSaveDelays.Clear();
+    }
 
     private class DraftAnswer
     {

@@ -58,13 +58,16 @@ public class ResultService : IResultService
         var answerReviews = deduped.Select(ua =>
         {
             var correct = ua.Question?.Answers.FirstOrDefault(a => a.IsCorrect);
+            // Lo que se le preguntó al candidato, no lo que la pregunta dice hoy. Se
+            // recurre al banco solo para las respuestas anteriores a la copia, que el
+            // guion de esquema rellena con el texto de hoy de todas formas.
             return new AnswerReviewDto(
-                ua.Question?.Text ?? "",
-                ua.SelectedAnswer?.Text,
+                ua.QuestionTextSnapshot ?? ua.Question?.Text ?? "",
+                ua.SelectedAnswerTextSnapshot ?? ua.SelectedAnswer?.Text,
                 ua.OpenAnswer,
-                correct?.Text,
+                ua.CorrectAnswerTextSnapshot ?? correct?.Text,
                 ua.IsCorrect,
-                ua.Question?.Points ?? 0,
+                ua.QuestionPointsSnapshot ?? ua.Question?.Points ?? 0,
                 ua.AwardedPoints,
                 ua.ReviewerComment);
         }).ToList();

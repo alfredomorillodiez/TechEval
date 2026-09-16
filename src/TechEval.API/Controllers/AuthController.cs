@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TechEval.Application.DTOs;
@@ -22,8 +23,10 @@ public class AuthController : ControllerBase
 
     /// <summary>Autenticación de administradores y alumnos</summary>
     [HttpPost("login")]
+    [EnableRateLimiting(RateLimiting.LoginPolicy)]
     [ProducesResponseType(typeof(AuthResultDto), 200)]
     [ProducesResponseType(401)]
+    [ProducesResponseType(429)]
     public async Task<IActionResult> Login([FromBody] LoginDto dto, CancellationToken ct)
     {
         var user = await _context.Users

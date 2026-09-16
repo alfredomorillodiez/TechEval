@@ -126,9 +126,7 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var adminHash = Convert.ToHexString(
-        SHA256.HashData(Encoding.UTF8.GetBytes(
-            builder.Configuration["AdminPassword"] ?? "Admin@123!"))).ToLower();
+    var adminHash = PasswordHasher.Hash(builder.Configuration["AdminPassword"] ?? "Admin@123!");
     await DbSeeder.SeedAsync(context, adminHash);
 }
 

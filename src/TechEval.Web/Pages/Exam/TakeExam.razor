@@ -2,9 +2,11 @@
 @implements IDisposable
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
+@using Microsoft.JSInterop
 @inject ApiService Api
 @inject AuthStateService Auth
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>Prueba técnica — TechEval</PageTitle>
 
@@ -266,6 +268,14 @@ else if (_state == ExamState.Completed)
     private readonly Dictionary<int, CancellationTokenSource> _autoSaveDelays = new();
     private int _remainingSeconds;
 
+    // El examen mide el tiempo con dos relojes y se queda con el que más ha avanzado.
+    // Al cronómetro no le afecta un cambio de hora del sistema. La hora UTC sigue
+    // corriendo aunque el equipo se suspenda. Ninguno de los dos puede regalar tiempo.
+    private System.Diagnostics.Stopwatch? _clock;
+    private DateTime _startedAtUtc;
+    private int _secondsAtStart;
+    private DotNetObjectReference<TakeExam>? _selfRef;
+
     protected override async Task OnInitializedAsync()
     {
         var validation = await Api.ValidateTokenAsync(Token);
@@ -290,6 +300,10 @@ else if (_state == ExamState.Completed)
         // El tiempo lo mide el servidor. Inicializarlo con TimeLimitMinutes daría una prueba
         // nueva completa en cada recarga.
         _remainingSeconds = session.RemainingSeconds;
+        // Los relojes locales arrancan en el mismo instante que cuenta el servidor.
+        _secondsAtStart = _remainingSeconds;
+        _clock = System.Diagnostics.Stopwatch.StartNew();
+        _startedAtUtc = DateTime.UtcNow;
         _drafts = session.Questions.Select(q => new DraftAnswer { QuestionId = q.QuestionId }).ToList();
         RestoreSavedAnswers(session);
 
@@ -324,18 +338,53 @@ else if (_state == ExamState.Completed)
     private void StartExam()
     {
         _state = ExamState.InProgress;
+
+        // Este temporizador solo refresca la pantalla. El tiempo restante sale de los
+        // relojes. El navegador frena o para el temporizador si la ventana está oculta,
+        // así que descontar un segundo por aviso regalaría tiempo al candidato.
         _timer = new System.Timers.Timer(1000);
-        _timer.Elapsed += async (_, _) =>
-        {
-            _remainingSeconds--;
-            if (_remainingSeconds <= 0)
-            {
-                _timer?.Stop();
-                await SubmitExamAsync();
-            }
-            await InvokeAsync(StateHasChanged);
-        };
+        _timer.Elapsed += async (_, _) => await OnTimerTickAsync();
         _timer.Start();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _selfRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("examTimer.register", _selfRef);
+    }
+
+    /// <summary>
+    /// Lo llama el navegador cuando la ventana vuelve a estar a la vista. Recalcula el
+    /// tiempo sin esperar al temporizador, que el navegador pudo dejar parado.
+    /// </summary>
+    [JSInvokable]
+    public async Task RefreshTimer()
+    {
+        if (_state != ExamState.InProgress) return;
+        await OnTimerTickAsync();
+    }
+
+    private int ElapsedSeconds()
+    {
+        var byStopwatch = _clock?.Elapsed.TotalSeconds ?? 0;
+        var byWallClock = (DateTime.UtcNow - _startedAtUtc).TotalSeconds;
+        return (int)Math.Round(Math.Max(byStopwatch, byWallClock));
+    }
+
+    private async Task OnTimerTickAsync()
+    {
+        _remainingSeconds = Math.Max(0, _secondsAtStart - ElapsedSeconds());
+
+        if (_remainingSeconds == 0)
+        {
+            _timer?.Stop();
+            await SubmitExamAsync();
+            return;
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private void NextQuestion() { if (_currentQuestion < _sessionInfo!.Questions.Count - 1) _currentQuestion++; }
@@ -445,7 +494,13 @@ else if (_state == ExamState.Completed)
 
     public void Dispose()
     {
+        _timer?.Stop();
         _timer?.Dispose();
+        _clock?.Stop();
+
+        // No esperamos a que termine: Dispose no admite await.
+        _ = JS.InvokeVoidAsync("examTimer.unregister");
+        _selfRef?.Dispose();
 
         // Sin esto, salir de la página con un retardo en vuelo dejaría una llamada que
         // escribe en una sesión que el candidato ya abandonó.

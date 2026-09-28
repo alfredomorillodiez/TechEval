@@ -17,6 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<ExamSession> ExamSessions => Set<ExamSession>();
     public DbSet<UserAnswer> UserAnswers => Set<UserAnswer>();
     public DbSet<ExamResult> ExamResults => Set<ExamResult>();
+    public DbSet<ExamIntegrityEvent> ExamIntegrityEvents => Set<ExamIntegrityEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

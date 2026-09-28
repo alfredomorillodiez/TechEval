@@ -93,7 +93,7 @@ public class ErrorMappingTests
     [Fact]
     public async Task LaRespuestaTieneFormaDeProblemDetails()
     {
-        var (_, body) = await EjecutarAsync(new NotFoundException("Examen no encontrado."));
+        var (_, body) = await EjecutarAsync(new NotFoundException("Prueba no encontrada."));
 
         using var doc = JsonDocument.Parse(body);
         doc.RootElement.TryGetProperty("title", out _).Should().BeTrue();
@@ -101,7 +101,7 @@ public class ErrorMappingTests
         doc.RootElement.TryGetProperty("detail", out var detail).Should().BeTrue();
 
         status.GetInt32().Should().Be(404);
-        detail.GetString().Should().Be("Examen no encontrado.");
+        detail.GetString().Should().Be("Prueba no encontrada.");
     }
 
     [Fact]

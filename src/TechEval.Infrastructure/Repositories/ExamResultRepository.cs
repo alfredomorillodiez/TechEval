@@ -34,6 +34,7 @@ public class ExamResultRepository : BaseRepository<ExamResult>, IExamResultRepos
     public async Task<ExamResult?> GetWithDetailsAsync(int id, CancellationToken ct = default)
         => await Context.ExamResults
             .Include(r => r.Exam)
+                .ThenInclude(e => e!.ExamQuestions)
             .Include(r => r.ExamSession)
                 .ThenInclude(s => s!.UserAnswers)
                     .ThenInclude(ua => ua.Question)
@@ -63,6 +64,7 @@ public class ExamResultRepository : BaseRepository<ExamResult>, IExamResultRepos
     public async Task<ExamResult?> GetForReviewAsync(int id, CancellationToken ct = default)
         => await Context.ExamResults
             .Include(r => r.Exam)
+                .ThenInclude(e => e!.ExamQuestions)
             .Include(r => r.ExamSession)
                 .ThenInclude(s => s!.UserAnswers)
                     .ThenInclude(ua => ua.Question)

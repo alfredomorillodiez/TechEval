@@ -7,14 +7,19 @@ using TechEval.Application.Services;
 
 namespace TechEval.API.Controllers;
 
-/// <summary>Endpoints de examen accesibles con el token del enlace, sin requerir login previo</summary>
+/// <summary>Endpoints de la prueba accesibles con el token del enlace, sin requerir login previo</summary>
 [ApiController]
 [Route("api/exam")]
 public class ExamSessionController : ControllerBase
 {
     private readonly IExamTokenService _tokenService;
+    private readonly IExamIntegrityService _integrityService;
 
-    public ExamSessionController(IExamTokenService tokenService) => _tokenService = tokenService;
+    public ExamSessionController(IExamTokenService tokenService, IExamIntegrityService integrityService)
+    {
+        _tokenService = tokenService;
+        _integrityService = integrityService;
+    }
 
     /// <summary>Valida el token, aprovisiona/reutiliza la cuenta del alumno y devuelve un JWT de auto-login</summary>
     [HttpGet("validate/{token}")]
@@ -23,7 +28,7 @@ public class ExamSessionController : ControllerBase
     public async Task<IActionResult> Validate(string token, CancellationToken ct)
         => Ok(await _tokenService.ValidateTokenAsync(token, ct));
 
-    /// <summary>Inicia la sesión de examen (marca el token como usado)</summary>
+    /// <summary>Inicia la sesión de la prueba (marca el token como usado)</summary>
     [HttpPost("start/{token}")]
     public async Task<IActionResult> Start(string token, CancellationToken ct)
     {
@@ -52,7 +57,7 @@ public class ExamSessionController : ControllerBase
         return Ok();
     }
 
-    /// <summary>Envía el examen completo y devuelve los resultados</summary>
+    /// <summary>Envía la prueba completa y devuelve los resultados</summary>
     [HttpPost("submit")]
     [Authorize(Roles = "Alumno")]
     [ProducesResponseType(typeof(ExamSubmissionReceiptDto), 200)]
@@ -61,6 +66,26 @@ public class ExamSessionController : ControllerBase
     {
         var result = await _tokenService.SubmitExamAsync(dto, CurrentUserId(), ct);
         return Ok(result);
+    }
+
+    /// <summary>Registra una señal de integridad: salida de la página, vuelta o pegado</summary>
+    /// <remarks>
+    /// Mismas reglas de propiedad que el auto-guardado. Pasado el tope de señales por sesión
+    /// responde 200 sin guardar: el candidato no debe notar nada.
+    /// </remarks>
+    [HttpPost("integrity/{sessionId:int}")]
+    [Authorize(Roles = "Alumno")]
+    [EnableRateLimiting(RateLimiting.IntegrityPolicy)]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(403)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(429)]
+    public async Task<IActionResult> RecordIntegrityEvent(
+        int sessionId, [FromBody] IntegrityEventInputDto dto, CancellationToken ct)
+    {
+        await _integrityService.RecordAsync(sessionId, CurrentUserId(), dto, ct);
+        return Ok();
     }
 
     private int CurrentUserId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

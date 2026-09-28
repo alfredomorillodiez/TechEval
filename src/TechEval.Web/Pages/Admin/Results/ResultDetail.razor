@@ -76,6 +76,8 @@
             </div>
         </div>
 
+        <IntegrityPanel Report="_integrity" />
+
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-0 pt-3">
                 <h5 class="mb-0">Respuestas <span class="badge bg-secondary ms-1">@_result.Answers.Count</span></h5>
@@ -167,13 +169,17 @@
     [Parameter] public int Id { get; set; }
 
     private ExamResultDto? _result;
+    private IntegrityReportDto? _integrity;
     private bool _loading = true;
 
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
-        _result = await Api.GetResultDetailAsync(Id);
+        var result = Api.GetResultDetailAsync(Id);
+        var integrity = Api.GetIntegrityReportAsync(Id);
+        _result = await result;
+        _integrity = await integrity;
         _loading = false;
     }
 }

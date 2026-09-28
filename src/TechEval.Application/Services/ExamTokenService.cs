@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using TechEval.Application.DTOs;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Interfaces.Repositories;
@@ -70,7 +71,7 @@ public class ExamTokenService : IExamTokenService
     public async Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
-            ?? throw new NotFoundException("Examen no encontrado.");
+            ?? throw new NotFoundException("Prueba no encontrada.");
 
         var secureToken = _tokenService.GenerateSecureToken();
         var expiresAt = DateTime.UtcNow.AddHours(dto.ExpirationHours);
@@ -97,7 +98,7 @@ public class ExamTokenService : IExamTokenService
     public async Task<BulkSendResultDto> SendExamBulkAsync(BulkSendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
-            ?? throw new NotFoundException("Examen no encontrado.");
+            ?? throw new NotFoundException("Prueba no encontrada.");
 
         var results = new List<BulkSendItemResultDto>();
 
@@ -147,7 +148,7 @@ public class ExamTokenService : IExamTokenService
         // El estado de la sesión manda sobre el del token. Un token usado con la sesión
         // todavía abierta es el caso normal de quien recarga la página, y debe poder volver.
         if (IsSessionFinished(examToken))
-            return new ExamTokenValidationDto(false, "Este examen ya ha sido completado.", null, null, null, null);
+            return new ExamTokenValidationDto(false, "Esta prueba ya ha sido completada.", null, null, null, null);
 
         // ExpiresAt es el plazo para EMPEZAR, no para terminar: una prueba ya abierta la
         // gobierna su tiempo límite, así que la expiración solo cierra la puerta de entrada.
@@ -208,7 +209,13 @@ public class ExamTokenService : IExamTokenService
         examToken.IsUsed = true;
         examToken.UsedAt = DateTime.UtcNow;
 
-        var session = new ExamSession { ExamTokenId = examToken.Id };
+        // La semilla se fija aquí y solo aquí: la reanudación devuelve la sesión existente
+        // antes de llegar a esta línea, así que el orden no cambia al recargar.
+        var session = new ExamSession
+        {
+            ExamTokenId = examToken.Id,
+            ShuffleSeed = RandomNumberGenerator.GetInt32(int.MaxValue)
+        };
         await _sessionRepo.AddAsync(session, ct);
         await _tokenRepo.UpdateAsync(examToken, ct);
 
@@ -266,7 +273,7 @@ public class ExamTokenService : IExamTokenService
             ?? throw new InvalidOperationException("Token no encontrado.");
 
         var exam = await _examRepo.GetWithQuestionsAsync(examToken.ExamId, ct)!
-            ?? throw new NotFoundException("Examen no encontrado.");
+            ?? throw new NotFoundException("Prueba no encontrada.");
 
         EnsureOwnedBy(examToken, userId);
 
@@ -488,10 +495,10 @@ public class ExamTokenService : IExamTokenService
     /// Comprueba que la sesión es de quien llama. Un `UserId` nulo se trata como ajeno:
     /// dueño desconocido es dueño distinto, y un fallo de autorización debe cerrar.
     /// </summary>
-    private static void EnsureOwnedBy(ExamToken token, int userId)
+    internal static void EnsureOwnedBy(ExamToken token, int userId)
     {
         if (token.UserId is null || token.UserId != userId)
-            throw new SessionAccessDeniedException("Esta sesión de examen no te pertenece.");
+            throw new SessionAccessDeniedException("Esta prueba no te pertenece.");
     }
 
     /// <summary>El plazo del examen, medido por el reloj del servidor y con su margen.</summary>
@@ -504,23 +511,34 @@ public class ExamTokenService : IExamTokenService
         return DateTime.UtcNow > limite;
     }
 
-    private static ExamSessionInfoDto BuildSessionInfo(ExamToken token) => new(
-        token.ExamSession!.Id,
-        token.Exam.Title,
-        token.CandidateName,
-        token.Exam.TimeLimitMinutes,
-        token.ExamSession.StartedAt,
-        RemainingSecondsOf(token),
-        token.Exam.ExamQuestions.OrderBy(eq => eq.Order).Select(eq => new SessionQuestionDto(
-            eq.QuestionId,
-            eq.Question!.Text,
-            eq.Question.Type,
-            eq.Question.Points,
-            eq.Order,
-            eq.Question.Answers.OrderBy(a => a.Order)
-                .Select(a => new AnswerOptionDto(a.Id, a.Text, a.Order)).ToList()
-        )).ToList(),
-        SavedAnswersOf(token));
+    /// <summary>
+    /// Detalle de la sesión en el orden propio de esa sesión. Los campos Order llevan la
+    /// posición en la sesión, no en el examen: el orden del examen sigue siendo la
+    /// referencia de los resultados, pero el candidato no lo ve.
+    /// </summary>
+    private static ExamSessionInfoDto BuildSessionInfo(ExamToken token)
+    {
+        var seed = token.ExamSession!.ShuffleSeed;
+
+        return new(
+            token.ExamSession.Id,
+            token.Exam.Title,
+            token.CandidateName,
+            token.CandidateEmail,
+            token.Exam.TimeLimitMinutes,
+            token.ExamSession.StartedAt,
+            RemainingSecondsOf(token),
+            SessionOrder.Questions(token.Exam.ExamQuestions, seed).Select((eq, i) => new SessionQuestionDto(
+                eq.QuestionId,
+                eq.Question!.Text,
+                eq.Question.Type,
+                eq.Question.Points,
+                i + 1,
+                SessionOrder.Answers(eq.Question.Answers, eq.QuestionId, seed)
+                    .Select((a, j) => new AnswerOptionDto(a.Id, a.Text, j + 1)).ToList()
+            )).ToList(),
+            SavedAnswersOf(token));
+    }
 
     /// <summary>
     /// Tiempo que le queda al candidato, medido por el reloj del servidor. Nunca negativo:

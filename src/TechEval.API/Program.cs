@@ -44,6 +44,7 @@ builder.Services.AddScoped<IExamTokenService, ExamTokenService>();
 builder.Services.AddScoped<IResultService, ResultService>();
 builder.Services.AddScoped<IStudentPortalService, StudentPortalService>();
 builder.Services.AddScoped<IOpenQuestionReviewService, OpenQuestionReviewService>();
+builder.Services.AddScoped<IExamIntegrityService, ExamIntegrityService>();
 
 // JWT Auth
 var jwtKey = builder.Configuration["Jwt:SecretKey"]!;

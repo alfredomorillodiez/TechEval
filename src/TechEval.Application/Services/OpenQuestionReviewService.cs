@@ -77,8 +77,7 @@ public class OpenQuestionReviewService : IOpenQuestionReviewService
 
         var openAnswers = OpenAnswersOf(result);
 
-        var answers = openAnswers
-            .OrderBy(ua => ua.Id)
+        var answers = SessionOrder.ByExamOrder(openAnswers, result.Exam)
             .Select(ua => new ReviewableAnswerDto(
                 ua.Id,
                 ua.QuestionId,

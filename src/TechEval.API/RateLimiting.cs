@@ -14,6 +14,9 @@ namespace TechEval.API;
 /// Desde que el hash es PBKDF2 con 600 000 iteraciones, verificar una contraseña cuesta
 /// cientos de milisegundos de CPU. Unas pocas peticiones simultáneas ocupan todos los
 /// hilos y el resto de la aplicación deja de responder, sin acertar ni una.
+///
+/// También limita las señales de integridad del examen. Esas sí exigen el JWT del alumno,
+/// pero cada una escribe una fila, y la interfaz las envía sin que el candidato haga nada.
 /// </summary>
 public static class RateLimiting
 {
@@ -22,6 +25,9 @@ public static class RateLimiting
 
     /// <summary>Validación del enlace de examen: barata y de uso legítimo frecuente.</summary>
     public const string ExamLinkPolicy = "exam-link";
+
+    /// <summary>Señales de integridad durante la prueba: frecuentes y sin coste, pero sin techo propio.</summary>
+    public const string IntegrityPolicy = "exam-integrity";
 
     public const string ProblemContentType = "application/problem+json";
 
@@ -32,12 +38,18 @@ public static class RateLimiting
     // volver a su prueba. Un cupo estrecho aquí echa de su examen a quien no ha hecho nada.
     private const int ExamLinkPermitsPerWindow = 60;
 
+    // Cada cambio de ventana produce dos señales, una al salir y otra al volver. 120 deja
+    // margen para quien cambia de ventana a menudo y corta un bucle. El cliente trata el
+    // rechazo como cualquier fallo: guarda la señal y la reintenta con la siguiente.
+    private const int IntegrityPermitsPerWindow = 120;
+
     public static IServiceCollection AddTechEvalRateLimiting(this IServiceCollection services)
     {
         services.AddRateLimiter(options =>
         {
             options.AddPolicy(LoginPolicy, http => FixedWindowFor(http, LoginPermitsPerWindow));
             options.AddPolicy(ExamLinkPolicy, http => FixedWindowFor(http, ExamLinkPermitsPerWindow));
+            options.AddPolicy(IntegrityPolicy, http => FixedWindowFor(http, IntegrityPermitsPerWindow));
 
             options.OnRejected = async (context, ct) =>
             {

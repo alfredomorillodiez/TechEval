@@ -146,6 +146,22 @@ public class ExamSessionConfiguration : IEntityTypeConfiguration<ExamSession>
             .WithOne(r => r.ExamSession)
             .HasForeignKey<ExamResult>(r => r.ExamSessionId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(s => s.IntegrityEvents)
+            .WithOne(e => e.ExamSession)
+            .HasForeignKey(e => e.ExamSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class ExamIntegrityEventConfiguration : IEntityTypeConfiguration<ExamIntegrityEvent>
+{
+    public void Configure(EntityTypeBuilder<ExamIntegrityEvent> builder)
+    {
+        builder.ToTable("ExamIntegrityEvents");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Type).IsRequired();
+        builder.HasIndex(e => e.ExamSessionId);
     }
 }
 

@@ -32,7 +32,7 @@ public class SmtpEmailService : IEmailService
         string toEmail, string toName, string examTitle,
         string examLink, DateTime expiresAt, CancellationToken ct = default)
     {
-        var subject = $"Invitación a examen técnico: {examTitle}";
+        var subject = $"Invitación a una prueba técnica: {examTitle}";
         var body = BuildInvitationHtml(toName, examTitle, examLink, expiresAt);
         await SendAsync(toEmail, toName, subject, body, ct);
     }
@@ -41,7 +41,7 @@ public class SmtpEmailService : IEmailService
         string toEmail, string toName, string examTitle,
         decimal scorePercentage, bool passed, CancellationToken ct = default)
     {
-        var subject = $"Resultado de tu examen: {examTitle}";
+        var subject = $"Resultado de tu prueba: {examTitle}";
         var body = BuildResultHtml(toName, examTitle, scorePercentage, passed);
         await SendAsync(toEmail, toName, subject, body, ct);
     }
@@ -95,12 +95,12 @@ public class SmtpEmailService : IEmailService
             </div>
             <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
                 <h2>Hola, {name}</h2>
-                <p>Has sido invitado a completar el siguiente examen técnico:</p>
+                <p>Has sido invitado a completar la siguiente prueba técnica:</p>
                 <h3 style="color: #1e40af;">{examTitle}</h3>
                 <p>Haz clic en el siguiente botón para comenzar:</p>
                 <a href="{link}" style="display: inline-block; background: #1e40af; color: white;
                    padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">
-                    Comenzar Examen
+                    Comenzar prueba
                 </a>
                 <p style="margin-top: 20px; color: #6b7280; font-size: 14px;">
                     ⚠️ Este enlace expira el {expiresAt:dd/MM/yyyy HH:mm} UTC y solo puede usarse una vez.
@@ -124,7 +124,7 @@ public class SmtpEmailService : IEmailService
             </div>
             <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
                 <h2>Hola, {name}</h2>
-                <p>Has completado el examen <strong>{examTitle}</strong>.</p>
+                <p>Has completado la prueba <strong>{examTitle}</strong>.</p>
                 <div style="text-align: center; padding: 20px; background: {(passed ? "#dcfce7" : "#fee2e2")};
                      border-radius: 8px; margin: 20px 0;">
                     <div style="font-size: 48px; font-weight: bold; color: {(passed ? "#16a34a" : "#dc2626")};">

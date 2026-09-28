@@ -8,11 +8,13 @@ namespace TechEval.Application.DTOs;
 /// recargar la página devolvería el tiempo completo y la prueba no tendría límite real.
 /// `SavedAnswers` reutiliza `SubmitAnswerDto` a propósito — ese record no tiene sitio para
 /// `IsCorrect` ni para la puntuación, así que no puede filtrar el solucionario.
+/// `CandidateEmail` es para la marca de agua: una captura de la pregunta identifica a su autor.
 /// </summary>
 public record ExamSessionInfoDto(
     int SessionId,
     string ExamTitle,
     string CandidateName,
+    string CandidateEmail,
     int TimeLimitMinutes,
     DateTime StartedAt,
     int RemainingSeconds,

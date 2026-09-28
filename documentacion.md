@@ -11,7 +11,7 @@
 8. [Cuentas de usuario y portal del alumno](#8-cuentas-de-usuario-y-portal-del-alumno)
 9. [Configuración y puesta en marcha](#9-configuración-y-puesta-en-marcha)
 10. [Scripts SQL](#10-scripts-sql)
-11. [Script SQL de preguntas del examen](#11-script-sql-de-preguntas-del-examen)
+11. [Script SQL de preguntas de la prueba](#11-script-sql-de-preguntas-de-la-prueba)
 12. [Docker](#12-docker)
 13. [Tests](#13-tests)
 14. [Seguridad](#14-seguridad)
@@ -171,7 +171,18 @@ ExamSessions
 ├── ExamTokenId (FK → ExamTokens, 1:1)
 ├── StartedAt
 ├── CompletedAt
-└── Status       -- 1=InProgress, 2=Completed, 3=Expired, 4=Abandoned
+├── Status       -- 1=InProgress, 2=Completed, 3=Expired, 4=Abandoned
+├── ShuffleSeed  -- semilla del orden propio de la sesión; NULL = sesión anterior al cambio
+└── IntegrityLimitReached  -- la sesión llegó al tope de 500 señales
+
+ExamIntegrityEvents
+├── Id (PK)
+├── ExamSessionId (FK → ExamSessions, CASCADE)  [INDEX]
+├── Type         -- 1=PageLeft, 2=PageReturned, 3=Paste
+├── QuestionId   -- pregunta en pantalla; sin FK, es solo un dato
+├── OccurredAt   -- hora UTC de recepción en el servidor
+├── AwaySeconds  -- solo PageReturned; la mide el navegador
+└── PastedChars  -- solo Paste; el texto pegado no se guarda
 
 UserAnswers
 ├── Id (PK)
@@ -201,10 +212,11 @@ ExamResults
 
 | Relación | Tipo | Notas |
 |----------|------|-------|
-| Exam → ExamQuestions | 1:N | Un examen contiene varias preguntas |
+| Exam → ExamQuestions | 1:N | Una prueba contiene varias preguntas |
 | ExamToken → ExamSession | 1:1 | Cada token genera máx. 1 sesión |
 | ExamSession → UserAnswers | 1:N | Respuestas parciales (auto-guardado) |
-| ExamSession → ExamResult | 1:1 | Se crea al finalizar el examen |
+| ExamSession → ExamResult | 1:1 | Se crea al finalizar la prueba |
+| ExamSession → ExamIntegrityEvents | 1:N | Señales de actividad durante la prueba; se borran con la sesión |
 | User → ExamTokens | 1:N | Invitaciones del alumno; `SET NULL` si se borra el usuario |
 | User → ExamResults | 1:N | Historial de notas del alumno; `SET NULL` si se borra el usuario |
 
@@ -272,7 +284,7 @@ TechEval/
 │   │       ├── CategoryService.cs
 │   │       ├── QuestionService.cs
 │   │       ├── ExamService.cs
-│   │       ├── ExamTokenService.cs             -- Ciclo de examen + cuentas de alumno
+│   │       ├── ExamTokenService.cs             -- Ciclo de la prueba + cuentas de alumno
 │   │       ├── ResultService.cs
 │   │       ├── QuestionGenerationService.cs    -- Jobs, revisión, aprobación/rechazo
 │   │       ├── StudentPortalService.cs         -- Pendientes y realizadas del alumno
@@ -455,14 +467,17 @@ Swagger publica la referencia interactiva en `/swagger` (solo en entorno de desa
 
 **Respuesta (`BulkSendResultDto`):** recuento de `sent` / `failed` y el detalle por candidato con el error concreto de cada fallo.
 
-### Sesión de examen (pública, con el token del enlace)
+### Sesión de la prueba (pública, con el token del enlace)
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
 | GET | `/api/exam/validate/{token}` | No | Valida el token, aprovisiona/reutiliza la cuenta del alumno y devuelve un JWT de auto-login |
 | POST | `/api/exam/start/{token}` | No | Inicia la sesión y marca el token como usado |
 | POST | `/api/exam/answer/{sessionId}` | No | Auto-guarda una respuesta |
-| POST | `/api/exam/submit` | No | Envía el examen completo |
+| POST | `/api/exam/submit` | No | Envía la prueba completa |
+| POST | `/api/exam/integrity/{sessionId}` | Alumno | Registra una señal de integridad: salida de la página, vuelta o pegado. Solo sobre la propia sesión en curso; `409` si la prueba ya se envió |
+
+El detalle de la sesión (`ExamSessionInfoDto`) presenta las preguntas y las opciones **en el orden propio de la sesión**, y los campos `order` llevan la posición en la sesión. El orden se obtiene de `ExamSession.ShuffleSeed` con un hash SHA-256 de la semilla y los identificadores, así que es el mismo en cada reanudación. La corrección identifica la opción elegida por su identificador, nunca por su posición.
 
 **Respuesta de `/api/exam/validate/{token}` (`ExamTokenValidationDto`):**
 ```json
@@ -490,9 +505,12 @@ El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro d
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
 | GET | `/api/results` | Admin | Historial completo |
-| GET | `/api/results/exam/{examId}` | Admin | Por examen |
+| GET | `/api/results/exam/{examId}` | Admin | Por prueba |
 | GET | `/api/results/{id}` | Admin | Detalle con revisión de respuestas |
 | GET | `/api/results/dashboard` | Admin | Estadísticas del dashboard |
+| GET | `/api/results/{id}/integrity` | Admin | Actividad del candidato durante la prueba: resumen y cronología (`IntegrityReportDto`) |
+
+El detalle de un resultado y el de corrección muestran las respuestas en el **orden de la prueba**, no en el que vio el candidato: así se comparan candidatos sobre el mismo orden.
 
 ---
 
@@ -503,10 +521,10 @@ El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro d
 ```
 Admin crea preguntas → Categorías + Dificultad + Tipo + Respuestas
     ↓
-Admin crea examen (manual o automático)
+Admin crea la prueba (manual o automática)
     │  La selección automática solo usa preguntas IsActive + Approved
     ↓
-Admin envía examen: POST /api/exams/send  ·  POST /api/exams/send-bulk
+Admin envía la prueba: POST /api/exams/send  ·  POST /api/exams/send-bulk
     ├── Se genera token seguro (48 bytes → 64 chars URL-safe, único en BD)
     ├── Se guarda ExamToken con fecha de expiración
     └── Se envía email HTML al candidato con enlace único
@@ -525,16 +543,21 @@ GET /api/exam/validate/{token}
     ├── Vincula ExamToken.UserId a ese usuario
     └── Devuelve: isValid, examTitle, candidateName y authToken (JWT rol Alumno)
     ↓
-Blazor guarda la sesión y muestra la pantalla de bienvenida con info del examen
+Blazor guarda la sesión y muestra la pantalla de bienvenida con info de la prueba
+    └── y el aviso de lo que se registra durante la prueba
     ↓
 Candidato pulsa "Comenzar"
     ↓
 POST /api/exam/start/{token}
     ├── Marca IsUsed = true, UsedAt = now (no puede repetirse)
-    └── Crea ExamSession con status=InProgress
+    └── Crea ExamSession con status=InProgress y una semilla de orden aleatoria
     ↓
 Candidato responde preguntas con temporizador visible
+    ├── Preguntas y opciones en el orden propio de su sesión
+    ├── Marca de agua con su nombre y su correo sobre las preguntas
     ├── Auto-guardado: POST /api/exam/answer/{sessionId} (cada respuesta)
+    ├── Salidas de la página y pegados en abiertas: POST /api/exam/integrity/{sessionId}
+    │       (una señal que falla se guarda en memoria y se reintenta con la siguiente)
     └── Si el tiempo se agota → auto-envío
     ↓
 Candidato pulsa "Finalizar" → POST /api/exam/submit
@@ -831,11 +854,13 @@ Para bases de datos **ya existentes** creadas con una versión anterior. Son adi
 | Script | Qué hace |
 |--------|----------|
 | [`add_user_link_columns.sql`](scripts/add_user_link_columns.sql) | Añade `Users.Username` con índice único filtrado, `ExamTokens.UserId` y `ExamResults.UserId` con sus FK (`ON DELETE SET NULL`) e índices |
+| [`add_integrity_columns.sql`](scripts/add_integrity_columns.sql) | Añade `ExamSessions.ShuffleSeed` e `ExamSessions.IntegrityLimitReached`, y crea `ExamIntegrityEvents` con su FK en cascada. Las sesiones existentes quedan sin semilla: conservan el orden de la prueba y constan como anteriores al registro |
 | [`add_category_ai_generation_flag.sql`](scripts/add_category_ai_generation_flag.sql) | Añade `Categories.AllowsAiGeneration` con default `1` y marca la categoría `iECS` como no apta para generación por IA |
 
 ```bash
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_link_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_category_ai_generation_flag.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
 ```
 
 ### 11.3 Limpieza de histórico
@@ -848,11 +873,11 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/reset_exam_history.sql
 
 ---
 
-## 11. Script SQL de preguntas del examen
+## 11. Script SQL de preguntas de la prueba
 
 ### Archivo: `scripts/seed_questions_examen.sql`
 
-Inserta las **89 preguntas** del examen de competencias técnicas (Examen competencias v3.pdf) directamente en `TechEvalDb`.
+Inserta las **89 preguntas** de la prueba de competencias técnicas (Examen competencias v3.pdf) directamente en `TechEvalDb`.
 
 #### Resumen de contenido
 
@@ -892,6 +917,12 @@ El script añade automáticamente (si no existen):
 #### Notas sobre las preguntas abiertas
 
 Las preguntas de tipo `OpenEnded` (`Type = 2`) no tienen respuestas en la tabla `Answers`; se evalúan manualmente. El campo `SampleAnswer` de la tabla `Questions` contiene la respuesta modelo usada como guía de corrección.
+
+#### Las opciones se presentan en orden aleatorio
+
+Cada candidato ve las opciones de una pregunta de test en un orden propio de su sesión. `Answers.Order` solo fija el orden en el banco y en la administración.
+
+> **Aviso para quien escribe preguntas.** Una opción que depende de su posición, como «Todas las anteriores» o «Ninguna de las anteriores», deja de tener sentido cuando cambia de sitio. Reescríbela con su contenido explícito, por ejemplo «WHERE, HAVING y GROUP BY». Los guiones de preguntas del repositorio no tienen ninguna opción así.
 
 ---
 
@@ -946,7 +977,7 @@ dotnet test
 | `QuestionService.GetByIdAsync_NonExisting_ReturnsNull` | No 404 expuesto |
 | `QuestionService.DeleteAsync_ExistingQuestion_SetsInactive` | Soft delete correcto |
 | `ExamService.GenerateAsync_NotEnoughQuestions_ThrowsException` | Validación de preguntas disponibles |
-| `ExamService.CreateAsync_AllQuestionsExist_CreatesExam` | Creación manual de examen |
+| `ExamService.CreateAsync_AllQuestionsExist_CreatesExam` | Creación manual de una prueba |
 
 ### Áreas sin cobertura automatizada
 
@@ -965,7 +996,7 @@ var context = new AppDbContext(options);
 
 ## 14. Seguridad
 
-### Tokens de examen
+### Tokens de acceso a la prueba
 
 - Generados con `RandomNumberGenerator.GetBytes(48)` → 64 chars Base64 URL-safe
 - **Un solo uso**: al iniciar la sesión `IsUsed = true`
@@ -1000,6 +1031,19 @@ El aislamiento entre alumnos sí está garantizado: los endpoints del portal res
 - `validate` devuelve un JWT de alumno, de modo que el resto de la sesión queda asociada a un usuario real
 - Rate limiting recomendado en producción (añadir `AspNetCoreRateLimit`)
 
+### Integridad de la prueba: lo que cubre y lo que no
+
+El sistema aplica tres medidas: un orden propio en cada sesión, una marca de agua con la identidad del candidato y un registro de actividad (salidas de la página y pegados en respuestas abiertas). El registro se muestra al corrector y **no decide nada**: no puntúa, no suspende y el candidato no lo ve.
+
+Lo que **no** cubre:
+
+- Una página web no puede impedir una captura de pantalla, una foto con el móvil ni una consulta desde otro dispositivo.
+- La prueba completa llega al navegador en un solo JSON al empezar, visible en las herramientas de desarrollo.
+- Un candidato con esas herramientas puede bloquear el envío de las señales o quitar la marca de agua. **La ausencia de señales no prueba nada.**
+- Salir de la página tiene causas legítimas: una notificación, un segundo monitor, una herramienta de accesibilidad.
+
+La duración de cada ausencia la mide el navegador del candidato, y la pantalla del corrector lo indica. El registro es un tratamiento de datos personales: la pantalla de bienvenida informa al candidato antes de empezar.
+
 ### CORS
 
 - Configurado explícitamente para el origen del frontend en producción (`AllowedOrigins`)
@@ -1016,7 +1060,7 @@ El aislamiento entre alumnos sí está garantizado: los endpoints del portal res
 ✓ Migrar el hash de contraseñas de SHA-256 a BCrypt o Argon2
 ✓ Usar HTTPS (certificado SSL/TLS)
 ✓ Configurar rate limiting en /api/exam/*
-✓ Añadir reCAPTCHA al formulario de examen si es necesario
+✓ Añadir reCAPTCHA al formulario de la prueba si es necesario
 ✓ Rotar la contraseña de SQL Server
 ✓ Usar Azure Key Vault o similar para secretos
 ```
@@ -1034,10 +1078,10 @@ El directorio [`openspec/`](openspec/) mantiene la especificación viva del sist
 | `project-architecture` | Estructura de la solución y reglas de dependencia entre capas |
 | `authentication` | Login, roles, expiración de JWT, hash de contraseñas, aprovisionamiento de cuentas |
 | `question-bank` | Banco de preguntas, categorías, dificultades y tipos |
-| `ai-question-generation` | Jobs de generación, revisión, aprobación y calidad del modelo |
 | `exam-management` | Creación manual y generación automática de pruebas |
 | `exam-delivery` | Invitaciones, tokens de un solo uso y envío por email |
-| `exam-taking` | Resolución de la prueba, temporizador y auto-guardado |
+| `exam-taking` | Resolución de la prueba, temporizador, auto-guardado y orden propio de cada sesión |
+| `exam-integrity` | Registro de salidas de la página y pegados, y su presentación al corrector |
 | `exam-results` | Corrección, cálculo de nota y consulta de resultados |
 | `candidate-experience` | Experiencia del candidato de principio a fin |
 | `student-portal` | Pruebas pendientes y realizadas del alumno autenticado |
@@ -1068,7 +1112,7 @@ Clean Architecture invierte las dependencias: Infrastructure depende de Domain, 
 
 ### ¿Por qué Blazor WebAssembly en lugar de Blazor Server?
 
-Blazor WASM se ejecuta en el cliente → sin estado en servidor → escala trivialmente. El examen del candidato funciona aunque la conexión sea inestable (las respuestas se guardan localmente hasta el envío). Blazor Server requeriría SignalR y conexión persistente, lo que es un riesgo para candidatos con mala conexión.
+Blazor WASM se ejecuta en el cliente → sin estado en servidor → escala trivialmente. La prueba del candidato funciona aunque la conexión sea inestable (las respuestas se guardan localmente hasta el envío). Blazor Server requeriría SignalR y conexión persistente, lo que es un riesgo para candidatos con mala conexión.
 
 ### ¿Por qué crear la cuenta del alumno al abrir la invitación y no antes?
 
@@ -1110,7 +1154,7 @@ El `IEmailService` desacopla la implementación. La `SmtpEmailService` funciona 
 | 1.3.0 | 2026-08-18 | Parámetros de calidad del modelo (temperatura, penalización de repetición, contexto) |
 | 1.4.0 | 2026-08-27 | Modelo de generación `qwen2.5-coder:14b` y flag `AllowsAiGeneration` por categoría |
 | 1.5.0 | 2026-09-09 | **Retirada de la generación con IA local.** Fuera el modelo, su cola, su bandeja de revisión y sus tablas |
-| 1.6.0 | 2026-09-16 | Reanudación del examen, envío idempotente, edición de preguntas ya respondidas y escritura transaccional |
+| 1.6.0 | 2026-09-16 | Reanudación de la prueba, envío idempotente, edición de preguntas ya respondidas y escritura transaccional |
 | 1.7.0 | 2026-09-16 | Propiedad de la sesión, plazo validado en servidor, cuentas de alumno sin contraseña adivinable y hash PBKDF2 |
 | 1.8.0 | 2026-09-16 | Secretos fuera del repositorio, errores traducidos a HTTP en un solo sitio y límite de ritmo en el login |
 | 1.9.0 | 2026-09-16 | La respuesta guarda lo que se le preguntó al candidato; hora en UTC; autoguardado mientras se escribe |

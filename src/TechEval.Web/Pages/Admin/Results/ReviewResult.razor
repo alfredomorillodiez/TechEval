@@ -59,6 +59,8 @@
             </div>
         </div>
 
+        <IntegrityPanel Report="_integrity" />
+
         <div class="alert alert-info d-flex justify-content-between align-items-center">
             <div>
                 <i class="bi bi-info-circle me-2"></i>
@@ -92,6 +94,15 @@
                                             @answer.OpenAnswer
                                         }
                                     </div>
+                                    @if (PastesOf(answer.QuestionId) is { } pastes)
+                                    {
+                                        @* Junto a la respuesta, que es donde el dato sirve para decidir. *@
+                                        <p class="small text-warning-emphasis mt-1 mb-0">
+                                            <i class="bi bi-clipboard me-1"></i>
+                                            Pegó texto @(pastes.Count == 1 ? "1 vez" : $"{pastes.Count} veces"),
+                                            @pastes.TotalChars caracteres en total.
+                                        </p>
+                                    }
                                 </div>
                                 <div class="col-md-6">
                                     <p class="text-muted small mb-1">
@@ -183,7 +194,11 @@
     private bool _loading = true, _saving, _conflict;
     private string? _error;
     private PendingReviewDetailDto? _detail;
+    private IntegrityReportDto? _integrity;
     private readonly Dictionary<int, AnswerInput> _inputs = new();
+
+    private PastesByQuestionDto? PastesOf(int questionId)
+        => _integrity?.PastesByQuestion.FirstOrDefault(p => p.QuestionId == questionId);
 
     private class AnswerInput
     {
@@ -200,7 +215,10 @@
             return;
         }
 
-        _detail = await Api.GetReviewDetailAsync(Id);
+        var detail = Api.GetReviewDetailAsync(Id);
+        var integrity = Api.GetIntegrityReportAsync(Id);
+        _detail = await detail;
+        _integrity = await integrity;
         if (_detail is not null)
         {
             foreach (var a in _detail.Answers)

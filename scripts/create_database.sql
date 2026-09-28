@@ -37,6 +37,7 @@ GO
 -- ============================================================
 -- Eliminar tablas (orden inverso de dependencias)
 -- ============================================================
+IF OBJECT_ID('dbo.ExamIntegrityEvents', 'U') IS NOT NULL DROP TABLE dbo.ExamIntegrityEvents;
 IF OBJECT_ID('dbo.ExamResults',   'U') IS NOT NULL DROP TABLE dbo.ExamResults;
 IF OBJECT_ID('dbo.UserAnswers',   'U') IS NOT NULL DROP TABLE dbo.UserAnswers;
 IF OBJECT_ID('dbo.ExamSessions',  'U') IS NOT NULL DROP TABLE dbo.ExamSessions;
@@ -210,6 +211,8 @@ CREATE TABLE dbo.ExamSessions (
     StartedAt   DATETIME2 NOT NULL CONSTRAINT DF_ExamSessions_StartedAt DEFAULT GETUTCDATE(),
     CompletedAt DATETIME2 NULL,
     Status      INT       NOT NULL CONSTRAINT DF_ExamSessions_Status DEFAULT 1,
+    ShuffleSeed INT       NULL,       -- semilla del orden de la sesión; NULL = anterior al cambio
+    IntegrityLimitReached BIT NOT NULL CONSTRAINT DF_ExamSessions_IntegrityLimitReached DEFAULT 0,
 
     CONSTRAINT PK_ExamSessions PRIMARY KEY (Id),
     CONSTRAINT FK_ExamSessions_ExamTokens FOREIGN KEY (ExamTokenId)
@@ -292,6 +295,28 @@ CREATE INDEX IX_ExamResults_CompletedAt          ON dbo.ExamResults (CompletedAt
 CREATE INDEX IX_ExamResults_UserId               ON dbo.ExamResults (UserId);
 CREATE INDEX IX_ExamResults_ReviewedByUserId     ON dbo.ExamResults (ReviewedByUserId);
 CREATE INDEX IX_ExamResults_Status               ON dbo.ExamResults (Status);
+GO
+
+-- ============================================================
+-- 11. ExamIntegrityEvents  (señales de actividad durante la prueba)
+--   Type: 1=PageLeft | 2=PageReturned | 3=Paste
+-- ============================================================
+CREATE TABLE dbo.ExamIntegrityEvents (
+    Id            INT       NOT NULL IDENTITY(1,1),
+    ExamSessionId INT       NOT NULL,
+    Type          INT       NOT NULL,
+    QuestionId    INT       NULL,       -- pregunta en pantalla; sin FK, es solo un dato
+    OccurredAt    DATETIME2 NOT NULL CONSTRAINT DF_ExamIntegrityEvents_OccurredAt DEFAULT GETUTCDATE(),
+    AwaySeconds   INT       NULL,       -- solo PageReturned, medido por el navegador
+    PastedChars   INT       NULL,       -- solo Paste; el texto no se guarda
+
+    CONSTRAINT PK_ExamIntegrityEvents PRIMARY KEY (Id),
+    CONSTRAINT FK_ExamIntegrityEvents_ExamSessions FOREIGN KEY (ExamSessionId)
+        REFERENCES dbo.ExamSessions (Id) ON DELETE CASCADE ON UPDATE NO ACTION
+);
+GO
+
+CREATE INDEX IX_ExamIntegrityEvents_ExamSessionId ON dbo.ExamIntegrityEvents (ExamSessionId);
 GO
 
 -- ============================================================

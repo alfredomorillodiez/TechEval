@@ -42,7 +42,7 @@ public class ExamsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
-    /// <summary>Genera un examen automáticamente con preguntas aleatorias</summary>
+    /// <summary>Genera una prueba automáticamente con preguntas aleatorias</summary>
     [HttpPost("generate")]
     public async Task<IActionResult> Generate([FromBody] GenerateExamDto dto, CancellationToken ct)
     {
@@ -65,16 +65,16 @@ public class ExamsController : ControllerBase
         return ok ? NoContent() : NotFound();
     }
 
-    /// <summary>Envía el examen por email al candidato generando un token único</summary>
+    /// <summary>Envía la prueba por email al candidato generando un token único</summary>
     [HttpPost("send")]
     public async Task<IActionResult> SendExam([FromBody] SendExamDto dto, CancellationToken ct)
     {
         var baseUrl = _configuration["FrontendBaseUrl"] ?? $"{Request.Scheme}://{Request.Host}";
         var token = await _tokenService.SendExamAsync(dto, baseUrl, ct);
-        return Ok(new { token, message = $"Examen enviado correctamente a {dto.CandidateEmail}" });
+        return Ok(new { token, message = $"Prueba enviada correctamente a {dto.CandidateEmail}" });
     }
 
-    /// <summary>Envía el mismo examen a múltiples candidatos en una sola operación</summary>
+    /// <summary>Envía la misma prueba a múltiples candidatos en una sola operación</summary>
     [HttpPost("send-bulk")]
     public async Task<IActionResult> SendExamBulk([FromBody] BulkSendExamDto dto, CancellationToken ct)
     {

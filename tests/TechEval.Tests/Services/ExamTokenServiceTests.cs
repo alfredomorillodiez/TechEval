@@ -156,7 +156,7 @@ public class ExamTokenServiceTests
         var result = await _sut.ValidateTokenAsync("tok");
 
         result.IsValid.Should().BeFalse();
-        result.Error.Should().Be("Este examen ya ha sido completado.");
+        result.Error.Should().Be("Esta prueba ya ha sido completada.");
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public class ExamTokenServiceTests
         var result = await _sut.ValidateTokenAsync("tok");
 
         result.IsValid.Should().BeFalse();
-        result.Error.Should().Be("Este examen ya ha sido completado.");
+        result.Error.Should().Be("Esta prueba ya ha sido completada.");
     }
 
     [Fact]

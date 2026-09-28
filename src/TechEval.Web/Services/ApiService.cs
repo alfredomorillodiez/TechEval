@@ -138,6 +138,32 @@ public class ApiService
         await _http.PostAsJsonAsync($"api/exam/answer/{sessionId}", dto, JsonOptions);
     }
 
+    /// <summary>
+    /// Envía una señal de integridad. Devuelve true cuando no hay que reintentarla: llegó, o
+    /// el servidor la rechazó por una razón que un reintento no cambia (400, 403, 409).
+    /// Devuelve false ante un fallo de red, un 429 o un error del servidor. Nunca lanza:
+    /// una señal perdida no debe interrumpir la prueba.
+    /// </summary>
+    public async Task<bool> RecordIntegrityEventAsync(int sessionId, IntegrityEventInputDto dto)
+    {
+        try
+        {
+            var response = await _http.PostAsJsonAsync($"api/exam/integrity/{sessionId}", dto, JsonOptions);
+            return response.IsSuccessStatusCode
+                || response.StatusCode is System.Net.HttpStatusCode.BadRequest
+                    or System.Net.HttpStatusCode.Forbidden
+                    or System.Net.HttpStatusCode.Conflict;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "No se pudo enviar una señal de integridad; se reintentará.");
+            return false;
+        }
+    }
+
+    public Task<IntegrityReportDto?> GetIntegrityReportAsync(int resultId)
+        => GetAsync<IntegrityReportDto>($"api/results/{resultId}/integrity");
+
     public Task<ExamSubmissionReceiptDto?> SubmitExamAsync(SubmitExamDto dto)
         => PostAsync<SubmitExamDto, ExamSubmissionReceiptDto>("api/exam/submit", dto);
 

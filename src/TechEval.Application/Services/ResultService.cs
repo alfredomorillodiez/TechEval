@@ -55,7 +55,7 @@ public class ResultService : IResultService
             .Select(g => g.OrderByDescending(ua => ua.IsCorrect.HasValue).ThenByDescending(ua => ua.Id).First())
             .ToList() ?? new List<UserAnswer>();
 
-        var answerReviews = deduped.Select(ua =>
+        var answerReviews = SessionOrder.ByExamOrder(deduped, result.Exam).Select(ua =>
         {
             var correct = ua.Question?.Answers.FirstOrDefault(a => a.IsCorrect);
             // Lo que se le preguntó al candidato, no lo que la pregunta dice hoy. Se

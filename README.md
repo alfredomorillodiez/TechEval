@@ -16,10 +16,20 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 - **Banco de preguntas** — tipo test (4 opciones) y respuesta abierta, con categorías y niveles de dificultad
 - **Generación de exámenes** — manual o automática con preguntas aleatorias por categoría y dificultad
 - **Envío por email** — enlace único por candidato con expiración configurable; envío masivo a múltiples candidatos desde CSV o lista manual
-- **Examen del candidato** — temporizador, auto-guardado de respuestas y envío automático al agotar el tiempo
+- **Prueba del candidato** — temporizador, auto-guardado de respuestas y envío automático al agotar el tiempo
 - **Reanudación de la prueba** — una recarga, un cierre de pestaña o una pérdida de red no expulsan al candidato: vuelve a sus preguntas con las respuestas que ya tenía y con el tiempo restante que calcula el servidor. La invitación caducada no corta una prueba ya empezada
 - **Corrección automática** — para preguntas tipo test; preguntas abiertas pendientes de revisión manual
 - **Dashboard de resultados** — historial, estadísticas y detalle por candidato, con filtros combinables
+
+### Integridad de la prueba
+
+- **Orden propio de cada sesión** — cada candidato ve las preguntas, y las opciones de cada pregunta de test, en un orden distinto. El orden es estable: al recargar, el candidato ve el mismo. Los resultados y la corrección siguen mostrando el orden de la prueba
+- **Marca de agua** — durante la prueba, el nombre y el correo del candidato aparecen en diagonal sobre las preguntas. Una captura de pantalla identifica a su autor
+- **Registro de actividad** — el sistema registra cada salida de la página (cambio de pestaña o de ventana), con su duración, y cada pegado en una respuesta abierta, con su número de caracteres. El texto pegado no se guarda
+- **Aviso previo** — la pantalla de bienvenida informa al candidato de todo lo anterior antes de empezar
+- **Solo informa** — el corrector ve el registro en el detalle del resultado y en la pantalla de corrección. Nada en el sistema lo usa para puntuar ni para suspender, y el candidato no lo ve
+
+> **Lo que estas medidas no cubren.** Una página web no puede impedir una captura de pantalla, una foto con el móvil ni la consulta a un buscador o a una IA desde otro dispositivo. La prueba completa llega al navegador en un solo JSON, visible en las herramientas de desarrollo. Un candidato con esas herramientas también puede bloquear el envío de las señales o quitar la marca de agua. **La ausencia de señales no prueba nada.**
 
 ### Corrección manual de preguntas abiertas
 
@@ -136,7 +146,12 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/remove_ai_generation.sql
 
 # Copia de lo preguntado en UserAnswers (D7)
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_answer_snapshot_columns.sql
+
+# Integridad de la prueba: ExamSessions.ShuffleSeed/IntegrityLimitReached y la tabla ExamIntegrityEvents
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
 ```
+
+> Las sesiones que ya existían quedan sin semilla. Conservan el orden de la prueba, y el corrector las ve como anteriores al registro de actividad, no como sesiones sin señales.
 
 Una prueba de la batería compara el modelo con `create_database.sql` y falla si dejan de coincidir, para que una columna nueva no se quede fuera del guion.
 
@@ -175,7 +190,7 @@ Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`ap
 
 ### Límite de ritmo
 
-`POST /api/auth/login` admite 10 peticiones por minuto y dirección de origen. `GET /api/exam/validate/{token}` admite 60. Al superarlo, la API responde `429` con una cabecera `Retry-After`.
+`POST /api/auth/login` admite 10 peticiones por minuto y dirección de origen. `GET /api/exam/validate/{token}` admite 60. `POST /api/exam/integrity/{sessionId}` admite 120. Al superarlo, la API responde `429` con una cabecera `Retry-After`.
 
 El motivo es el coste: verificar una contraseña cuesta cientos de milisegundos de CPU desde que el hash es PBKDF2, así que un volumen moderado de intentos deja al servidor sin hilos aunque ninguno acierte.
 
@@ -249,7 +264,7 @@ TechEval/
 | `/admin/results/pending` | Admin | Cola de resultados pendientes de corrección |
 | `/admin/results/{id}/review` | Admin | Corrección de las preguntas abiertas de un resultado |
 | `/portal` | Alumno | Pruebas pendientes y realizadas del alumno |
-| `/exam/{token}` · `/prueba/{token}` | Público | Apertura de la invitación y resolución del examen |
+| `/exam/{token}` · `/prueba/{token}` | Público | Apertura de la invitación y resolución de la prueba |
 
 ---
 
@@ -266,11 +281,13 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | `POST` | `/api/exams/generate` | Admin |
 | `POST` | `/api/exams/send` · `/api/exams/send-bulk` | Admin |
 | `GET` | `/api/results` · `/api/results/{id}` · `/api/results/exam/{examId}` · `/api/results/dashboard` | Admin |
+| `GET` | `/api/results/{id}/integrity` | Admin — actividad del candidato durante la prueba |
 | `GET` | `/api/review/pending` · `/api/review/{resultId}` | Admin |
 | `POST` | `/api/review/{resultId}` | Admin |
 | `GET` | `/api/student/pending` · `/api/student/completed` | Alumno |
 | `GET` | `/api/exam/validate/{token}` | Público — devuelve el JWT de alumno |
 | `POST` | `/api/exam/start/{token}` · `/api/exam/answer/{sessionId}` · `/api/exam/submit` | Público — token del enlace |
+| `POST` | `/api/exam/integrity/{sessionId}` | Alumno — solo sobre su propia sesión en curso |
 
 ---
 
@@ -302,7 +319,7 @@ Estado implicado: `ExamResultStatus` (`PendingReview` · `Reviewed`). Cada respu
 
 El directorio [`openspec/`](openspec/) mantiene la especificación viva del sistema, dividida en 13 capacidades:
 
-`admin-console` · `ai-question-generation` · `authentication` · `candidate-experience` · `deployment-ops` · `exam-delivery` · `exam-management` · `exam-results` · `exam-taking` · `open-question-review` · `project-architecture` · `question-bank` · `student-portal`
+`admin-console` · `authentication` · `candidate-experience` · `deployment-ops` · `exam-delivery` · `exam-integrity` · `exam-management` · `exam-results` · `exam-taking` · `open-question-review` · `project-architecture` · `question-bank` · `student-portal`
 
 > `ai-question-generation` describe una capacidad ya retirada del código. Su spec sigue en `openspec/specs/` a la espera de archivarse.
 

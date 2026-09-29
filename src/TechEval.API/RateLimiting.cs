@@ -29,6 +29,9 @@ public static class RateLimiting
     /// <summary>Señales de integridad durante la prueba: frecuentes y sin coste, pero sin techo propio.</summary>
     public const string IntegrityPolicy = "exam-integrity";
 
+    /// <summary>Enlace para fijar la contraseña: público, de uso legítimo muy escaso.</summary>
+    public const string PasswordSetupPolicy = "password-setup";
+
     public const string ProblemContentType = "application/problem+json";
 
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
@@ -43,6 +46,10 @@ public static class RateLimiting
     // rechazo como cualquier fallo: guarda la señal y la reintenta con la siguiente.
     private const int IntegrityPermitsPerWindow = 120;
 
+    // Como el login: fijar la contraseña calcula un PBKDF2, y comprobar un enlace es una
+    // adivinanza gratis si no tiene techo. Nadie legítimo pasa de un par de intentos.
+    private const int PasswordSetupPermitsPerWindow = 10;
+
     public static IServiceCollection AddTechEvalRateLimiting(this IServiceCollection services)
     {
         services.AddRateLimiter(options =>
@@ -50,6 +57,7 @@ public static class RateLimiting
             options.AddPolicy(LoginPolicy, http => FixedWindowFor(http, LoginPermitsPerWindow));
             options.AddPolicy(ExamLinkPolicy, http => FixedWindowFor(http, ExamLinkPermitsPerWindow));
             options.AddPolicy(IntegrityPolicy, http => FixedWindowFor(http, IntegrityPermitsPerWindow));
+            options.AddPolicy(PasswordSetupPolicy, http => FixedWindowFor(http, PasswordSetupPermitsPerWindow));
 
             options.OnRejected = async (context, ct) =>
             {

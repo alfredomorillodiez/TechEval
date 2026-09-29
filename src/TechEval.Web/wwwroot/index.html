@@ -4,6 +4,9 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- La ruta de /fijar-contrasena/{token} lleva el token del enlace: que no salga en la
+         cabecera Referer de ninguna petición a otro origen. -->
+    <meta name="referrer" content="no-referrer" />
     <title>TechEval Platform</title>
     <base href="/" />
 

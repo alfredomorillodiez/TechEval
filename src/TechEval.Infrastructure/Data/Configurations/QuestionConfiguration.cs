@@ -60,8 +60,28 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Username).HasMaxLength(200);
         builder.Property(u => u.Name).IsRequired().HasMaxLength(200);
         builder.Property(u => u.PasswordHash).IsRequired();
+        builder.Property(u => u.Role).IsRequired();
+        builder.Property(u => u.SecurityStamp).IsRequired();
         builder.HasIndex(u => u.Email).IsUnique();
         builder.HasIndex(u => u.Username).IsUnique().HasFilter("[Username] IS NOT NULL");
+        builder.ToTable(t => t.HasCheckConstraint("CK_Users_Role", "[Role] IN (1, 2, 3)"));
+    }
+}
+
+public class PasswordSetupTokenConfiguration : IEntityTypeConfiguration<PasswordSetupToken>
+{
+    public void Configure(EntityTypeBuilder<PasswordSetupToken> builder)
+    {
+        builder.ToTable("PasswordSetupTokens");
+        builder.HasKey(t => t.Id);
+        builder.Property(t => t.TokenHash).IsRequired().HasMaxLength(64).IsFixedLength();
+        builder.HasIndex(t => t.TokenHash).IsUnique();
+        builder.HasIndex(t => t.UserId);
+
+        builder.HasOne(t => t.User)
+            .WithMany()
+            .HasForeignKey(t => t.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

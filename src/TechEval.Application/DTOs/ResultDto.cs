@@ -45,6 +45,6 @@ public record DashboardStatsDto(
     int PendingReviewCount,
     List<ExamResultSummaryDto> RecentResults);
 
-public record AuthResultDto(string Token, string Name, string Email, bool IsAdmin);
+public record AuthResultDto(string Token, string Name, string Email, UserRole Role);
 
 public record LoginDto(string Email, string Password);

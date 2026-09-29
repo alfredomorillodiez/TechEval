@@ -36,8 +36,13 @@ TechEval es una plataforma de evaluación técnica que permite:
 
 | Rol | Claim JWT | Alcance |
 |-----|-----------|---------|
-| `Admin` | `Role = "Admin"` | Consola completa: categorías, preguntas, pruebas, envíos y resultados de todos los candidatos |
+| `Admin` | `Role = "Admin"` | Consola completa: categorías, preguntas, pruebas, envíos, resultados de todos los candidatos y gestión de usuarios |
+| `Evaluador` | `Role = "Evaluador"` | Corrección de pruebas. En esta versión solo ve una página de bienvenida sin datos; la corrección a ciegas de sus pruebas asignadas llega con `evaluator-review` |
 | `Alumno` | `Role = "Alumno"` | Portal propio: sus pruebas pendientes y sus resultados. No accede a nada de otro alumno |
+
+Cada usuario tiene **un solo rol**, guardado en `Users.Role`. La matriz de permisos vive en `src/TechEval.API/Authorization/Policies.cs`: los controladores nombran una política (`Gestion`, `Alumno`) y no una lista de roles.
+
+El JWT lleva además el claim `stamp`, con el `SecurityStamp` del usuario. En cada petición autenticada, `SecurityStampValidator` comprueba que el usuario existe, está activo, conserva el rol del token y conserva el sello. Si algo falla, la API responde `401`. El sello cambia al cambiar el rol, al desactivar la cuenta, al restablecer el acceso y al fijar una contraseña: así esos cambios revocan los tokens en el acto, sin esperar a que caduquen.
 
 ---
 
@@ -50,7 +55,7 @@ TechEval es una plataforma de evaluación técnica que permite:
 | Frontend | Blazor WebAssembly | 9.0.0 |
 | ORM | Entity Framework Core | 9.0.0 |
 | Base de datos | SQL Server | 2022 |
-| Autenticación | JWT Bearer (roles `Admin` / `Alumno`) | 9.0.0 |
+| Autenticación | JWT Bearer (roles `Admin` / `Evaluador` / `Alumno`, sello de seguridad) | 9.0.0 |
 | Documentación API | Swashbuckle (Swagger) | 7.2.0 |
 | Logging | Serilog (consola + fichero diario) | 9.0.0 |
 | Email | SMTP (`System.Net.Mail`) | — |
@@ -109,9 +114,18 @@ Users
 ├── Email (UNIQUE)
 ├── Username (UNIQUE filtrado WHERE Username IS NOT NULL)
 ├── Name
-├── PasswordHash (SHA-256)
-├── IsAdmin          -- true = Admin, false = Alumno
+├── PasswordHash (PBKDF2; vacío = sin contraseña utilizable)
+├── Role             -- 1 = Admin, 2 = Evaluador, 3 = Alumno (CHECK)
+├── SecurityStamp    -- viaja en el JWT; cambiarlo revoca los tokens del usuario
 └── IsActive
+
+PasswordSetupTokens  -- enlaces de un solo uso para fijar la contraseña
+├── Id (PK)
+├── UserId (FK → Users, CASCADE)
+├── TokenHash (UNIQUE)   -- SHA-256 del token; el token no se guarda
+├── CreatedAt
+├── ExpiresAt            -- emisión + 48 h
+└── UsedAt
 
 Categories
 ├── Id (PK)
@@ -385,7 +399,9 @@ Swagger publica la referencia interactiva en `/swagger` (solo en entorno de desa
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| POST | `/api/auth/login` | No | Login de admin o alumno; acepta email **o** username |
+| POST | `/api/auth/login` | No | Login de cualquier rol; acepta email **o** username |
+| GET | `/api/auth/password-setup/{token}` | No | Nombre y email del dueño de un enlace vigente. `404` genérico si el enlace no vale, por el motivo que sea |
+| POST | `/api/auth/password-setup` | No | `{ token, password }`. Fija la contraseña (12 a 128 caracteres), marca el enlace como usado y cambia el sello. `204`; no inicia sesión |
 
 **Body de `/api/auth/login`:**
 ```json
@@ -394,8 +410,23 @@ Swagger publica la referencia interactiva en `/swagger` (solo en entorno de desa
 
 **Respuesta (`AuthResultDto`):**
 ```json
-{ "token": "eyJhbGciOi…", "name": "Administrador", "email": "admin@techeval.com", "isAdmin": true }
+{ "token": "eyJhbGciOi…", "name": "Administrador", "email": "admin@techeval.com", "role": "Admin" }
 ```
+
+### Usuarios
+
+Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mismo y las que dejarían cero administradores activos responden `409`.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/api/users?role=&active=&q=` | Listado con filtros por rol, estado y texto. Nunca expone hash, sello ni enlaces |
+| POST | `/api/users` | `{ name, email, role }`, rol `Admin` o `Evaluador`. `201` con `{ user, emailSent }`; `409` si el email existe |
+| PUT | `/api/users/{id}/role` | `{ role }`. Permitido: Admin ↔ Evaluador y Alumno → Admin/Evaluador. Nadie pasa a Alumno (`400`) |
+| POST | `/api/users/{id}/deactivate` | Desactiva y cambia el sello |
+| POST | `/api/users/{id}/activate` | Reactiva. Los tokens anteriores a la desactivación siguen sin valer |
+| POST | `/api/users/{id}/reset-access` | Vacía la contraseña, cambia el sello, invalida los enlaces anteriores y envía uno nuevo. `400` para un alumno |
+
+`emailSent` es `false` si el correo no salió (la operación queda hecha) y `null` si la operación no envía correo.
 
 ### Categorías
 
@@ -595,13 +626,14 @@ No hay alta manual de alumnos. La cuenta se crea sola la primera vez que se abre
 ```
 GET /api/exam/validate/{token}
     ├── ¿Existe un User con ese CandidateEmail?
-    │      Sí → se reutiliza (no se modifica ni el Name ni el PasswordHash)
+    │      Sí, alumno activo → se reutiliza (no se modifica ni el Name ni el PasswordHash)
+    │      Sí, de otro rol o desactivado → "Token no válido.", sin JWT
     │      No → se crea:
     │             Email        = CandidateEmail
     │             Username     = parte local del email (antes de la @)
     │             Name         = CandidateName de la invitación
-    │             PasswordHash = SHA-256(username)
-    │             IsAdmin      = false
+    │             PasswordHash = vacío (sin contraseña utilizable)
+    │             Role         = Alumno
     │             IsActive     = true
     ├── ExamToken.UserId ← Id del usuario
     └── Respuesta con authToken: JWT firmado con rol Alumno (auto-login)
@@ -614,9 +646,20 @@ Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`. La cu
 | Situación | Comportamiento |
 |-----------|----------------|
 | Login de admin | `POST /api/auth/login` → JWT rol `Admin` → redirección a `/admin`, sidebar completo |
+| Login de evaluador | `POST /api/auth/login` → JWT rol `Evaluador` → redirección a `/evaluacion`, sidebar solo con «Inicio» |
 | Login de alumno | `POST /api/auth/login` (email o username) → JWT rol `Alumno` → redirección a `/portal`, barra superior simple |
 | Apertura del enlace de invitación | `authToken` devuelto por `validate` → sesión iniciada sin pedir credenciales |
-| Sesión previa en `localStorage` | `AuthStateService.InitializeAsync` la restaura y redirige según el rol |
+| Sesión previa en `localStorage` | `AuthStateService.InitializeAsync` la restaura y redirige según el rol (`auth_role`). Una sesión de la versión anterior, sin rol, se borra |
+| Página de otro rol | Cada página comprueba el rol y, si no es el suyo, lleva a la página de inicio del rol de la sesión |
+| La API responde `401` con sesión abierta | `SessionExpiryHandler` avisa a `MainLayout`, que cierra la sesión: admin y evaluador van a `/login?motivo=sesion`; el alumno, a `/sesion-no-valida`, que le pide volver a abrir su enlace |
+
+### Gestión de usuarios (`/admin/usuarios`)
+
+El administrador da de alta administradores y evaluadores, cambia el rol, desactiva, reactiva y restablece el acceso. Los alumnos no se dan de alta aquí: nacen al abrir una invitación.
+
+- **Sin contraseñas en la consola.** El alta y el restablecimiento envían un enlace a `/fijar-contrasena/{token}` que caduca a las 48 horas y vale una vez. Emitir un enlace nuevo invalida los anteriores del mismo usuario.
+- **Tres protecciones.** Nadie se cambia el rol, se desactiva ni se restablece el acceso a sí mismo. Y siempre queda un administrador activo: las operaciones que retiran un administrador toman un bloqueo de aplicación de SQL Server (`sp_getapplock`), así que dos administradores que se desactivan a la vez quedan en fila y el segundo recibe `409`.
+- **Invitaciones solo para alumnos.** Enviar una prueba al correo de un administrador o de un evaluador responde `400`; en el envío masivo, falla solo ese candidato.
 
 ### Contenido del portal (`/portal`)
 
@@ -818,6 +861,8 @@ ExamTokens ─────────── FK → Exams, Users (SET NULL)
 ExamSessions ───────── FK → ExamTokens                (CASCADE delete, UNIQUE)
 UserAnswers ────────── FK → ExamSessions (CASCADE), Questions, Answers
 ExamResults ────────── FK → ExamSessions (CASCADE, UNIQUE), Exams, Users (SET NULL)
+ExamIntegrityEvents ── FK → ExamSessions               (CASCADE delete)
+PasswordSetupTokens ── FK → Users                      (CASCADE delete)
 ```
 
 #### Contraseña de administrador
@@ -856,12 +901,16 @@ Para bases de datos **ya existentes** creadas con una versión anterior. Son adi
 | [`add_user_link_columns.sql`](scripts/add_user_link_columns.sql) | Añade `Users.Username` con índice único filtrado, `ExamTokens.UserId` y `ExamResults.UserId` con sus FK (`ON DELETE SET NULL`) e índices |
 | [`add_integrity_columns.sql`](scripts/add_integrity_columns.sql) | Añade `ExamSessions.ShuffleSeed` e `ExamSessions.IntegrityLimitReached`, y crea `ExamIntegrityEvents` con su FK en cascada. Las sesiones existentes quedan sin semilla: conservan el orden de la prueba y constan como anteriores al registro |
 | [`add_category_ai_generation_flag.sql`](scripts/add_category_ai_generation_flag.sql) | Añade `Categories.AllowsAiGeneration` con default `1` y marca la categoría `iECS` como no apta para generación por IA |
+| [`add_user_roles.sql`](scripts/add_user_roles.sql) | Añade `Users.Role` (rellenado desde `IsAdmin`: 1 → Admin, 0 → Alumno) con su `CHECK`, `Users.SecurityStamp` con un valor propio por fila, y la tabla `PasswordSetupTokens`. Después **quita `Users.IsAdmin`**: el binario anterior ya no arranca contra la base actualizada. La cabecera trae el SQL para volver atrás |
 
 ```bash
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_link_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_category_ai_generation_flag.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
 ```
+
+> **Antes de `add_user_roles.sql`**, comprueba que no hay pruebas en curso: los tokens de la versión anterior no llevan sello y la API los rechaza, así que un candidato a mitad de prueba perdería el guardado hasta volver a abrir su enlace. Despliega cuando `SELECT COUNT(*) FROM dbo.ExamSessions WHERE Status = 1` devuelva `0`.
 
 ### 11.3 Limpieza de histórico
 

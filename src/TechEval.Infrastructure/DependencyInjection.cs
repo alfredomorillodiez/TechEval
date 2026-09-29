@@ -29,12 +29,14 @@ public static class DependencyInjection
         services.AddScoped<IExamRepository, ExamRepository>();
         services.AddScoped<IExamTokenRepository, ExamTokenRepository>();
         services.AddScoped<IExamResultRepository, ExamResultRepository>();
+        services.AddScoped<IAdminCountLock, AdminCountLock>();
 
         // Services
         services.Configure<EmailSettings>(configuration.GetSection("Email"));
         services.Configure<JwtSettings>(configuration.GetSection("Jwt"));
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddScoped<ITokenService, TokenService>();
+        services.AddScoped<SecurityStampValidator>();
 
         return services;
     }

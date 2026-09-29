@@ -1,9 +1,11 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject AuthStateService Auth
+@inject SessionEvents Session
 @inject NavigationManager Nav
 
 <div class="d-flex min-vh-100">
-    @if (Auth.IsAuthenticated && Auth.IsAdmin)
+    @if (Auth.IsAuthenticated && (Auth.IsAdmin || Auth.IsEvaluador))
     {
         <!-- Sidebar -->
         <nav class="bg-dark text-white d-flex flex-column p-3" style="width:250px;min-height:100vh;">
@@ -12,31 +14,47 @@
                 <small class="text-muted">@Auth.UserName</small>
             </div>
             <ul class="nav flex-column gap-1 flex-grow-1">
-                <li class="nav-item">
-                    <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin" Match="NavLinkMatch.All">
-                        <i class="bi bi-speedometer2"></i> Dashboard
-                    </NavLink>
-                </li>
-                <li class="nav-item">
-                    <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/questions" Match="NavLinkMatch.Prefix">
-                        <i class="bi bi-question-circle"></i> Preguntas
-                    </NavLink>
-                </li>
-                <li class="nav-item">
-                    <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/pruebas" Match="NavLinkMatch.Prefix">
-                        <i class="bi bi-file-earmark-text"></i> Pruebas
-                    </NavLink>
-                </li>
-                <li class="nav-item">
-                    <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/results" Match="NavLinkMatch.Prefix">
-                        <i class="bi bi-bar-chart"></i> Resultados
-                    </NavLink>
-                </li>
-                <li class="nav-item">
-                    <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/results/pending" Match="NavLinkMatch.All">
-                        <i class="bi bi-pencil-square"></i> Correcciones
-                    </NavLink>
-                </li>
+                @if (Auth.IsAdmin)
+                {
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin" Match="NavLinkMatch.All">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </NavLink>
+                    </li>
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/questions" Match="NavLinkMatch.Prefix">
+                            <i class="bi bi-question-circle"></i> Preguntas
+                        </NavLink>
+                    </li>
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/pruebas" Match="NavLinkMatch.Prefix">
+                            <i class="bi bi-file-earmark-text"></i> Pruebas
+                        </NavLink>
+                    </li>
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/results" Match="NavLinkMatch.Prefix">
+                            <i class="bi bi-bar-chart"></i> Resultados
+                        </NavLink>
+                    </li>
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/results/pending" Match="NavLinkMatch.All">
+                            <i class="bi bi-pencil-square"></i> Correcciones
+                        </NavLink>
+                    </li>
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/admin/usuarios" Match="NavLinkMatch.Prefix">
+                            <i class="bi bi-people"></i> Usuarios
+                        </NavLink>
+                    </li>
+                }
+                else
+                {
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/evaluacion" Match="NavLinkMatch.Prefix">
+                            <i class="bi bi-house"></i> Inicio
+                        </NavLink>
+                    </li>
+                }
             </ul>
             <div class="border-top border-secondary pt-3">
                 <button class="btn btn-outline-secondary btn-sm w-100" @onclick="LogoutAsync">
@@ -47,7 +65,7 @@
     }
 
     <div class="flex-grow-1 d-flex flex-column">
-        @if (Auth.IsAuthenticated && !Auth.IsAdmin)
+        @if (Auth.IsAuthenticated && Auth.IsAlumno)
         {
             <nav class="navbar navbar-light bg-white border-bottom px-4 py-2">
                 <span class="navbar-brand mb-0 h6">TechEval — <span class="text-muted fw-normal">@Auth.UserName</span></span>
@@ -64,11 +82,34 @@
 
 @code {
     protected override async Task OnInitializedAsync()
-        => await Auth.InitializeAsync();
+    {
+        Auth.OnChange += OnAuthChanged;
+        Session.SessionRejected += OnSessionRejectedAsync;
+        await Auth.InitializeAsync();
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    // La API rechazó el token: la cuenta cambió. El alumno no tiene contraseña con la que
+    // volver a entrar, así que a él se le pide abrir otra vez su enlace.
+    private async Task OnSessionRejectedAsync()
+    {
+        if (!Auth.IsAuthenticated) return;
+
+        var wasAlumno = Auth.IsAlumno;
+        await Auth.LogoutAsync();
+        Nav.NavigateTo(wasAlumno ? "/sesion-no-valida" : "/login?motivo=sesion");
+    }
 
     private async Task LogoutAsync()
     {
         await Auth.LogoutAsync();
         Nav.NavigateTo("/login");
+    }
+
+    public void Dispose()
+    {
+        Auth.OnChange -= OnAuthChanged;
+        Session.SessionRejected -= OnSessionRejectedAsync;
     }
 }

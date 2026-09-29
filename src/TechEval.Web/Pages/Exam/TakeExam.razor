@@ -314,7 +314,7 @@ else if (_state == ExamState.Completed)
         }
 
         if (!string.IsNullOrEmpty(validation.AuthToken))
-            await Auth.LoginAsync(validation.AuthToken, validation.CandidateName ?? string.Empty, isAdmin: false);
+            await Auth.LoginAsync(validation.AuthToken, validation.CandidateName ?? string.Empty, UserRole.Alumno);
 
         // El backend devuelve SessionId cuando la prueba ya estaba empezada. En ese caso no
         // hay bienvenida que mostrar: el candidato vuelve de una recarga y espera continuar.

@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<UserAnswer> UserAnswers => Set<UserAnswer>();
     public DbSet<ExamResult> ExamResults => Set<ExamResult>();
     public DbSet<ExamIntegrityEvent> ExamIntegrityEvents => Set<ExamIntegrityEvent>();
+    public DbSet<PasswordSetupToken> PasswordSetupTokens => Set<PasswordSetupToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

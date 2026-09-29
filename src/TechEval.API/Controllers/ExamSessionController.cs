@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
@@ -44,7 +45,7 @@ public class ExamSessionController : ControllerBase
     /// sesión es secuencial, así que por sí solo nunca puede valer como prueba de propiedad.
     /// </remarks>
     [HttpPost("answer/{sessionId:int}")]
-    [Authorize(Roles = "Alumno")]
+    [Authorize(Policy = Policies.Alumno)]
     [ProducesResponseType(200)]
     [ProducesResponseType(403)]
     [ProducesResponseType(409)]
@@ -59,7 +60,7 @@ public class ExamSessionController : ControllerBase
 
     /// <summary>Envía la prueba completa y devuelve los resultados</summary>
     [HttpPost("submit")]
-    [Authorize(Roles = "Alumno")]
+    [Authorize(Policy = Policies.Alumno)]
     [ProducesResponseType(typeof(ExamSubmissionReceiptDto), 200)]
     [ProducesResponseType(403)]
     public async Task<IActionResult> Submit([FromBody] SubmitExamDto dto, CancellationToken ct)
@@ -74,7 +75,7 @@ public class ExamSessionController : ControllerBase
     /// responde 200 sin guardar: el candidato no debe notar nada.
     /// </remarks>
     [HttpPost("integrity/{sessionId:int}")]
-    [Authorize(Roles = "Alumno")]
+    [Authorize(Policy = Policies.Alumno)]
     [EnableRateLimiting(RateLimiting.IntegrityPolicy)]
     [ProducesResponseType(200)]
     [ProducesResponseType(400)]

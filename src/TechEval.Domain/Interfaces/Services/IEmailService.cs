@@ -28,4 +28,15 @@ public interface IEmailService
         string toName,
         string examTitle,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Enlace de un solo uso para que un administrador o un evaluador fije su contraseña.
+    /// Lanza si el envío falla: quien llama decide si eso deshace algo.
+    /// </summary>
+    Task SendPasswordSetupAsync(
+        string toEmail,
+        string toName,
+        string setupLink,
+        DateTime expiresAt,
+        CancellationToken ct = default);
 }

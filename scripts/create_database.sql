@@ -38,6 +38,7 @@ GO
 -- Eliminar tablas (orden inverso de dependencias)
 -- ============================================================
 IF OBJECT_ID('dbo.ExamIntegrityEvents', 'U') IS NOT NULL DROP TABLE dbo.ExamIntegrityEvents;
+IF OBJECT_ID('dbo.PasswordSetupTokens', 'U') IS NOT NULL DROP TABLE dbo.PasswordSetupTokens;
 IF OBJECT_ID('dbo.ExamResults',   'U') IS NOT NULL DROP TABLE dbo.ExamResults;
 IF OBJECT_ID('dbo.UserAnswers',   'U') IS NOT NULL DROP TABLE dbo.UserAnswers;
 IF OBJECT_ID('dbo.ExamSessions',  'U') IS NOT NULL DROP TABLE dbo.ExamSessions;
@@ -57,14 +58,16 @@ CREATE TABLE dbo.Users (
     Id           INT           NOT NULL IDENTITY(1,1),
     Email        NVARCHAR(200) NOT NULL,
     Username     NVARCHAR(200) NULL,        -- alumnos: parte local del email (ej. alejandro.robles)
-    PasswordHash NVARCHAR(MAX) NOT NULL,   -- SHA-256 hex lowercase
+    PasswordHash NVARCHAR(MAX) NOT NULL,   -- PBKDF2 (formato de PasswordHasher); vacio = sin contrasena utilizable
     Name         NVARCHAR(200) NOT NULL,
-    IsAdmin      BIT           NOT NULL CONSTRAINT DF_Users_IsAdmin    DEFAULT 0,
+    Role         INT           NOT NULL,   -- 1=Admin | 2=Evaluador | 3=Alumno
+    SecurityStamp UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_Users_SecurityStamp DEFAULT NEWID(),
     IsActive     BIT           NOT NULL CONSTRAINT DF_Users_IsActive   DEFAULT 1,
     CreatedAt    DATETIME2     NOT NULL CONSTRAINT DF_Users_CreatedAt  DEFAULT GETUTCDATE(),
     UpdatedAt    DATETIME2     NULL,
 
-    CONSTRAINT PK_Users PRIMARY KEY (Id)
+    CONSTRAINT PK_Users PRIMARY KEY (Id),
+    CONSTRAINT CK_Users_Role CHECK (Role IN (1, 2, 3))
 );
 GO
 
@@ -317,6 +320,28 @@ CREATE TABLE dbo.ExamIntegrityEvents (
 GO
 
 CREATE INDEX IX_ExamIntegrityEvents_ExamSessionId ON dbo.ExamIntegrityEvents (ExamSessionId);
+GO
+
+-- ============================================================
+-- 12. PasswordSetupTokens  (enlaces de un solo uso para fijar la contrasena)
+--   Solo el SHA-256 del token, nunca el token.
+-- ============================================================
+CREATE TABLE dbo.PasswordSetupTokens (
+    Id        INT       NOT NULL IDENTITY(1,1),
+    UserId    INT       NOT NULL,
+    TokenHash NCHAR(64) NOT NULL,    -- SHA-256 hexadecimal del token del enlace
+    CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_PasswordSetupTokens_CreatedAt DEFAULT GETUTCDATE(),
+    ExpiresAt DATETIME2 NOT NULL,
+    UsedAt    DATETIME2 NULL,
+
+    CONSTRAINT PK_PasswordSetupTokens PRIMARY KEY (Id),
+    CONSTRAINT FK_PasswordSetupTokens_Users FOREIGN KEY (UserId)
+        REFERENCES dbo.Users (Id) ON DELETE CASCADE ON UPDATE NO ACTION
+);
+GO
+
+CREATE UNIQUE INDEX IX_PasswordSetupTokens_TokenHash ON dbo.PasswordSetupTokens (TokenHash);
+CREATE INDEX IX_PasswordSetupTokens_UserId ON dbo.PasswordSetupTokens (UserId);
 GO
 
 -- ============================================================

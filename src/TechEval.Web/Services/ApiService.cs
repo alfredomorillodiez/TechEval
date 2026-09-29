@@ -201,12 +201,82 @@ public class ApiService
         }
     }
 
+    // Users
+    public Task<List<UserDto>?> GetUsersAsync(UserRole? role = null, bool? active = null, string? search = null)
+    {
+        var q = new List<string>();
+        if (role.HasValue) q.Add($"role={role}");
+        if (active.HasValue) q.Add($"active={active.Value.ToString().ToLowerInvariant()}");
+        if (!string.IsNullOrWhiteSpace(search)) q.Add($"q={Uri.EscapeDataString(search.Trim())}");
+        var qs = q.Any() ? "?" + string.Join("&", q) : "";
+        return GetAsync<List<UserDto>>($"api/users{qs}");
+    }
+
+    public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> CreateUserAsync(CreateUserDto dto)
+        => SendAsync<UserActionResultDto>(HttpMethod.Post, "api/users", dto);
+
+    public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> ChangeUserRoleAsync(int id, UserRole role)
+        => SendAsync<UserActionResultDto>(HttpMethod.Put, $"api/users/{id}/role", new ChangeRoleDto(role));
+
+    public Task<(UserDto? Result, int StatusCode, string? Error)> DeactivateUserAsync(int id)
+        => SendAsync<UserDto>(HttpMethod.Post, $"api/users/{id}/deactivate", null);
+
+    public Task<(UserDto? Result, int StatusCode, string? Error)> ActivateUserAsync(int id)
+        => SendAsync<UserDto>(HttpMethod.Post, $"api/users/{id}/activate", null);
+
+    public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> ResetUserAccessAsync(int id)
+        => SendAsync<UserActionResultDto>(HttpMethod.Post, $"api/users/{id}/reset-access", null);
+
+    // Enlace para fijar la contraseña (público)
+    public Task<PasswordSetupInfoDto?> CheckPasswordSetupAsync(string token)
+        => GetAsync<PasswordSetupInfoDto>($"api/auth/password-setup/{Uri.EscapeDataString(token)}");
+
+    public async Task<(int StatusCode, string? Error)> SetPasswordAsync(SetPasswordDto dto)
+    {
+        var (_, status, error) = await SendAsync<object>(HttpMethod.Post, "api/auth/password-setup", dto);
+        return (status, error);
+    }
+
+    /// <summary>
+    /// Petición que devuelve el código y el mensaje de error de la API, para las pantallas
+    /// que tienen que distinguir un 409 o un 400 de un fallo cualquiera. Un 204 da Result nulo.
+    /// </summary>
+    private async Task<(T? Result, int StatusCode, string? Error)> SendAsync<T>(
+        HttpMethod method, string url, object? body)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(method, url);
+            if (body is not null) request.Content = JsonContent.Create(body, options: JsonOptions);
+
+            var response = await _http.SendAsync(request);
+            var status = (int)response.StatusCode;
+            if (!response.IsSuccessStatusCode)
+            {
+                var text = await response.Content.ReadAsStringAsync();
+                _logger.LogError("{Method} {Url} → HTTP {Status}: {Body}", method, url, status, text);
+                return (default, status, ExtractError(text));
+            }
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent) return (default, status, null);
+            return (await response.Content.ReadFromJsonAsync<T>(JsonOptions), status, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Method} {Url} failed", method, url);
+            return (default, 0, ex.Message);
+        }
+    }
+
+    // Lee `error` (respuestas propias de los controladores) o `detail` (ProblemDetails de
+    // ErrorHandlingMiddleware), que es donde llega el mensaje de las excepciones de negocio.
     private static string? ExtractError(string body)
     {
         try
         {
             using var doc = JsonDocument.Parse(body);
-            return doc.RootElement.TryGetProperty("error", out var e) ? e.GetString() : null;
+            if (doc.RootElement.TryGetProperty("error", out var e)) return e.GetString();
+            return doc.RootElement.TryGetProperty("detail", out var d) ? d.GetString() : null;
         }
         catch
         {

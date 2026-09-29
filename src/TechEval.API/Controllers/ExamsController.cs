@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using TechEval.Application.DTOs;
@@ -9,7 +10,7 @@ namespace TechEval.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Admin")]
+[Authorize(Policy = Policies.Gestion)]
 public class ExamsController : ControllerBase
 {
     private readonly IExamService _examService;

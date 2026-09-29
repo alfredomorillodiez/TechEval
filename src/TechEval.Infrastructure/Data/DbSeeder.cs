@@ -27,7 +27,7 @@ public static class DbSeeder
                 Email = "admin@techeval.com",
                 Name = "Administrador",
                 PasswordHash = adminPasswordHash,
-                IsAdmin = true
+                Role = UserRole.Admin
             });
             await context.SaveChangesAsync();
         }

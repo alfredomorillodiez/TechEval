@@ -4,6 +4,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Moq;
 using Xunit;
+using TechEval.API.Authorization;
 using TechEval.API.Controllers;
 using TechEval.Application;
 using TechEval.Application.DTOs;
@@ -314,21 +315,21 @@ public class ExamIntegrityServiceTests
 
     // ---------- Acceso a los endpoints ----------
 
-    private static string? RolesDe(MemberInfo m)
-        => m.GetCustomAttribute<AuthorizeAttribute>()?.Roles;
+    private static string? PoliticaDe(MemberInfo m)
+        => m.GetCustomAttribute<AuthorizeAttribute>()?.Policy;
 
     [Fact]
     public void EndpointDeRegistro_ExigeRolAlumno()
     {
         var metodo = typeof(ExamSessionController).GetMethod(nameof(ExamSessionController.RecordIntegrityEvent))!;
 
-        RolesDe(metodo).Should().Be("Alumno");
+        PoliticaDe(metodo).Should().Be(Policies.Alumno);
     }
 
     [Fact]
     public void EndpointDeLectura_ExigeRolAdmin()
     {
-        RolesDe(typeof(ResultsController)).Should().Be("Admin");
+        PoliticaDe(typeof(ResultsController)).Should().Be(Policies.Gestion);
         typeof(ResultsController).GetMethod(nameof(ResultsController.GetIntegrity))!
             .GetCustomAttribute<AllowAnonymousAttribute>().Should().BeNull();
     }

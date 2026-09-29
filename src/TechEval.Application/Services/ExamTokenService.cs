@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using TechEval.Application.DTOs;
 using TechEval.Domain.Entities;
+using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 using TechEval.Domain.Interfaces.Services;
 
@@ -73,6 +74,8 @@ public class ExamTokenService : IExamTokenService
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
             ?? throw new NotFoundException("Prueba no encontrada.");
 
+        await EnsureInvitableAsync(dto.CandidateEmail, ct);
+
         var secureToken = _tokenService.GenerateSecureToken();
         var expiresAt = DateTime.UtcNow.AddHours(dto.ExpirationHours);
 
@@ -106,6 +109,8 @@ public class ExamTokenService : IExamTokenService
         {
             try
             {
+                await EnsureInvitableAsync(candidate.Email, ct);
+
                 var secureToken = _tokenService.GenerateSecureToken();
                 var expiresAt = DateTime.UtcNow.AddHours(dto.ExpirationHours);
 
@@ -155,14 +160,19 @@ public class ExamTokenService : IExamTokenService
         if (!HasOpenSession(examToken) && examToken.IsExpired)
             return new ExamTokenValidationDto(false, "El enlace ha expirado.", null, null, null, null);
 
+        // Mismo mensaje que un token inexistente: quien tiene el enlace no necesita saber
+        // que el correo es de un evaluador o que la cuenta está desactivada.
         var user = await GetOrCreateStudentAsync(examToken.CandidateEmail, examToken.CandidateName, ct);
+        if (user is null)
+            return new ExamTokenValidationDto(false, "Token no válido.", null, null, null, null);
+
         if (examToken.UserId != user.Id)
         {
             examToken.UserId = user.Id;
             await _tokenRepo.UpdateAsync(examToken, ct);
         }
 
-        var authToken = _tokenService.GenerateJwtToken(user.Id, user.Email, isAdmin: false);
+        var authToken = _tokenService.GenerateJwtToken(user);
 
         return new ExamTokenValidationDto(
             true, null,
@@ -172,10 +182,29 @@ public class ExamTokenService : IExamTokenService
             authToken);
     }
 
-    private async Task<User> GetOrCreateStudentAsync(string email, string name, CancellationToken ct)
+    /// <summary>
+    /// Las invitaciones son solo para alumnos. Un solo rol por usuario: abrir la invitación
+    /// emite un token de alumno, y un administrador o un evaluador no puede recibirlo.
+    /// </summary>
+    private async Task EnsureInvitableAsync(string email, CancellationToken ct)
     {
         var existing = await _userRepo.FindAsync(u => u.Email == email, ct);
-        if (existing.Count > 0) return existing[0];
+        if (existing.Count > 0 && existing[0].Role != UserRole.Alumno)
+            throw new ValidationException(
+                $"{email} pertenece a una cuenta de {existing[0].Role.ToString().ToLowerInvariant()}, " +
+                "no de alumno. Las invitaciones son solo para alumnos.");
+    }
+
+    /// <summary>
+    /// El alumno del enlace, creado la primera vez. Null si el correo es de otro rol o de un
+    /// alumno desactivado: el enlace emite un token de alumno, y no puede emitirlo para esas
+    /// cuentas. Cubre también las invitaciones enviadas antes de que la persona cambiara de rol.
+    /// </summary>
+    private async Task<User?> GetOrCreateStudentAsync(string email, string name, CancellationToken ct)
+    {
+        var existing = await _userRepo.FindAsync(u => u.Email == email, ct);
+        if (existing.Count > 0)
+            return existing[0] is { Role: UserRole.Alumno, IsActive: true } alumno ? alumno : null;
 
         var username = email.Split('@')[0];
         var user = new User
@@ -187,7 +216,7 @@ public class ExamTokenService : IExamTokenService
             // que circula en cualquier proceso de selección en la llave del portal del
             // candidato. Su acceso es el enlace de la invitación, que ya lo autentica.
             PasswordHash = string.Empty,
-            IsAdmin = false,
+            Role = UserRole.Alumno,
             IsActive = true
         };
         return await _userRepo.AddAsync(user, ct);

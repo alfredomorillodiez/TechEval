@@ -200,7 +200,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
         _categories = await Api.GetCategoriesAsync() ?? new();
         await LoadQuestionsAsync();
     }

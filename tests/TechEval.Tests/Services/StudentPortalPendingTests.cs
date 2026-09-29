@@ -31,7 +31,7 @@ public class StudentPortalPendingTests
     {
         var db = NuevoContexto();
 
-        var admin = new User { Id = 1, Email = "admin@test.com", Name = "Admin", PasswordHash = "x", IsAdmin = true };
+        var admin = new User { Id = 1, Email = "admin@test.com", Name = "Admin", PasswordHash = "x", Role = UserRole.Admin };
         var alumno = new User { Id = 5, Email = "ana@test.com", Name = "Ana", PasswordHash = "x" };
         db.Users.AddRange(admin, alumno);
 

@@ -40,9 +40,13 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 - **Trazabilidad** — cada resultado guarda el administrador que lo corrigió (`ReviewedByUserId`)
 - **Sin doble corrección** — un resultado ya corregido devuelve `409 Conflict` ante un segundo intento
 
-### Cuentas y portal del alumno
+### Cuentas, roles y portal del alumno
 
-- **Dos roles** — `Admin` (consola de administración) y `Alumno` (portal propio)
+- **Tres roles, uno por usuario** — `Admin` (consola de administración), `Evaluador` (corrección de pruebas; en esta versión solo ve una página de bienvenida, sin datos) y `Alumno` (portal propio)
+- **Gestión de usuarios** (`/admin/usuarios`) — el administrador da de alta administradores y evaluadores, cambia el rol, desactiva, reactiva y restablece el acceso. Nadie puede cambiarse el rol, desactivarse ni restablecerse el acceso a sí mismo, y siempre queda al menos un administrador activo, también cuando dos actúan a la vez
+- **La contraseña la fija su dueño** — el alta y el restablecimiento envían por correo un enlace de un solo uso que caduca a las 48 horas. El administrador nunca conoce la contraseña de otra persona. La base de datos guarda solo el SHA-256 del enlace
+- **Revocación inmediata** — el JWT lleva un sello de seguridad que la API compara en cada petición. Desactivar una cuenta, cambiarle el rol o restablecerle el acceso invalida sus tokens en su siguiente petición, sin esperar a que caduquen, y la Web cierra la sesión
+- **Invitaciones solo para alumnos** — enviar una prueba al correo de un administrador o de un evaluador se rechaza
 - **Aprovisionamiento automático** — al abrir por primera vez el enlace de invitación se crea la cuenta del alumno a partir del email del candidato
 - **Auto-login desde la invitación** — validar el token devuelve un JWT con rol `Alumno`; el candidato no necesita credenciales para hacer la prueba
 - **Portal del alumno** (`/portal`) — sus pruebas pendientes (sin empezar, con fecha de expiración, o a medias con acceso directo a continuarlas) y su historial de pruebas realizadas con nota y aprobado/suspenso
@@ -59,7 +63,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 | Frontend | Blazor WebAssembly | 9.0.0 |
 | ORM | Entity Framework Core | 9.0.0 |
 | Base de datos | SQL Server | 2022 |
-| Autenticación | JWT Bearer (roles `Admin` / `Alumno`) | 9.0.0 |
+| Autenticación | JWT Bearer (roles `Admin` / `Evaluador` / `Alumno`, sello de seguridad) | 9.0.0 |
 | Documentación API | Swagger (Swashbuckle) | 7.2.0 |
 | Logging | Serilog (consola + fichero diario) | 9.0.0 |
 | Contenedores | Docker / Docker Compose | — |
@@ -149,7 +153,20 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_answer_snapshot_columns.sql
 
 # Integridad de la prueba: ExamSessions.ShuffleSeed/IntegrityLimitReached y la tabla ExamIntegrityEvents
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
+
+# Roles: Users.Role y Users.SecurityStamp, tabla PasswordSetupTokens; quita Users.IsAdmin
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
 ```
+
+> **Antes de aplicar `add_user_roles.sql`**, comprueba que no hay pruebas en curso. Desde este cambio el JWT lleva un sello de seguridad, y la API rechaza los tokens emitidos por la versión anterior. Un candidato a mitad de prueba perdería el guardado de sus respuestas hasta volver a abrir su enlace. Despliega cuando esta consulta devuelva `0`:
+>
+> ```sql
+> SELECT COUNT(*) FROM dbo.ExamSessions WHERE Status = 1;   -- 1 = InProgress
+> ```
+>
+> El guion y el binario nuevo van juntos: el guion quita `IsAdmin`, y la versión anterior ya no arranca contra la base actualizada. La cabecera del guion trae el SQL para volver atrás.
+
+> **Atención: todos estos guiones llevan `USE TechEvalDb` dentro.** El `-d` de `sqlcmd` no cambia la base sobre la que actúan. `create_database.sql`, además, borra todas las tablas antes de crearlas.
 
 > Las sesiones que ya existían quedan sin semilla. Conservan el orden de la prueba, y el corrector las ve como anteriores al registro de actividad, no como sesiones sin señales.
 
@@ -177,6 +194,8 @@ cd src/TechEval.Web && dotnet run
 
 Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`appsettings.Development.json`, `appsettings.Local.json` — este último ignorado por git) o mediante variables de entorno usando doble guion bajo (`Jwt__SecretKey`).
 
+> **`appsettings.Local.json` manda sobre todo lo demás**, también sobre las variables de entorno y la línea de órdenes, porque `Program.cs` lo carga el último. Si ese fichero trae un servidor SMTP real, `Email__Host=...` no lo sustituye y la API envía correo de verdad. Para probar el correo en local sin él, arranca la API con `--contentRoot` apuntando a una carpeta que no lo tenga.
+
 | Clave | Descripción | Por defecto |
 |-------|-------------|-------------|
 | `ConnectionStrings:DefaultConnection` | Cadena de conexión a SQL Server | `Server=localhost;Database=TechEvalDb;…` |
@@ -190,7 +209,7 @@ Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`ap
 
 ### Límite de ritmo
 
-`POST /api/auth/login` admite 10 peticiones por minuto y dirección de origen. `GET /api/exam/validate/{token}` admite 60. `POST /api/exam/integrity/{sessionId}` admite 120. Al superarlo, la API responde `429` con una cabecera `Retry-After`.
+`POST /api/auth/login` admite 10 peticiones por minuto y dirección de origen. Las operaciones de `/api/auth/password-setup` admiten 10. `GET /api/exam/validate/{token}` admite 60. `POST /api/exam/integrity/{sessionId}` admite 120. Al superarlo, la API responde `429` con una cabecera `Retry-After`.
 
 El motivo es el coste: verificar una contraseña cuesta cientos de milisegundos de CPU desde que el hash es PBKDF2, así que un volumen moderado de intentos deja al servidor sin hilos aunque ninguno acierte.
 
@@ -253,7 +272,7 @@ TechEval/
 
 | Ruta | Rol | Descripción |
 |------|-----|-------------|
-| `/` · `/login` | — | Acceso de administradores y alumnos (email o usuario) |
+| `/` · `/login` | — | Acceso con email (o usuario) y contraseña; lleva a la página de inicio del rol |
 | `/admin` · `/admin/dashboard` | Admin | Dashboard con indicadores generales |
 | `/admin/questions` | Admin | Banco de preguntas con filtros |
 | `/admin/questions/new` · `/admin/questions/{id}` | Admin | Alta y edición de preguntas |
@@ -263,7 +282,11 @@ TechEval/
 | `/admin/results/prueba/{examId}` | Admin | Resultados de una prueba concreta |
 | `/admin/results/pending` | Admin | Cola de resultados pendientes de corrección |
 | `/admin/results/{id}/review` | Admin | Corrección de las preguntas abiertas de un resultado |
+| `/admin/usuarios` | Admin | Gestión de usuarios: alta, rol, estado y acceso |
+| `/evaluacion` | Evaluador | Bienvenida del evaluador, sin datos hasta que tenga pruebas asignadas |
 | `/portal` | Alumno | Pruebas pendientes y realizadas del alumno |
+| `/fijar-contrasena/{token}` | Público | Fijar la contraseña con el enlace del correo |
+| `/sesion-no-valida` | Público | Aviso al alumno cuya sesión rechazó la API: debe volver a abrir su enlace |
 | `/exam/{token}` · `/prueba/{token}` | Público | Apertura de la invitación y resolución de la prueba |
 
 ---
@@ -275,6 +298,11 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | Método | Endpoint | Autorización |
 |--------|----------|--------------|
 | `POST` | `/api/auth/login` | Público |
+| `GET` | `/api/auth/password-setup/{token}` | Público — nombre y email del dueño de un enlace vigente |
+| `POST` | `/api/auth/password-setup` | Público — fija la contraseña con el enlace; no inicia sesión |
+| `GET` `POST` | `/api/users` | Admin — listado con filtros, y alta |
+| `PUT` | `/api/users/{id}/role` | Admin |
+| `POST` | `/api/users/{id}/deactivate` · `/activate` · `/reset-access` | Admin |
 | `GET` `POST` `PUT` `DELETE` | `/api/categories` | Admin |
 | `GET` `POST` `PUT` `DELETE` | `/api/questions` | Admin |
 | `GET` `POST` `PUT` `DELETE` | `/api/exams` | Admin |
@@ -288,6 +316,47 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | `GET` | `/api/exam/validate/{token}` | Público — devuelve el JWT de alumno |
 | `POST` | `/api/exam/start/{token}` · `/api/exam/answer/{sessionId}` · `/api/exam/submit` | Público — token del enlace |
 | `POST` | `/api/exam/integrity/{sessionId}` | Alumno — solo sobre su propia sesión en curso |
+
+---
+
+## Usuarios y roles
+
+| Capacidad | Admin | Evaluador | Alumno |
+|---|:-:|:-:|:-:|
+| Banco de preguntas, pruebas e invitaciones | ✓ | — | — |
+| Resultados, dashboard y corrección | ✓ | — | — |
+| Gestión de usuarios | ✓ | — | — |
+| Portal del alumno y resolución de la prueba | — | — | ✓ |
+
+La matriz vive en un solo sitio, `src/TechEval.API/Authorization/Policies.cs`. Los controladores nombran una política (`Gestion`, `Alumno`), nunca una lista de roles.
+
+El evaluador todavía no tiene permisos sobre datos. La corrección a ciegas de las pruebas que se le asignen es el cambio siguiente (`evaluator-review`).
+
+**Alta de un evaluador o de otro administrador:**
+
+1. En `/admin/usuarios`, pulsa «Nuevo usuario» y escribe nombre, email y rol.
+2. La persona recibe un correo con un enlace que caduca a las 48 horas y vale una sola vez.
+3. En `/fijar-contrasena/{token}` fija su contraseña, de 12 a 128 caracteres.
+4. Después inicia sesión en `/login` con su email y esa contraseña.
+
+Si el correo no sale, la cuenta queda creada y la página lo avisa. «Restablecer acceso» envía un enlace nuevo e invalida el anterior.
+
+**Para retirar el acceso a alguien**, desactiva su cuenta. No hay paso a `Alumno`: le dejaría la contraseña y, con ella, la entrada al portal.
+
+### Recuperar el acceso del único administrador
+
+Si el único administrador activo pierde su contraseña, nadie puede restablecerle el acceso desde la aplicación, y `AdminPassword` solo actúa con la base vacía. Con acceso a la base de datos, se puede fijar una contraseña temporal:
+
+1. Calcula el hash de una contraseña temporal con `PasswordHasher.Hash`, desde una prueba o una consola de .NET.
+2. Escribe ese hash en la base y cambia el sello, para invalidar cualquier token anterior:
+
+   ```sql
+   UPDATE dbo.Users
+   SET PasswordHash = '<hash>', SecurityStamp = NEWID(), IsActive = 1
+   WHERE Email = 'admin@techeval.com';
+   ```
+
+3. Inicia sesión con la contraseña temporal. Crea un segundo administrador para que esto no vuelva a depender de una sola persona.
 
 ---
 

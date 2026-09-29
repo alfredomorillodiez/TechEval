@@ -7,10 +7,12 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using TechEval.API;
+using TechEval.API.Authorization;
 using TechEval.API.Middleware;
 using TechEval.Application.Services;
 using TechEval.Infrastructure;
 using TechEval.Infrastructure.Data;
+using TechEval.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
@@ -45,6 +47,9 @@ builder.Services.AddScoped<IResultService, ResultService>();
 builder.Services.AddScoped<IStudentPortalService, StudentPortalService>();
 builder.Services.AddScoped<IOpenQuestionReviewService, OpenQuestionReviewService>();
 builder.Services.AddScoped<IExamIntegrityService, ExamIntegrityService>();
+builder.Services.AddScoped<PasswordSetupService>();
+builder.Services.AddScoped<IPasswordSetupService>(sp => sp.GetRequiredService<PasswordSetupService>());
+builder.Services.AddScoped<IUserManagementService, UserManagementService>();
 
 // JWT Auth
 var jwtKey = builder.Configuration["Jwt:SecretKey"]!;
@@ -62,9 +67,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero
         };
+
+        // La firma y la caducidad no bastan: un token de una cuenta desactivada o con el rol
+        // cambiado seguiría valiendo hasta caducar. El sello lo revoca en la siguiente petición.
+        o.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var validator = context.HttpContext.RequestServices
+                    .GetRequiredService<SecurityStampValidator>();
+                if (!await validator.IsValidAsync(context.Principal!, context.HttpContext.RequestAborted))
+                    context.Fail("El token ya no corresponde al estado de la cuenta.");
+            }
+        };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddTechEvalAuthorization();
 
 // CORS para Blazor
 builder.Services.AddCors(o => o.AddPolicy("BlazorPolicy", p =>

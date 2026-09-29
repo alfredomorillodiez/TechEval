@@ -37,7 +37,7 @@ public class ExamTokenServiceTests
         _userRepo.Setup(r => r.FindAsync(It.IsAny<Expression<Func<User, bool>>>(), default))
             .ReturnsAsync(new List<User> { new() { Id = 5, Email = "ana@test.com", Name = "Ana" } });
 
-        _tokens.Setup(t => t.GenerateJwtToken(It.IsAny<int>(), It.IsAny<string>(), false))
+        _tokens.Setup(t => t.GenerateJwtToken(It.Is<User>(u => u.Role == UserRole.Alumno)))
             .Returns("jwt-alumno");
 
         _sessionRepo.Setup(r => r.AddAsync(It.IsAny<ExamSession>(), default))

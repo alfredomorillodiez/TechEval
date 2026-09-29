@@ -211,7 +211,7 @@
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin)
         {
-            Nav.NavigateTo("/login");
+            Nav.NavigateTo(Auth.Home);
             return;
         }
 

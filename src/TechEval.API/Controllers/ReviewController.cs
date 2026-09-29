@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
@@ -9,7 +10,7 @@ namespace TechEval.API.Controllers;
 /// <summary>Corrección manual de las preguntas abiertas de una prueba</summary>
 [ApiController]
 [Route("api/review")]
-[Authorize(Roles = "Admin")]
+[Authorize(Policy = Policies.Gestion)]
 public class ReviewController : ControllerBase
 {
     private readonly IOpenQuestionReviewService _service;

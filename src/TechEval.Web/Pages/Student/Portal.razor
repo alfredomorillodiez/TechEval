@@ -108,9 +108,9 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated || Auth.IsAdmin)
+        if (!Auth.IsAlumno)
         {
-            Nav.NavigateTo("/login");
+            Nav.NavigateTo(Auth.Home);
             return;
         }
 

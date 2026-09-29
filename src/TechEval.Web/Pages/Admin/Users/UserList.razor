@@ -1,0 +1,436 @@
+@page "/admin/usuarios"
+@using TechEval.Application.DTOs
+@using TechEval.Application.Services
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Usuarios — TechEval</PageTitle>
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0">Usuarios</h1>
+        <button class="btn btn-primary" @onclick="OpenCreate">
+            <i class="bi bi-person-plus me-1"></i> Nuevo usuario
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_notice))
+    {
+        <div class="alert @_noticeClass alert-dismissible py-2">
+            @_notice
+            @if (_resendUser is not null)
+            {
+                <button class="btn btn-sm btn-outline-dark ms-2" @onclick="() => AskReset(_resendUser)">
+                    Restablecer el acceso para reenviar el enlace
+                </button>
+            }
+            <button type="button" class="btn-close" @onclick="ClearNotice"></button>
+        </div>
+    }
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body d-flex flex-wrap gap-2 align-items-end">
+            <div>
+                <label class="form-label small mb-1">Rol</label>
+                <select class="form-select form-select-sm" @bind="_filterRole" @bind:after="LoadAsync">
+                    <option value="">Todos</option>
+                    @foreach (var r in Enum.GetValues<UserRole>())
+                    {
+                        <option value="@r">@RoleLabel(r)</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label class="form-label small mb-1">Estado</label>
+                <select class="form-select form-select-sm" @bind="_filterActive" @bind:after="LoadAsync">
+                    <option value="">Todos</option>
+                    <option value="true">Activas</option>
+                    <option value="false">Inactivas</option>
+                </select>
+            </div>
+            <div class="flex-grow-1" style="min-width:220px;">
+                <label class="form-label small mb-1">Nombre o email</label>
+                <input class="form-control form-control-sm" @bind="_search" @bind:event="oninput"
+                       @onkeydown="OnSearchKey" placeholder="Buscar…" />
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync">
+                <i class="bi bi-search"></i>
+            </button>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_users.Count == 0)
+    {
+        <div class="text-center text-muted py-5">No hay usuarios con esos filtros.</div>
+    }
+    else
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Email</th>
+                            <th>Rol</th>
+                            <th>Estado</th>
+                            <th>Alta</th>
+                            <th class="text-end">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in _users)
+                        {
+                            var isSelf = IsSelf(u);
+                            <tr class="@(u.IsActive ? "" : "text-muted")">
+                                <td>
+                                    @u.Name
+                                    @if (isSelf) { <span class="badge bg-light text-dark border ms-1">Tú</span> }
+                                </td>
+                                <td>@u.Email</td>
+                                <td><span class="badge @RoleBadge(u.Role)">@RoleLabel(u.Role)</span></td>
+                                <td>
+                                    <span class="badge @(u.IsActive ? "bg-success" : "bg-secondary")">
+                                        @(u.IsActive ? "Activa" : "Inactiva")
+                                    </span>
+                                    @if (u.AccessPending)
+                                    {
+                                        <span class="badge bg-warning text-dark ms-1">Acceso pendiente</span>
+                                    }
+                                </td>
+                                <td class="small">@u.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy")</td>
+                                <td class="text-end text-nowrap">
+                                    @if (!isSelf)
+                                    {
+                                        @if (AllowedTargets(u.Role).Any())
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary" title="Cambiar rol"
+                                                    @onclick="() => OpenRole(u)" disabled="@_busy">
+                                                <i class="bi bi-person-gear"></i>
+                                            </button>
+                                        }
+                                        @if (u.Role != UserRole.Alumno)
+                                        {
+                                            <button class="btn btn-sm btn-outline-warning ms-1" title="Restablecer acceso"
+                                                    @onclick="() => AskReset(u)" disabled="@_busy">
+                                                <i class="bi bi-key"></i>
+                                            </button>
+                                        }
+                                        @if (u.IsActive)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger ms-1" title="Desactivar"
+                                                    @onclick="() => AskDeactivate(u)" disabled="@_busy">
+                                                <i class="bi bi-person-slash"></i>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-success ms-1" title="Reactivar"
+                                                    @onclick="() => ActivateAsync(u)" disabled="@_busy">
+                                                <i class="bi bi-person-check"></i>
+                                            </button>
+                                        }
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@* Alta: sin campo de contraseña. La fija la propia persona con el enlace del correo. *@
+@if (_showCreate)
+{
+    <div class="modal d-block" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Nuevo usuario</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showCreate = false"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_modalError)) { <div class="alert alert-danger py-2">@_modalError</div> }
+                    <div class="mb-3">
+                        <label class="form-label">Nombre</label>
+                        <input class="form-control" @bind="_newName" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control" @bind="_newEmail" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Rol</label>
+                        <select class="form-select" @bind="_newRole">
+                            <option value="@UserRole.Evaluador">@RoleLabel(UserRole.Evaluador)</option>
+                            <option value="@UserRole.Admin">@RoleLabel(UserRole.Admin)</option>
+                        </select>
+                    </div>
+                    <p class="small text-muted mb-0">
+                        La persona recibirá un correo con un enlace para fijar su contraseña.
+                        El enlace caduca a las 48 horas y solo vale una vez.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => _showCreate = false">Cancelar</button>
+                    <button class="btn btn-primary" @onclick="CreateAsync" disabled="@_busy">
+                        @if (_busy) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                        Crear y enviar enlace
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_roleUser is not null)
+{
+    <div class="modal d-block" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cambiar rol de @_roleUser.Name</h5>
+                    <button type="button" class="btn-close" @onclick="() => _roleUser = null"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_modalError)) { <div class="alert alert-danger py-2">@_modalError</div> }
+                    <p>Rol actual: <strong>@RoleLabel(_roleUser.Role)</strong></p>
+                    <select class="form-select" @bind="_targetRole">
+                        @foreach (var r in AllowedTargets(_roleUser.Role))
+                        {
+                            <option value="@r">@RoleLabel(r)</option>
+                        }
+                    </select>
+                    <p class="small text-muted mt-3 mb-0">
+                        Su sesión abierta dejará de valer y tendrá que volver a entrar.
+                        @if (_roleUser.Role == UserRole.Alumno)
+                        {
+                            <br />@:Como no tiene contraseña, recibirá un enlace para fijarla.
+                        }
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => _roleUser = null">Cancelar</button>
+                    <button class="btn btn-primary" @onclick="ChangeRoleAsync" disabled="@_busy">Cambiar rol</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_confirm is not null)
+{
+    <div class="modal d-block" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@_confirm.Title</h5>
+                    <button type="button" class="btn-close" @onclick="() => _confirm = null"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_modalError)) { <div class="alert alert-danger py-2">@_modalError</div> }
+                    <p class="mb-0">@_confirm.Message</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => _confirm = null">Cancelar</button>
+                    <button class="btn @_confirm.ButtonClass" @onclick="_confirm.Action" disabled="@_busy">
+                        @_confirm.Button
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed record Confirmation(
+        string Title, string Message, string Button, string ButtonClass, Func<Task> Action);
+
+    private List<UserDto> _users = new();
+    private bool _loading = true, _busy;
+
+    private string _filterRole = string.Empty, _filterActive = string.Empty, _search = string.Empty;
+
+    private string? _notice, _noticeClass, _modalError;
+    private UserDto? _resendUser;
+
+    private bool _showCreate;
+    private string _newName = string.Empty, _newEmail = string.Empty;
+    private UserRole _newRole = UserRole.Evaluador;
+
+    private UserDto? _roleUser;
+    private UserRole _targetRole;
+
+    private Confirmation? _confirm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        UserRole? role = Enum.TryParse<UserRole>(_filterRole, out var r) ? r : null;
+        bool? active = bool.TryParse(_filterActive, out var a) ? a : null;
+        _users = await Api.GetUsersAsync(role, active, _search) ?? new();
+        _loading = false;
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+    }
+
+    // La API también lo impide. Aquí solo se evita ofrecer lo que va a fallar.
+    private bool IsSelf(UserDto u)
+        => Auth.Email is not null && string.Equals(u.Email, Auth.Email, StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<UserRole> AllowedTargets(UserRole from)
+        => Enum.GetValues<UserRole>().Where(to => RoleTransitions.IsAllowed(from, to));
+
+    private static string RoleLabel(UserRole r) => r switch
+    {
+        UserRole.Admin => "Administrador",
+        UserRole.Evaluador => "Evaluador",
+        _ => "Alumno"
+    };
+
+    private static string RoleBadge(UserRole r) => r switch
+    {
+        UserRole.Admin => "bg-dark",
+        UserRole.Evaluador => "bg-primary",
+        _ => "bg-light text-dark border"
+    };
+
+    private void OpenCreate()
+    {
+        _newName = _newEmail = string.Empty;
+        _newRole = UserRole.Evaluador;
+        _modalError = null;
+        _showCreate = true;
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true; _modalError = null;
+        var (result, _, error) = await Api.CreateUserAsync(new CreateUserDto(_newName, _newEmail, _newRole));
+        _busy = false;
+
+        if (result is null) { _modalError = error ?? "No se pudo crear el usuario."; return; }
+
+        _showCreate = false;
+        ShowOutcome(result, $"Usuario {result.User.Email} creado.");
+        await LoadAsync();
+    }
+
+    private void OpenRole(UserDto u)
+    {
+        _modalError = null;
+        _roleUser = u;
+        _targetRole = AllowedTargets(u.Role).First();
+    }
+
+    private async Task ChangeRoleAsync()
+    {
+        if (_roleUser is null) return;
+        _busy = true; _modalError = null;
+        var (result, _, error) = await Api.ChangeUserRoleAsync(_roleUser.Id, _targetRole);
+        _busy = false;
+
+        if (result is null) { _modalError = error ?? "No se pudo cambiar el rol."; return; }
+
+        _roleUser = null;
+        ShowOutcome(result, $"{result.User.Name} es ahora {RoleLabel(result.User.Role).ToLowerInvariant()}.");
+        await LoadAsync();
+    }
+
+    private void AskDeactivate(UserDto u)
+    {
+        _modalError = null;
+        _confirm = new Confirmation(
+            "Desactivar cuenta",
+            $"{u.Name} no podrá entrar, y su sesión abierta dejará de valer en su siguiente acción. " +
+            "Sus datos se conservan y puedes reactivar la cuenta más tarde.",
+            "Desactivar", "btn-danger",
+            async () =>
+            {
+                _busy = true;
+                var (result, _, error) = await Api.DeactivateUserAsync(u.Id);
+                _busy = false;
+                if (result is null) { _modalError = error ?? "No se pudo desactivar la cuenta."; return; }
+                _confirm = null;
+                Notice($"Cuenta de {u.Name} desactivada.", "alert-success");
+                await LoadAsync();
+            });
+    }
+
+    private void AskReset(UserDto u)
+    {
+        _modalError = null;
+        _confirm = new Confirmation(
+            "Restablecer acceso",
+            $"{u.Name} perderá su contraseña y su sesión abierta, y recibirá un enlace nuevo para fijar " +
+            "otra. Los enlaces anteriores dejarán de valer.",
+            "Restablecer y enviar enlace", "btn-warning",
+            async () =>
+            {
+                _busy = true;
+                var (result, _, error) = await Api.ResetUserAccessAsync(u.Id);
+                _busy = false;
+                if (result is null) { _modalError = error ?? "No se pudo restablecer el acceso."; return; }
+                _confirm = null;
+                ShowOutcome(result, $"Acceso de {u.Name} restablecido.");
+                await LoadAsync();
+            });
+    }
+
+    private async Task ActivateAsync(UserDto u)
+    {
+        _busy = true;
+        var (result, _, error) = await Api.ActivateUserAsync(u.Id);
+        _busy = false;
+        if (result is null) { Notice(error ?? "No se pudo reactivar la cuenta.", "alert-danger"); return; }
+        Notice($"Cuenta de {u.Name} reactivada. Tendrá que iniciar sesión otra vez.", "alert-success");
+        await LoadAsync();
+    }
+
+    private void ShowOutcome(UserActionResultDto result, string done)
+    {
+        switch (result.EmailSent)
+        {
+            case true:
+                Notice($"{done} Enlace para fijar la contraseña enviado a {result.User.Email}.", "alert-success");
+                break;
+            case false:
+                Notice($"{done} El correo con el enlace NO se ha enviado.", "alert-warning");
+                _resendUser = result.User;
+                break;
+            default:
+                Notice(done, "alert-success");
+                break;
+        }
+    }
+
+    private void Notice(string text, string cssClass)
+    {
+        _notice = text;
+        _noticeClass = cssClass;
+        _resendUser = null;
+    }
+
+    private void ClearNotice()
+    {
+        _notice = null;
+        _resendUser = null;
+    }
+}

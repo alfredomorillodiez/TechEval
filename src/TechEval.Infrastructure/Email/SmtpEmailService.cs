@@ -54,6 +54,14 @@ public class SmtpEmailService : IEmailService
         await SendAsync(toEmail, toName, subject, body, ct);
     }
 
+    public async Task SendPasswordSetupAsync(
+        string toEmail, string toName, string setupLink, DateTime expiresAt, CancellationToken ct = default)
+    {
+        const string subject = "Fija tu contraseña de TechEval";
+        var body = BuildPasswordSetupHtml(toName, setupLink, expiresAt);
+        await SendAsync(toEmail, toName, subject, body, ct);
+    }
+
     private async Task SendAsync(
         string toEmail, string toName, string subject, string body, CancellationToken ct)
     {
@@ -135,6 +143,38 @@ public class SmtpEmailService : IEmailService
                     </div>
                 </div>
                 <p>Gracias por participar en el proceso de evaluación.</p>
+            </div>
+        </body>
+        </html>
+        """;
+
+    // El nombre lo escribe un administrador en el alta, así que se codifica antes de
+    // insertarlo en el HTML.
+    private static string BuildPasswordSetupHtml(string name, string link, DateTime expiresAt) => $"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"></head>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+                <h1 style="margin: 0;">TechEval Platform</h1>
+            </div>
+            <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
+                <h2>Hola, {WebUtility.HtmlEncode(name)}</h2>
+                <p>Tienes una cuenta en TechEval. Para entrar, primero fija tu contraseña:</p>
+                <a href="{link}" style="display: inline-block; background: #1e40af; color: white;
+                   padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">
+                    Fijar contraseña
+                </a>
+                <p style="margin-top: 20px; color: #6b7280; font-size: 14px;">
+                    ⚠️ Este enlace expira el {expiresAt:dd/MM/yyyy HH:mm} UTC y solo puede usarse una vez.
+                    Si caduca, pide uno nuevo al administrador.
+                </p>
+                <p style="color: #6b7280; font-size: 12px;">
+                    Si no esperabas este correo, ignóralo: sin el enlace nadie puede fijar la contraseña.
+                </p>
+                <p style="color: #6b7280; font-size: 12px;">
+                    Si el botón no funciona, copia este enlace: <br>{link}
+                </p>
             </div>
         </body>
         </html>

@@ -50,6 +50,8 @@ builder.Services.AddScoped<IExamIntegrityService, ExamIntegrityService>();
 builder.Services.AddScoped<PasswordSetupService>();
 builder.Services.AddScoped<IPasswordSetupService>(sp => sp.GetRequiredService<PasswordSetupService>());
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+builder.Services.AddScoped<IExamEvaluatorService, ExamEvaluatorService>();
+builder.Services.AddScoped<IEvaluationService, EvaluationService>();
 
 // JWT Auth
 var jwtKey = builder.Configuration["Jwt:SecretKey"]!;

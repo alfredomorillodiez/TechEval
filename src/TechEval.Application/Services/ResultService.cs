@@ -77,7 +77,10 @@ public class ResultService : IResultService
             result.Exam?.Title ?? "",
             result.TotalPoints, result.ObtainedPoints,
             result.ScorePercentage, result.Passed, result.Status,
-            result.CompletedAt, answerReviews);
+            result.CompletedAt, answerReviews,
+            // Solo cuando hubo corrección manual: un resultado de solo test no tiene corrector.
+            result.ReviewedByUserId is null ? null : result.ReviewedByUser?.Name,
+            result.ReviewedByUserId is null ? null : result.ReviewedAt);
     }
 
     public async Task<DashboardStatsDto> GetDashboardStatsAsync(CancellationToken ct = default)
@@ -96,6 +99,7 @@ public class ResultService : IResultService
         var totalQuestions = await _questionRepo.CountAsync(q => q.IsActive, ct);
         var pendingReviewCount = await _resultRepo.CountPendingReviewAsync(ct);
         var recent = await _resultRepo.GetRecentAsync(10, ct);
+        var withoutEvaluator = await _examRepo.GetActiveWithoutEvaluatorAsync(ct) ?? Array.Empty<Exam>();
 
         // Media y tasa de aprobación solo sobre lo ya corregido: un resultado pendiente
         // lleva una puntuación parcial que hundiría la media e inflaría los suspensos.
@@ -113,6 +117,7 @@ public class ResultService : IResultService
             avgScore,
             passRate,
             pendingReviewCount,
-            recent.Select(MapToSummary).ToList());
+            recent.Select(MapToSummary).ToList(),
+            withoutEvaluator.Select(e => new ExamRefDto(e.Id, e.Title)).ToList());
     }
 }

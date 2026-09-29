@@ -16,9 +16,13 @@ public class ExamsController : ControllerBase
     private readonly IExamService _examService;
     private readonly IExamTokenService _tokenService;
     private readonly IConfiguration _configuration;
+    private readonly IExamEvaluatorService _evaluators;
 
-    public ExamsController(IExamService examService, IExamTokenService tokenService, IConfiguration configuration)
+    public ExamsController(
+        IExamService examService, IExamTokenService tokenService, IConfiguration configuration,
+        IExamEvaluatorService evaluators)
     {
+        _evaluators = evaluators;
         _examService = examService;
         _tokenService = tokenService;
         _configuration = configuration;
@@ -86,6 +90,28 @@ public class ExamsController : ControllerBase
         var result = await _tokenService.SendExamBulkAsync(dto, baseUrl, ct);
         return Ok(result);
     }
+
+    /// <summary>Evaluadores asignados a la prueba</summary>
+    [HttpGet("{id:int}/evaluators")]
+    [ProducesResponseType(typeof(IReadOnlyList<ExamEvaluatorDto>), 200)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> GetEvaluators(int id, CancellationToken ct)
+        => Ok(await _evaluators.ListAsync(id, ct));
+
+    /// <summary>Asigna un evaluador activo a la prueba. Repetir la asignación no hace nada</summary>
+    [HttpPost("{id:int}/evaluators/{userId:int}")]
+    [ProducesResponseType(typeof(IReadOnlyList<ExamEvaluatorDto>), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> AssignEvaluator(int id, int userId, CancellationToken ct)
+        => Ok(await _evaluators.AssignAsync(id, userId, GetCurrentUserId(), ct));
+
+    /// <summary>Quita un evaluador de la prueba. Sus correcciones hechas no cambian</summary>
+    [HttpDelete("{id:int}/evaluators/{userId:int}")]
+    [ProducesResponseType(typeof(IReadOnlyList<ExamEvaluatorDto>), 200)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> UnassignEvaluator(int id, int userId, CancellationToken ct)
+        => Ok(await _evaluators.UnassignAsync(id, userId, ct));
 
     private int GetCurrentUserId()
         => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

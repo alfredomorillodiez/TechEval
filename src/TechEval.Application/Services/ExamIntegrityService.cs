@@ -9,6 +9,12 @@ public interface IExamIntegrityService
 {
     Task RecordAsync(int sessionId, int userId, IntegrityEventInputDto dto, CancellationToken ct = default);
     Task<IntegrityReportDto> GetReportAsync(int resultId, CancellationToken ct = default);
+
+    /// <summary>
+    /// El mismo informe sin la hora del reloj: cada señal lleva solo el tiempo desde el inicio.
+    /// Para el evaluador, que corrige a ciegas. La comprobación de acceso la hace quien llama.
+    /// </summary>
+    Task<IntegrityReportDto> GetEvaluatorReportAsync(int resultId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -112,7 +118,13 @@ public class ExamIntegrityService : IExamIntegrityService
             throw new ValidationException("Un pegado solo se registra sobre una pregunta abierta de la prueba.");
     }
 
-    public async Task<IntegrityReportDto> GetReportAsync(int resultId, CancellationToken ct = default)
+    public Task<IntegrityReportDto> GetReportAsync(int resultId, CancellationToken ct = default)
+        => BuildReportAsync(resultId, withClockTime: true, ct);
+
+    public Task<IntegrityReportDto> GetEvaluatorReportAsync(int resultId, CancellationToken ct = default)
+        => BuildReportAsync(resultId, withClockTime: false, ct);
+
+    private async Task<IntegrityReportDto> BuildReportAsync(int resultId, bool withClockTime, CancellationToken ct)
     {
         var result = await _resultRepo.GetByIdAsync(resultId, ct)
             ?? throw new NotFoundException("Resultado no encontrado.");
@@ -156,7 +168,9 @@ public class ExamIntegrityService : IExamIntegrityService
                 .ToList(),
             Events: events
                 .Select(e => new IntegrityEventDto(
-                    e.Type, e.OccurredAt, e.QuestionId, NumberOf(e.QuestionId), e.AwaySeconds, e.PastedChars))
+                    e.Type, withClockTime ? e.OccurredAt : null, e.QuestionId, NumberOf(e.QuestionId),
+                    e.AwaySeconds, e.PastedChars,
+                    Math.Max(0, (int)(e.OccurredAt - session.StartedAt).TotalSeconds)))
                 .ToList());
     }
 }

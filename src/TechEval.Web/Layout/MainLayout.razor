@@ -49,9 +49,15 @@
                 }
                 else
                 {
+                    @* Match exacto en «Correcciones»: con Prefix se marcaría también en el historial. *@
                     <li class="nav-item">
-                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/evaluacion" Match="NavLinkMatch.Prefix">
-                            <i class="bi bi-house"></i> Inicio
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/evaluacion" Match="NavLinkMatch.All">
+                            <i class="bi bi-pencil-square"></i> Correcciones
+                        </NavLink>
+                    </li>
+                    <li class="nav-item">
+                        <NavLink class="nav-link text-white d-flex align-items-center gap-2 rounded" href="/evaluacion/historial" Match="NavLinkMatch.Prefix">
+                            <i class="bi bi-clock-history"></i> Historial
                         </NavLink>
                     </li>
                 }

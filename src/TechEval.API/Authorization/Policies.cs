@@ -20,10 +20,17 @@ public static class Policies
     /// <summary>Portal del alumno y resolución de la prueba.</summary>
     public const string Alumno = "Alumno";
 
+    /// <summary>
+    /// Corrección a ciegas de las pruebas asignadas. Solo el evaluador: el administrador corrige
+    /// por sus endpoints, que le muestran la identidad del candidato.
+    /// </summary>
+    public const string Evaluacion = "Evaluacion";
+
     public static IServiceCollection AddTechEvalAuthorization(this IServiceCollection services)
         => services.AddAuthorization(o =>
         {
             o.AddPolicy(Gestion, p => p.RequireRole(nameof(UserRole.Admin)));
             o.AddPolicy(Alumno, p => p.RequireRole(nameof(UserRole.Alumno)));
+            o.AddPolicy(Evaluacion, p => p.RequireRole(nameof(UserRole.Evaluador)));
         });
 }

@@ -76,7 +76,26 @@
                                             @p.OpenAnswerCount @(p.OpenAnswerCount == 1 ? "respuesta" : "respuestas")
                                         </span>
                                     </td>
-                                    <td class="text-end pe-3">
+                                    <td class="text-end pe-3 text-nowrap">
+                                        @if (p.ReservedByName is not null)
+                                        {
+                                            <span class="badge bg-light text-dark border me-2">
+                                                <i class="bi bi-lock me-1"></i>
+                                                @p.ReservedByName hasta las @p.ReservedUntil?.ToLocalTime().ToString("HH:mm")
+                                            </span>
+                                            @if (_confirmRelease == p.ResultId)
+                                            {
+                                                <button class="btn btn-sm btn-danger me-1" @onclick="() => ReleaseAsync(p.ResultId)">Confirmar</button>
+                                                <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => _confirmRelease = null">No</button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn-sm btn-outline-danger me-1" title="Liberar la reserva"
+                                                        @onclick="() => _confirmRelease = p.ResultId">
+                                                    Liberar
+                                                </button>
+                                            }
+                                        }
                                         <a href="/admin/results/@p.ResultId/review" class="btn btn-sm btn-primary">
                                             <i class="bi bi-pencil-square me-1"></i> Corregir
                                         </a>
@@ -94,6 +113,16 @@
 @code {
     private bool _loading = true;
     private List<PendingReviewSummaryDto> _pending = new();
+    private int? _confirmRelease;
+
+    // Quien tenía la reserva, si sigue en la pantalla, recibe un 409 al enviar solo si otra
+    // persona toma el resultado entretanto.
+    private async Task ReleaseAsync(int resultId)
+    {
+        _confirmRelease = null;
+        await Api.ReleaseReviewReservationAsync(resultId);
+        _pending = await Api.GetPendingReviewsAsync() ?? new();
+    }
 
     protected override async Task OnInitializedAsync()
     {

@@ -30,8 +30,9 @@ public class ReviewController : ControllerBase
     [ProducesResponseType(409)]
     public async Task<IActionResult> GetDetail(int resultId, CancellationToken ct)
     {
-        // El 409 de `AlreadyReviewedException` lo produce ErrorHandlingMiddleware.
-        var detail = await _service.GetDetailAsync(resultId, ct);
+        // Abrir el detalle reserva el resultado. Los 409 (ya corregido, o reservado por otra
+        // persona) los produce ErrorHandlingMiddleware.
+        var detail = await _service.GetDetailAsync(resultId, GetCurrentUserId(), ct);
         return detail is null ? NotFound() : Ok(detail);
     }
 
@@ -48,6 +49,23 @@ public class ReviewController : ControllerBase
     {
         var result = await _service.SubmitReviewAsync(resultId, dto, GetCurrentUserId(), ct);
         return Ok(result);
+    }
+
+    /// <summary>Renueva la reserva de quien la tiene, por otros 30 minutos</summary>
+    [HttpPost("{resultId:int}/reservation")]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    public async Task<IActionResult> RenewReservation(int resultId, CancellationToken ct)
+        => Ok(new { reservedUntil = await _service.RenewReservationAsync(resultId, GetCurrentUserId(), ct) });
+
+    /// <summary>Libera la reserva, sea de quien sea</summary>
+    [HttpDelete("{resultId:int}/reservation")]
+    [ProducesResponseType(204)]
+    public async Task<IActionResult> ReleaseReservation(int resultId, CancellationToken ct)
+    {
+        await _service.ReleaseReservationAsync(resultId, ct);
+        return NoContent();
     }
 
     private int GetCurrentUserId()

@@ -37,10 +37,10 @@ TechEval es una plataforma de evaluación técnica que permite:
 | Rol | Claim JWT | Alcance |
 |-----|-----------|---------|
 | `Admin` | `Role = "Admin"` | Consola completa: categorías, preguntas, pruebas, envíos, resultados de todos los candidatos y gestión de usuarios |
-| `Evaluador` | `Role = "Evaluador"` | Corrección de pruebas. En esta versión solo ve una página de bienvenida sin datos; la corrección a ciegas de sus pruebas asignadas llega con `evaluator-review` |
+| `Evaluador` | `Role = "Evaluador"` | Corrige a ciegas los resultados pendientes de las pruebas que tiene asignadas, y consulta su historial. No ve el nombre ni el email del candidato |
 | `Alumno` | `Role = "Alumno"` | Portal propio: sus pruebas pendientes y sus resultados. No accede a nada de otro alumno |
 
-Cada usuario tiene **un solo rol**, guardado en `Users.Role`. La matriz de permisos vive en `src/TechEval.API/Authorization/Policies.cs`: los controladores nombran una política (`Gestion`, `Alumno`) y no una lista de roles.
+Cada usuario tiene **un solo rol**, guardado en `Users.Role`. La matriz de permisos vive en `src/TechEval.API/Authorization/Policies.cs`: los controladores nombran una política (`Gestion`, `Evaluacion`, `Alumno`) y no una lista de roles. El administrador no pasa la política `Evaluacion`: corrige por sus endpoints, que le muestran la identidad.
 
 El JWT lleva además el claim `stamp`, con el `SecurityStamp` del usuario. En cada petición autenticada, `SecurityStampValidator` comprueba que el usuario existe, está activo, conserva el rol del token y conserva el sello. Si algo falla, la API responde `401`. El sello cambia al cambiar el rol, al desactivar la cuenta, al restablecer el acceso y al fijar una contraseña: así esos cambios revocan los tokens en el acto, sin esperar a que caduquen.
 
@@ -218,7 +218,15 @@ ExamResults
 ├── ObtainedPoints
 ├── ScorePercentage (DECIMAL 5,2)
 ├── Passed
+├── Status · ReviewedAt · ReviewedByUserId (FK → Users)   -- quién corrigió
+├── ReservedByUserId (FK → Users) · ReservedUntil         -- reserva mientras alguien corrige
 └── CompletedAt    [INDEX]
+
+ExamEvaluators       -- evaluadores asignados a cada prueba
+├── ExamId (PK, FK → Exams, CASCADE)
+├── UserId (PK, FK → Users)
+├── AssignedAt
+└── AssignedByUserId (FK → Users)
 
 ```
 
@@ -541,6 +549,22 @@ El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro d
 | GET | `/api/results/dashboard` | Admin | Estadísticas del dashboard |
 | GET | `/api/results/{id}/integrity` | Admin | Actividad del candidato durante la prueba: resumen y cronología (`IntegrityReportDto`) |
 
+### Corrección
+
+| Método | Ruta | Auth | Descripción |
+|--------|------|------|-------------|
+| GET | `/api/review/pending` | Admin | Cola completa, con la identidad y quién tiene cada reserva |
+| GET · POST | `/api/review/{resultId}` | Admin | El `GET` reserva el resultado 30 minutos; el `POST` corrige |
+| POST · DELETE | `/api/review/{resultId}/reservation` | Admin | Renueva la propia · libera cualquiera |
+| GET · POST · DELETE | `/api/exams/{id}/evaluators[/{userId}]` | Admin | Evaluadores de la prueba. Solo se asignan evaluadores activos |
+| GET | `/api/evaluation/queue` | Evaluador | Pendientes de sus pruebas, sin los suyos como candidato |
+| GET · POST | `/api/evaluation/{resultId}` | Evaluador | A ciegas. El `GET` reserva. `404` si la prueba no está asignada |
+| POST · DELETE | `/api/evaluation/{resultId}/reservation` | Evaluador | Renueva o libera la propia |
+| GET | `/api/evaluation/{resultId}/integrity` | Evaluador | Señales con `ElapsedSeconds` y `OccurredAt` nulo |
+| GET | `/api/evaluation/history[/{resultId}]` | Evaluador | Sus correcciones, aunque ya no tenga asignada la prueba |
+
+Una reserva ajena vigente responde `409` al abrir y al enviar. La reserva se toma con un `UPDATE` condicional, así que dos aperturas simultáneas no pueden ganar las dos.
+
 El detalle de un resultado y el de corrección muestran las respuestas en el **orden de la prueba**, no en el que vio el candidato: así se comparan candidatos sobre el mismo orden.
 
 ---
@@ -660,6 +684,18 @@ El administrador da de alta administradores y evaluadores, cambia el rol, desact
 - **Sin contraseñas en la consola.** El alta y el restablecimiento envían un enlace a `/fijar-contrasena/{token}` que caduca a las 48 horas y vale una vez. Emitir un enlace nuevo invalida los anteriores del mismo usuario.
 - **Tres protecciones.** Nadie se cambia el rol, se desactiva ni se restablece el acceso a sí mismo. Y siempre queda un administrador activo: las operaciones que retiran un administrador toman un bloqueo de aplicación de SQL Server (`sp_getapplock`), así que dos administradores que se desactivan a la vez quedan en fila y el segundo recibe `409`.
 - **Invitaciones solo para alumnos.** Enviar una prueba al correo de un administrador o de un evaluador responde `400`; en el envío masivo, falla solo ese candidato.
+
+### Corrección a ciegas (`/evaluacion`)
+
+El administrador asigna evaluadores a cada prueba desde su detalle. El evaluador corrige los pendientes de esas pruebas en `/evaluacion`.
+
+- **Sin identidad.** Los DTO del evaluador no tienen campos de nombre ni de email. El candidato es `Candidato R-<id>`, distinto en cada resultado. Las fechas son `DateOnly`, y las señales de integridad llevan los segundos desde el inicio en lugar de la hora del reloj, porque la hora a la que alguien hizo la prueba ayuda a saber quién la hizo.
+- **Acceso en una consulta.** `GetForEvaluatorAsync` exige la asignación y excluye los resultados del propio evaluador como candidato. Inexistente, no asignado o propio dan el mismo `404`. La comprobación se repite en el envío.
+- **Reserva.** Abrir una corrección la reserva 30 minutos; la pantalla la renueva cada 10 mientras sigue abierta. «Cancelar» o el envío la liberan; si se cierra la pestaña, caduca sola.
+- **Historial.** Filtrado por `ReviewedByUserId`, no por la asignación.
+- **Cambio de rol.** Quien deja de ser evaluador pierde sus asignaciones y sus reservas. La desactivación las conserva.
+
+> **Límite de la ceguera.** Lo que el candidato escribe llega tal cual, y en una prueba que hizo una sola persona la identidad se puede deducir. La ceguera quita la identidad de la pantalla; no la hace imposible de averiguar.
 
 ### Contenido del portal (`/portal`)
 
@@ -862,6 +898,7 @@ ExamSessions ───────── FK → ExamTokens                (CASCA
 UserAnswers ────────── FK → ExamSessions (CASCADE), Questions, Answers
 ExamResults ────────── FK → ExamSessions (CASCADE, UNIQUE), Exams, Users (SET NULL)
 ExamIntegrityEvents ── FK → ExamSessions               (CASCADE delete)
+ExamEvaluators ─────── FK → Exams (CASCADE), Users
 PasswordSetupTokens ── FK → Users                      (CASCADE delete)
 ```
 
@@ -902,12 +939,14 @@ Para bases de datos **ya existentes** creadas con una versión anterior. Son adi
 | [`add_integrity_columns.sql`](scripts/add_integrity_columns.sql) | Añade `ExamSessions.ShuffleSeed` e `ExamSessions.IntegrityLimitReached`, y crea `ExamIntegrityEvents` con su FK en cascada. Las sesiones existentes quedan sin semilla: conservan el orden de la prueba y constan como anteriores al registro |
 | [`add_category_ai_generation_flag.sql`](scripts/add_category_ai_generation_flag.sql) | Añade `Categories.AllowsAiGeneration` con default `1` y marca la categoría `iECS` como no apta para generación por IA |
 | [`add_user_roles.sql`](scripts/add_user_roles.sql) | Añade `Users.Role` (rellenado desde `IsAdmin`: 1 → Admin, 0 → Alumno) con su `CHECK`, `Users.SecurityStamp` con un valor propio por fila, y la tabla `PasswordSetupTokens`. Después **quita `Users.IsAdmin`**: el binario anterior ya no arranca contra la base actualizada. La cabecera trae el SQL para volver atrás |
+| [`add_evaluator_columns.sql`](scripts/add_evaluator_columns.sql) | Crea `ExamEvaluators` y añade `ExamResults.ReservedByUserId` y `ReservedUntil`. Solo añade: el binario anterior sigue funcionando contra la base actualizada |
 
 ```bash
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_link_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_category_ai_generation_flag.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
 ```
 
 > **Antes de `add_user_roles.sql`**, comprueba que no hay pruebas en curso: los tokens de la versión anterior no llevan sello y la API los rechaza, así que un candidato a mitad de prueba perdería el guardado hasta volver a abrir su enlace. Despliega cuando `SELECT COUNT(*) FROM dbo.ExamSessions WHERE Status = 1` devuelva `0`.

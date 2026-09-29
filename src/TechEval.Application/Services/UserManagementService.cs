@@ -42,13 +42,19 @@ public class UserManagementService : IUserManagementService
     private readonly PasswordSetupService _passwordSetup;
     private readonly IAdminCountLock _adminLock;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IRepository<ExamEvaluator> _assignmentRepo;
+    private readonly IExamResultRepository _resultRepo;
 
     public UserManagementService(
         IRepository<User> userRepo,
         PasswordSetupService passwordSetup,
         IAdminCountLock adminLock,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IRepository<ExamEvaluator> assignmentRepo,
+        IExamResultRepository resultRepo)
     {
+        _assignmentRepo = assignmentRepo;
+        _resultRepo = resultRepo;
         _userRepo = userRepo;
         _passwordSetup = passwordSetup;
         _adminLock = adminLock;
@@ -125,6 +131,15 @@ public class UserManagementService : IUserManagementService
         {
             if (user is { Role: UserRole.Admin, IsActive: true })
                 await EnsureAnotherActiveAdminAsync(tx);
+
+            // Quien deja de ser evaluador deja de corregir: fuera sus asignaciones y sus
+            // reservas. Sus correcciones hechas siguen a su nombre en ReviewedByUserId.
+            if (user.Role == UserRole.Evaluador)
+            {
+                foreach (var assignment in await _assignmentRepo.FindAsync(a => a.UserId == user.Id, tx))
+                    await _assignmentRepo.DeleteAsync(assignment, tx);
+                await _resultRepo.ReleaseAllOfAsync(user.Id, tx);
+            }
 
             user.Role = dto.Role;
             user.RotateSecurityStamp();

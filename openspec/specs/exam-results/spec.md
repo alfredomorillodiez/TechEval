@@ -164,3 +164,16 @@ El sistema SHALL calcular `ObtainedPoints` como la suma de los `AwardedPoints` d
 - **GIVEN** un resultado en el que el candidato acertó una pregunta de test que valía 1 punto, con `AwardedPoints = 1` registrado
 - **WHEN** un administrador edita esa pregunta y le asigna 5 puntos, y después se recalcula el resultado al cerrar su corrección manual
 - **THEN** el sistema SHALL seguir contabilizando 1 punto por esa respuesta, manteniendo la coherencia con el `TotalPoints` congelado en el envío
+
+### Requirement: El detalle muestra quién corrigió
+El detalle de un resultado que el administrador consulta SHALL incluir, cuando el resultado tiene preguntas abiertas corregidas, el nombre de quien lo corrigió y la fecha de la corrección. Si la cuenta del corrector está desactivada, el detalle SHALL mostrar igualmente su nombre.
+
+#### Scenario: Resultado corregido por un evaluador
+- **GIVEN** un resultado corregido por el evaluador "Laura Gil"
+- **WHEN** un administrador consulta su detalle
+- **THEN** el detalle indica que lo corrigió Laura Gil, y cuándo
+
+#### Scenario: Resultado sin preguntas abiertas
+- **GIVEN** un resultado corregido de forma automática, sin preguntas abiertas
+- **WHEN** un administrador consulta su detalle
+- **THEN** el detalle no indica ningún corrector

@@ -171,8 +171,54 @@ public class ApiService
     public Task<List<PendingReviewSummaryDto>?> GetPendingReviewsAsync()
         => GetAsync<List<PendingReviewSummaryDto>>("api/review/pending");
 
-    public Task<PendingReviewDetailDto?> GetReviewDetailAsync(int resultId)
-        => GetAsync<PendingReviewDetailDto>($"api/review/{resultId}");
+    /// <summary>
+    /// Abrir el detalle reserva el resultado. Con el código, la pantalla distingue un 409
+    /// (ya corregido, o reservado por otra persona) de un 404.
+    /// </summary>
+    public Task<(PendingReviewDetailDto? Result, int StatusCode, string? Error)> GetReviewDetailAsync(int resultId)
+        => SendAsync<PendingReviewDetailDto>(HttpMethod.Get, $"api/review/{resultId}", null);
+
+    public async Task<bool> RenewReviewReservationAsync(int resultId)
+        => (await SendAsync<object>(HttpMethod.Post, $"api/review/{resultId}/reservation", null)).StatusCode == 200;
+
+    public async Task<bool> ReleaseReviewReservationAsync(int resultId)
+        => (await SendAsync<object>(HttpMethod.Delete, $"api/review/{resultId}/reservation", null)).StatusCode == 204;
+
+    // Evaluación a ciegas (rol Evaluador)
+    public Task<List<EvaluatorQueueItemDto>?> GetEvaluationQueueAsync()
+        => GetAsync<List<EvaluatorQueueItemDto>>("api/evaluation/queue");
+
+    public Task<(EvaluatorReviewDetailDto? Result, int StatusCode, string? Error)> GetEvaluationDetailAsync(int resultId)
+        => SendAsync<EvaluatorReviewDetailDto>(HttpMethod.Get, $"api/evaluation/{resultId}", null);
+
+    public async Task<bool> RenewEvaluationReservationAsync(int resultId)
+        => (await SendAsync<ReservationDto>(HttpMethod.Post, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 200;
+
+    public async Task<bool> ReleaseEvaluationReservationAsync(int resultId)
+        => (await SendAsync<object>(HttpMethod.Delete, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 204;
+
+    public Task<(EvaluatorReviewOutcomeDto? Result, int StatusCode, string? Error)> SubmitEvaluationAsync(
+        int resultId, SubmitReviewDto dto)
+        => SendAsync<EvaluatorReviewOutcomeDto>(HttpMethod.Post, $"api/evaluation/{resultId}", dto);
+
+    public Task<IntegrityReportDto?> GetEvaluationIntegrityAsync(int resultId)
+        => GetAsync<IntegrityReportDto>($"api/evaluation/{resultId}/integrity");
+
+    public Task<List<EvaluatorHistoryItemDto>?> GetEvaluationHistoryAsync()
+        => GetAsync<List<EvaluatorHistoryItemDto>>("api/evaluation/history");
+
+    public Task<EvaluatorHistoryDetailDto?> GetEvaluationHistoryDetailAsync(int resultId)
+        => GetAsync<EvaluatorHistoryDetailDto>($"api/evaluation/history/{resultId}");
+
+    // Evaluadores de una prueba
+    public Task<List<ExamEvaluatorDto>?> GetExamEvaluatorsAsync(int examId)
+        => GetAsync<List<ExamEvaluatorDto>>($"api/exams/{examId}/evaluators");
+
+    public Task<(List<ExamEvaluatorDto>? Result, int StatusCode, string? Error)> AssignEvaluatorAsync(int examId, int userId)
+        => SendAsync<List<ExamEvaluatorDto>>(HttpMethod.Post, $"api/exams/{examId}/evaluators/{userId}", null);
+
+    public Task<(List<ExamEvaluatorDto>? Result, int StatusCode, string? Error)> UnassignEvaluatorAsync(int examId, int userId)
+        => SendAsync<List<ExamEvaluatorDto>>(HttpMethod.Delete, $"api/exams/{examId}/evaluators/{userId}", null);
 
     /// <summary>
     /// Devuelve el resultado corregido, o el código de estado cuando falla: la pantalla

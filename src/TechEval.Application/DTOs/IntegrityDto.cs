@@ -24,13 +24,19 @@ public enum IntegrityAvailability
 /// `QuestionNumber` es la posición de la pregunta en el examen, que es el orden en que el
 /// corrector ve las respuestas. El candidato la vio en otra posición.
 /// </summary>
+/// <param name="OccurredAt">
+/// Hora UTC de la señal. Solo para el administrador: al evaluador le llega nula, porque la hora
+/// a la que alguien hizo la prueba ayuda a saber quién la hizo.
+/// </param>
+/// <param name="ElapsedSeconds">Segundos desde el inicio de la sesión. Llega a los dos.</param>
 public record IntegrityEventDto(
     IntegrityEventType Type,
-    DateTime OccurredAt,
+    DateTime? OccurredAt,
     int? QuestionId,
     int? QuestionNumber,
     int? AwaySeconds,
-    int? PastedChars);
+    int? PastedChars,
+    int ElapsedSeconds = 0);
 
 public record PastesByQuestionDto(
     int QuestionId,

@@ -33,16 +33,20 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 
 ### Corrección manual de preguntas abiertas
 
-- **Cola de pendientes** — un resultado con preguntas abiertas queda en estado `PendingReview` hasta que un administrador lo corrige; la cola se ordena del más antiguo al más reciente
+- **Cola de pendientes** — un resultado con preguntas abiertas queda en estado `PendingReview` hasta que un administrador o un evaluador asignado lo corrige; la cola se ordena del más antiguo al más reciente
+- **Evaluadores por prueba** — el administrador asigna evaluadores en el detalle de la prueba. Cada evaluador ve solo los pendientes de sus pruebas, nunca un resultado suyo como candidato. Una prueba con preguntas abiertas y sin evaluador la corrige solo el administrador, y el dashboard la señala
+- **Corrección a ciegas** — el evaluador ve las respuestas, la referencia y las señales de integridad, pero no el nombre ni el email del candidato: la API no los envía. El candidato aparece como `Candidato R-<id>`, la fecha va sin hora y las señales llevan el tiempo desde el inicio en lugar de la hora del reloj
+- **Reserva de 30 minutos** — abrir una corrección la reserva para quien la abre; la pantalla la renueva mientras sigue abierta, y «Cancelar» o el envío la liberan. El administrador ve quién tiene cada reserva y puede liberarla
+- **Historial del evaluador** — sus correcciones, a ciegas y en solo lectura, aunque ya no tenga asignada la prueba
 - **Pantalla de corrección** — muestra cada respuesta del candidato junto a la respuesta de referencia, y admite puntuación y comentario por respuesta
 - **Corrección completa** — el envío corrige todas las respuestas abiertas de una vez; no se admite la corrección parcial
 - **Cierre del resultado** — al enviar la corrección, el sistema recalcula la nota, fija el veredicto, pasa el resultado a `Reviewed` y avisa al candidato
-- **Trazabilidad** — cada resultado guarda el administrador que lo corrigió (`ReviewedByUserId`)
+- **Trazabilidad** — cada resultado guarda quién lo corrigió (`ReviewedByUserId`), y el detalle se lo muestra al administrador
 - **Sin doble corrección** — un resultado ya corregido devuelve `409 Conflict` ante un segundo intento
 
 ### Cuentas, roles y portal del alumno
 
-- **Tres roles, uno por usuario** — `Admin` (consola de administración), `Evaluador` (corrección de pruebas; en esta versión solo ve una página de bienvenida, sin datos) y `Alumno` (portal propio)
+- **Tres roles, uno por usuario** — `Admin` (consola de administración), `Evaluador` (corrige a ciegas las pruebas que tiene asignadas) y `Alumno` (portal propio)
 - **Gestión de usuarios** (`/admin/usuarios`) — el administrador da de alta administradores y evaluadores, cambia el rol, desactiva, reactiva y restablece el acceso. Nadie puede cambiarse el rol, desactivarse ni restablecerse el acceso a sí mismo, y siempre queda al menos un administrador activo, también cuando dos actúan a la vez
 - **La contraseña la fija su dueño** — el alta y el restablecimiento envían por correo un enlace de un solo uso que caduca a las 48 horas. El administrador nunca conoce la contraseña de otra persona. La base de datos guarda solo el SHA-256 del enlace
 - **Revocación inmediata** — el JWT lleva un sello de seguridad que la API compara en cada petición. Desactivar una cuenta, cambiarle el rol o restablecerle el acceso invalida sus tokens en su siguiente petición, sin esperar a que caduquen, y la Web cierra la sesión
@@ -156,6 +160,9 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
 
 # Roles: Users.Role y Users.SecurityStamp, tabla PasswordSetupTokens; quita Users.IsAdmin
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
+
+# Evaluadores: tabla ExamEvaluators y la reserva en ExamResults (ReservedByUserId, ReservedUntil)
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
 ```
 
 > **Antes de aplicar `add_user_roles.sql`**, comprueba que no hay pruebas en curso. Desde este cambio el JWT lleva un sello de seguridad, y la API rechaza los tokens emitidos por la versión anterior. Un candidato a mitad de prueba perdería el guardado de sus respuestas hasta volver a abrir su enlace. Despliega cuando esta consulta devuelva `0`:
@@ -283,7 +290,8 @@ TechEval/
 | `/admin/results/pending` | Admin | Cola de resultados pendientes de corrección |
 | `/admin/results/{id}/review` | Admin | Corrección de las preguntas abiertas de un resultado |
 | `/admin/usuarios` | Admin | Gestión de usuarios: alta, rol, estado y acceso |
-| `/evaluacion` | Evaluador | Bienvenida del evaluador, sin datos hasta que tenga pruebas asignadas |
+| `/evaluacion` · `/evaluacion/{id}` | Evaluador | Cola de correcciones de sus pruebas y corrección a ciegas |
+| `/evaluacion/historial` · `/evaluacion/historial/{id}` | Evaluador | Sus correcciones, en solo lectura |
 | `/portal` | Alumno | Pruebas pendientes y realizadas del alumno |
 | `/fijar-contrasena/{token}` | Público | Fijar la contraseña con el enlace del correo |
 | `/sesion-no-valida` | Público | Aviso al alumno cuya sesión rechazó la API: debe volver a abrir su enlace |
@@ -312,6 +320,12 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | `GET` | `/api/results/{id}/integrity` | Admin — actividad del candidato durante la prueba |
 | `GET` | `/api/review/pending` · `/api/review/{resultId}` | Admin |
 | `POST` | `/api/review/{resultId}` | Admin |
+| `POST` `DELETE` | `/api/review/{resultId}/reservation` | Admin — renueva la propia o libera cualquiera |
+| `GET` `POST` `DELETE` | `/api/exams/{id}/evaluators[/{userId}]` | Admin — evaluadores de la prueba |
+| `GET` | `/api/evaluation/queue` · `/api/evaluation/history[/{resultId}]` | Evaluador |
+| `GET` `POST` | `/api/evaluation/{resultId}` | Evaluador — el `GET` reserva; `404` si la prueba no está asignada |
+| `POST` `DELETE` | `/api/evaluation/{resultId}/reservation` | Evaluador — solo la propia |
+| `GET` | `/api/evaluation/{resultId}/integrity` | Evaluador — señales sin la hora del reloj |
 | `GET` | `/api/student/pending` · `/api/student/completed` | Alumno |
 | `GET` | `/api/exam/validate/{token}` | Público — devuelve el JWT de alumno |
 | `POST` | `/api/exam/start/{token}` · `/api/exam/answer/{sessionId}` · `/api/exam/submit` | Público — token del enlace |
@@ -324,13 +338,17 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | Capacidad | Admin | Evaluador | Alumno |
 |---|:-:|:-:|:-:|
 | Banco de preguntas, pruebas e invitaciones | ✓ | — | — |
-| Resultados, dashboard y corrección | ✓ | — | — |
+| Resultados y dashboard | ✓ | — | — |
+| Asignar evaluadores a las pruebas | ✓ | — | — |
+| Corregir, con la identidad del candidato | ✓ (todas las pruebas) | — | — |
+| Corregir a ciegas | — | ✓ (sus pruebas) | — |
+| Historial de correcciones propias | — | ✓ | — |
 | Gestión de usuarios | ✓ | — | — |
 | Portal del alumno y resolución de la prueba | — | — | ✓ |
 
-La matriz vive en un solo sitio, `src/TechEval.API/Authorization/Policies.cs`. Los controladores nombran una política (`Gestion`, `Alumno`), nunca una lista de roles.
+La matriz vive en un solo sitio, `src/TechEval.API/Authorization/Policies.cs`. Los controladores nombran una política (`Gestion`, `Evaluacion`, `Alumno`), nunca una lista de roles. Todo lo del evaluador vive en `api/evaluation`, con su propia política.
 
-El evaluador todavía no tiene permisos sobre datos. La corrección a ciegas de las pruebas que se le asignen es el cambio siguiente (`evaluator-review`).
+> **Lo que la corrección a ciegas no cubre.** La API no envía el nombre ni el email del candidato, pero lo que el candidato escribe llega tal cual: si pone su nombre en una respuesta, el evaluador lo lee. Y en una prueba que hizo una sola persona, quien sepa quién la hizo sabe de quién es. La ceguera quita la identidad de la pantalla; no impide deducirla.
 
 **Alta de un evaluador o de otro administrador:**
 
@@ -371,24 +389,26 @@ Candidato  →  POST /api/exam/submit
              └─ con preguntas abiertas  →  ExamResult = PendingReview · Passed = NULL
                           │
                           ▼
-Admin  →  /admin/results/pending        cola del más antiguo al más reciente
+Admin      →  /admin/results/pending    cola completa, con la identidad y las reservas
+Evaluador  →  /evaluacion               solo sus pruebas, a ciegas
                           │
                           ▼
-Admin  →  /admin/results/{id}/review    puntuación y comentario por respuesta
-                          │  POST /api/review/{resultId}   (todas las abiertas a la vez)
+Abrir la corrección reserva el resultado 30 minutos (GET /api/review/{id} · GET /api/evaluation/{id})
+                          │  puntuación y comentario por respuesta
+                          │  POST /api/review/{id} · POST /api/evaluation/{id}   (todas las abiertas a la vez)
                           ▼
    ExamResult = Reviewed · nota recalculada · veredicto fijado · aviso al candidato
 ```
 
-Estado implicado: `ExamResultStatus` (`PendingReview` · `Reviewed`). Cada respuesta guarda los puntos otorgados en `UserAnswers.AwardedPoints` y el comentario del corrector en `UserAnswers.ReviewerComment`.
+Estado implicado: `ExamResultStatus` (`PendingReview` · `Reviewed`), y la reserva en `ExamResults.ReservedByUserId` y `ReservedUntil`. Cada respuesta guarda los puntos otorgados en `UserAnswers.AwardedPoints` y el comentario del corrector en `UserAnswers.ReviewerComment`.
 
 ---
 
 ## Especificaciones (OpenSpec)
 
-El directorio [`openspec/`](openspec/) mantiene la especificación viva del sistema, dividida en 13 capacidades:
+El directorio [`openspec/`](openspec/) mantiene la especificación viva del sistema, dividida en 15 capacidades:
 
-`admin-console` · `authentication` · `candidate-experience` · `deployment-ops` · `exam-delivery` · `exam-integrity` · `exam-management` · `exam-results` · `exam-taking` · `open-question-review` · `project-architecture` · `question-bank` · `student-portal`
+`admin-console` · `authentication` · `candidate-experience` · `deployment-ops` · `evaluator-review` · `exam-delivery` · `exam-integrity` · `exam-management` · `exam-results` · `exam-taking` · `open-question-review` · `project-architecture` · `question-bank` · `student-portal` · `user-management`
 
 > `ai-question-generation` describe una capacidad ya retirada del código. Su spec sigue en `openspec/specs/` a la espera de archivarse.
 

@@ -9,7 +9,9 @@ public record PendingReviewSummaryDto(
     string CandidateEmail,
     DateTime CompletedAt,
     int DaysWaiting,
-    int OpenAnswerCount);
+    int OpenAnswerCount,
+    string? ReservedByName = null,
+    DateTime? ReservedUntil = null);
 
 /// <summary>Una respuesta abierta a corregir, con la referencia para el corrector</summary>
 public record ReviewableAnswerDto(
@@ -31,7 +33,8 @@ public record PendingReviewDetailDto(
     DateTime CompletedAt,
     int TotalPoints,
     int AutoScoredPoints,
-    List<ReviewableAnswerDto> Answers);
+    List<ReviewableAnswerDto> Answers,
+    DateTime? ReservedUntil = null);
 
 /// <summary>Puntuación otorgada a una respuesta abierta concreta</summary>
 public record ReviewAnswerInputDto(

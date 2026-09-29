@@ -69,7 +69,7 @@
                     <table class="table table-sm align-middle mb-0">
                         <thead>
                             <tr class="small text-muted">
-                                <th>Hora</th>
+                                <th>@(Report.Events.Any(e => e.OccurredAt is null) ? "Desde el inicio" : "Hora")</th>
                                 <th>Señal</th>
                                 <th>Pregunta <span class="fw-normal">(orden de la prueba)</span></th>
                                 <th>Dato</th>
@@ -79,7 +79,7 @@
                             @foreach (var e in Report.Events)
                             {
                                 <tr>
-                                    <td class="small">@e.OccurredAt.ToLocalTime().ToString("HH:mm:ss")</td>
+                                    <td class="small">@TimeOf(e)</td>
                                     <td>@LabelOf(e.Type)</td>
                                     <td>@(e.QuestionNumber?.ToString() ?? "—")</td>
                                     <td class="small">@DetailOf(e)</td>
@@ -94,6 +94,12 @@
 </div>
 
 @code {
+    // El evaluador recibe la señal sin hora del reloj (la hora ayuda a saber quién hizo la
+    // prueba): entonces se muestra el tiempo desde el inicio de la sesión.
+    private static string TimeOf(IntegrityEventDto e) => e.OccurredAt is DateTime at
+        ? at.ToLocalTime().ToString("HH:mm:ss")
+        : $"{e.ElapsedSeconds / 60:00}:{e.ElapsedSeconds % 60:00}";
+
     /// <summary>Informe ya cargado por la página, o null si no se pudo cargar.</summary>
     [Parameter] public IntegrityReportDto? Report { get; set; }
 

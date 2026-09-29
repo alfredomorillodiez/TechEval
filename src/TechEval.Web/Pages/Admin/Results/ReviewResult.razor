@@ -18,13 +18,14 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
-    else if (_conflict)
+    else if (_conflict is not null)
     {
+        @* 409: ya corregido, o reservado por otra persona. El mensaje de la API dice cuál y,
+           si es una reserva, quién la tiene y hasta cuándo. *@
         <div class="alert alert-warning d-flex justify-content-between align-items-center">
             <div>
                 <i class="bi bi-exclamation-triangle me-2"></i>
-                <strong>Este resultado ya ha sido corregido.</strong>
-                Es posible que otro administrador se haya adelantado.
+                <strong>@_conflict</strong>
             </div>
             <a href="/admin/results/pending" class="btn btn-warning btn-sm">Volver a la cola</a>
         </div>
@@ -35,6 +36,8 @@
     }
     else
     {
+        <ReservationKeeper Renew="() => Api.RenewReviewReservationAsync(Id)" OnLost="OnReservationLost" />
+
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-body">
                 <div class="row g-3 align-items-center">
@@ -61,150 +64,24 @@
 
         <IntegrityPanel Report="_integrity" />
 
-        <div class="alert alert-info d-flex justify-content-between align-items-center">
-            <div>
-                <i class="bi bi-info-circle me-2"></i>
-                Puntuación provisional:
-                <strong>@ProvisionalPoints / @_detail.TotalPoints pts</strong>
-                (@ProvisionalPercentage%)
-            </div>
-            <span class="small">Se confirmará al guardar la corrección.</span>
-        </div>
-
-        @foreach (var (answer, index) in _detail.Answers.Select((a, i) => (a, i + 1)))
-        {
-            var input = _inputs[answer.UserAnswerId];
-            <div class="card border-0 shadow-sm mb-3">
-                <div class="card-body">
-                    <div class="d-flex gap-3">
-                        <span class="badge bg-secondary rounded-pill px-2 py-1 mt-1" style="min-width:2rem;text-align:center;">@index</span>
-                        <div class="flex-grow-1">
-                            <p class="fw-semibold mb-3">@answer.QuestionText</p>
-
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <p class="text-muted small mb-1">Respuesta del candidato</p>
-                                    <div class="px-3 py-2 rounded border bg-light" style="min-height:6rem;white-space:pre-wrap;">
-                                        @if (string.IsNullOrWhiteSpace(answer.OpenAnswer))
-                                        {
-                                            <span class="text-muted fst-italic">Sin respuesta</span>
-                                        }
-                                        else
-                                        {
-                                            @answer.OpenAnswer
-                                        }
-                                    </div>
-                                    @if (PastesOf(answer.QuestionId) is { } pastes)
-                                    {
-                                        @* Junto a la respuesta, que es donde el dato sirve para decidir. *@
-                                        <p class="small text-warning-emphasis mt-1 mb-0">
-                                            <i class="bi bi-clipboard me-1"></i>
-                                            Pegó texto @(pastes.Count == 1 ? "1 vez" : $"{pastes.Count} veces"),
-                                            @pastes.TotalChars caracteres en total.
-                                        </p>
-                                    }
-                                </div>
-                                <div class="col-md-6">
-                                    <p class="text-muted small mb-1">
-                                        <i class="bi bi-lightbulb me-1"></i> Respuesta de referencia
-                                    </p>
-                                    <div class="px-3 py-2 rounded border bg-white" style="min-height:6rem;white-space:pre-wrap;">
-                                        @if (string.IsNullOrWhiteSpace(answer.SampleAnswer))
-                                        {
-                                            <span class="text-muted fst-italic">Esta pregunta no tiene respuesta de referencia.</span>
-                                        }
-                                        else
-                                        {
-                                            @answer.SampleAnswer
-                                        }
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row g-3 mt-1">
-                                <div class="col-md-3">
-                                    <label class="form-label small fw-semibold mb-1">
-                                        Puntos (0 – @answer.MaxPoints)
-                                    </label>
-                                    <input type="number" class="form-control @(IsValid(answer) ? "" : "is-invalid")"
-                                           min="0" max="@answer.MaxPoints"
-                                           @bind="input.AwardedPoints" @bind:event="oninput" />
-                                    @if (!IsValid(answer))
-                                    {
-                                        <div class="invalid-feedback d-block">
-                                            Debe estar entre 0 y @answer.MaxPoints.
-                                        </div>
-                                    }
-                                </div>
-                                <div class="col-md-9">
-                                    <label class="form-label small fw-semibold mb-1">
-                                        Comentario para el candidato (opcional)
-                                    </label>
-                                    <input type="text" class="form-control" maxlength="2000"
-                                           placeholder="Por qué esta puntuación..."
-                                           @bind="input.ReviewerComment" @bind:event="oninput" />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        }
-
-        @if (_error is not null)
-        {
-            <div class="alert alert-danger">@_error</div>
-        }
-
-        <div class="d-flex justify-content-between align-items-center">
-            <div class="text-muted small">
-                @if (!AllValid)
-                {
-                    <span class="text-danger">
-                        <i class="bi bi-exclamation-circle me-1"></i>
-                        Corrige las puntuaciones fuera de rango antes de guardar.
-                    </span>
-                }
-                else if (_detail.Answers.Count == 1)
-                {
-                    <span>Se corregirá la respuesta y se cerrará el resultado.</span>
-                }
-                else
-                {
-                    <span>Se corregirán las @_detail.Answers.Count respuestas de una sola vez.</span>
-                }
-            </div>
-            <div class="d-flex gap-2">
-                <a href="/admin/results/pending" class="btn btn-outline-secondary">Cancelar</a>
-                <button class="btn btn-success" disabled="@(!AllValid || _saving)" @onclick="SubmitAsync">
-                    @if (_saving)
-                    {
-                        <span class="spinner-border spinner-border-sm me-1"></span>
-                    }
-                    <i class="bi bi-check-lg me-1"></i> Guardar corrección y notificar
-                </button>
-            </div>
-        </div>
+        <ReviewForm Answers="_detail.Answers"
+                    AutoScoredPoints="_detail.AutoScoredPoints"
+                    TotalPoints="_detail.TotalPoints"
+                    Integrity="_integrity"
+                    Saving="_saving"
+                    Error="_error"
+                    OnSubmit="SubmitAsync"
+                    OnCancel="CancelAsync" />
     }
 </div>
 
 @code {
     [Parameter] public int Id { get; set; }
 
-    private bool _loading = true, _saving, _conflict;
-    private string? _error;
+    private bool _loading = true, _saving;
+    private string? _error, _conflict;
     private PendingReviewDetailDto? _detail;
     private IntegrityReportDto? _integrity;
-    private readonly Dictionary<int, AnswerInput> _inputs = new();
-
-    private PastesByQuestionDto? PastesOf(int questionId)
-        => _integrity?.PastesByQuestion.FirstOrDefault(p => p.QuestionId == questionId);
-
-    private class AnswerInput
-    {
-        public int AwardedPoints { get; set; }
-        public string? ReviewerComment { get; set; }
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -217,62 +94,34 @@
 
         var detail = Api.GetReviewDetailAsync(Id);
         var integrity = Api.GetIntegrityReportAsync(Id);
-        _detail = await detail;
+        var (result, status, error) = await detail;
         _integrity = await integrity;
-        if (_detail is not null)
-        {
-            foreach (var a in _detail.Answers)
-            {
-                // Las respuestas en blanco llegan pre-puntuadas a 0: el corrector solo confirma.
-                _inputs[a.UserAnswerId] = new AnswerInput
-                {
-                    AwardedPoints = a.AwardedPoints ?? 0,
-                    ReviewerComment = a.ReviewerComment
-                };
-            }
-        }
+
+        if (status == 409) _conflict = error ?? "Este resultado no está disponible para corregir.";
+        else _detail = result;
         _loading = false;
     }
 
-    private bool IsValid(ReviewableAnswerDto a)
+    private void OnReservationLost()
+        => _conflict = "La reserva de este resultado se perdió: otra persona lo está corrigiendo.";
+
+    private async Task CancelAsync()
     {
-        var v = _inputs[a.UserAnswerId].AwardedPoints;
-        return v >= 0 && v <= a.MaxPoints;
+        await Api.ReleaseReviewReservationAsync(Id);
+        Nav.NavigateTo("/admin/results/pending");
     }
 
-    private bool AllValid => _detail is not null && _detail.Answers.All(IsValid);
-
-    private int ProvisionalPoints
-        => (_detail?.AutoScoredPoints ?? 0) + _inputs.Values.Sum(i => i.AwardedPoints);
-
-    private decimal ProvisionalPercentage
-        => _detail is { TotalPoints: > 0 }
-            ? Math.Round((decimal)ProvisionalPoints / _detail.TotalPoints * 100, 2)
-            : 0;
-
-    private async Task SubmitAsync()
+    private async Task SubmitAsync(SubmitReviewDto payload)
     {
-        if (_detail is null || !AllValid) return;
-
         _saving = true;
         _error = null;
-
-        var payload = new SubmitReviewDto(
-            _detail.Answers
-                .Select(a => new ReviewAnswerInputDto(
-                    a.UserAnswerId,
-                    _inputs[a.UserAnswerId].AwardedPoints,
-                    string.IsNullOrWhiteSpace(_inputs[a.UserAnswerId].ReviewerComment)
-                        ? null
-                        : _inputs[a.UserAnswerId].ReviewerComment))
-                .ToList());
 
         var (result, status, error) = await Api.SubmitReviewAsync(Id, payload);
         _saving = false;
 
         if (status == 409)
         {
-            _conflict = true;
+            _conflict = error ?? "Este resultado ya no está disponible para corregir.";
             return;
         }
 

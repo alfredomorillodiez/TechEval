@@ -38,7 +38,8 @@ public class UserManagementServiceTests
         var passwordSetup = new PasswordSetupService(
             new BaseRepository<PasswordSetupToken>(_db), users,
             new TokenService(Options.Create(new JwtSettings())), _email.Object, new FakeUnitOfWork());
-        _sut = new UserManagementService(users, passwordSetup, new AdminCountLock(_db), new FakeUnitOfWork());
+        _sut = new UserManagementService(users, passwordSetup, new AdminCountLock(_db), new FakeUnitOfWork(),
+            new BaseRepository<ExamEvaluator>(_db), new ExamResultRepository(_db));
 
         _admin = Nuevo("admin@test.com", UserRole.Admin, "hash-admin");
         _evaluador = Nuevo("laura@test.com", UserRole.Evaluador, "hash-laura");

@@ -13,7 +13,9 @@ public record ExamResultDto(
     bool? Passed,
     ExamResultStatus Status,
     DateTime CompletedAt,
-    List<AnswerReviewDto> Answers);
+    List<AnswerReviewDto> Answers,
+    string? ReviewedByName = null,
+    DateTime? ReviewedAt = null);
 
 public record AnswerReviewDto(
     string QuestionText,
@@ -43,7 +45,11 @@ public record DashboardStatsDto(
     decimal AverageScoreThisMonth,
     int PassRateThisMonth,
     int PendingReviewCount,
-    List<ExamResultSummaryDto> RecentResults);
+    List<ExamResultSummaryDto> RecentResults,
+    List<ExamRefDto>? ExamsWithoutEvaluator = null);
+
+/// <summary>Una prueba, solo para enlazarla.</summary>
+public record ExamRefDto(int Id, string Title);
 
 public record AuthResultDto(string Token, string Name, string Email, UserRole Role);
 

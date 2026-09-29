@@ -30,6 +30,52 @@ public interface IExamResultRepository : IRepository<ExamResult>
 
     /// <summary>Los más recientes, ordenados y limitados en la base de datos.</summary>
     Task<IReadOnlyList<ExamResult>> GetRecentAsync(int count, CancellationToken ct = default);
+
+    // ---- Reserva mientras alguien corrige -------------------------------------------------
+    // Cada operación es una sola escritura condicional, no leer y después escribir: dos
+    // correctores que abren a la vez no pueden ganar los dos.
+
+    /// <summary>
+    /// Reserva el resultado para <paramref name="userId"/> hasta <paramref name="until"/> si está
+    /// pendiente y libre, caducado o ya es suyo. False si otra persona tiene una reserva vigente
+    /// o si el resultado ya no está pendiente. También sirve para renovar.
+    /// </summary>
+    Task<bool> TryReserveAsync(int resultId, int userId, DateTime now, DateTime until, CancellationToken ct = default);
+
+    /// <summary>
+    /// Para el envío, dentro de su transacción: quita la reserva si es de <paramref name="userId"/>,
+    /// si no hay ninguna o si caducó. False si otra persona tiene una vigente.
+    /// </summary>
+    Task<bool> TryReleaseForSubmitAsync(int resultId, int userId, DateTime now, CancellationToken ct = default);
+
+    /// <summary>
+    /// Libera sin corregir. Con <paramref name="userId"/>, solo si la reserva es suya; con null,
+    /// siempre (el administrador). True si había algo que liberar.
+    /// </summary>
+    Task<bool> ReleaseAsync(int resultId, int? userId, CancellationToken ct = default);
+
+    /// <summary>Libera todas las reservas de un usuario: al dejar el rol de evaluador.</summary>
+    Task ReleaseAllOfAsync(int userId, CancellationToken ct = default);
+
+    /// <summary>Quién tiene la reserva y hasta cuándo, para explicar un 409.</summary>
+    Task<(int? UserId, string? UserName, DateTime? Until)> GetReservationAsync(int resultId, CancellationToken ct = default);
+
+    // ---- Evaluador ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Pendientes de las pruebas asignadas al evaluador, sin los suyos como candidato, del más
+    /// antiguo al más reciente.
+    /// </summary>
+    Task<IReadOnlyList<ExamResult>> GetPendingForEvaluatorAsync(int evaluatorId, string evaluatorEmail, CancellationToken ct = default);
+
+    /// <summary>
+    /// El resultado, para la corrección, solo si su prueba está asignada al evaluador y no es
+    /// suyo como candidato. Null en cualquier otro caso, sin distinguir cuál.
+    /// </summary>
+    Task<ExamResult?> GetForEvaluatorAsync(int resultId, int evaluatorId, string evaluatorEmail, CancellationToken ct = default);
+
+    /// <summary>Resultados que corrigió el usuario, del más reciente al más antiguo.</summary>
+    Task<IReadOnlyList<ExamResult>> GetReviewedByAsync(int userId, CancellationToken ct = default);
 }
 
 /// <summary>

@@ -48,7 +48,7 @@ El sistema SHALL impedir el acceso a cualquier página bajo `/admin` cuando no e
 
 #### Scenario: Acceso sin sesión a una página protegida
 - **GIVEN** un visitante sin token almacenado en `localStorage`
-- **WHEN** navega directamente a `/admin`, `/admin/questions`, `/admin/pruebas`, `/admin/results`, `/admin/usuarios` o `/evaluacion`
+- **WHEN** navega directamente a `/admin`, `/admin/questions`, `/admin/pruebas`, `/admin/results`, `/admin/usuarios`, `/evaluacion` o `/evaluacion/historial`
 - **THEN** el sistema MUST redirigir a `/login` antes de cargar los datos de la página
 
 #### Scenario: Evaluador en una página de administración
@@ -58,7 +58,7 @@ El sistema SHALL impedir el acceso a cualquier página bajo `/admin` cuando no e
 
 #### Scenario: Alumno en una página de administración o de evaluación
 - **GIVEN** un alumno con una sesión válida
-- **WHEN** navega directamente a una página bajo `/admin` o a `/evaluacion`
+- **WHEN** navega directamente a una página bajo `/admin` o bajo `/evaluacion`
 - **THEN** el sistema MUST redirigir a `/portal` antes de cargar los datos de la página
 
 #### Scenario: Sidebar visible solo con sesión activa
@@ -69,7 +69,7 @@ El sistema SHALL impedir el acceso a cualquier página bajo `/admin` cuando no e
 #### Scenario: Barra lateral del evaluador
 - **GIVEN** el layout principal con una sesión de rol `Evaluador`
 - **WHEN** se muestra cualquier página
-- **THEN** el sistema SHALL mostrar la barra lateral solo con el enlace a `/evaluacion`, el nombre del usuario conectado y el botón de cerrar sesión
+- **THEN** el sistema SHALL mostrar la barra lateral solo con los enlaces a `/evaluacion` (Correcciones) y a `/evaluacion/historial` (Historial), el nombre del usuario conectado y el botón de cerrar sesión
 
 #### Scenario: Cierre de sesión
 - **GIVEN** un usuario autenticado con rol `Admin` o `Evaluador`
@@ -268,14 +268,6 @@ El sistema SHALL ofrecer una página pública en `/fijar-contrasena/{token}`. Al
 - **WHEN** alguien abre la página con un enlace caducado, usado o inexistente
 - **THEN** la página muestra el mensaje genérico y no muestra el formulario
 
-### Requirement: Bienvenida del evaluador
-El sistema SHALL ofrecer en `/evaluacion` una página para el rol `Evaluador`. En este cambio, la página SHALL mostrar el nombre del evaluador y un aviso de que todavía no tiene correcciones disponibles, y SHALL NOT mostrar datos de pruebas, candidatos ni resultados.
-
-#### Scenario: Evaluador tras el login
-- **GIVEN** un evaluador que inicia sesión
-- **WHEN** llega a `/evaluacion`
-- **THEN** la página muestra su nombre y el aviso, sin ningún dato de pruebas, candidatos ni resultados
-
 ### Requirement: Cierre de la sesión cuando la API la rechaza
 Cuando la API responde `401 Unauthorized` a una petición hecha con una sesión abierta, la interfaz SHALL cerrar la sesión local. Si el rol de la sesión era `Admin` o `Evaluador`, SHALL llevar a `/login` con el mensaje "Tu sesión ya no es válida. Inicia sesión de nuevo.". Si el rol era `Alumno`, SHALL mostrar un mensaje que pide volver a abrir el enlace de la invitación, porque el alumno no tiene contraseña. La petición de login SHALL quedar fuera de esta regla, porque su `401` significa credenciales incorrectas.
 
@@ -287,3 +279,36 @@ Cuando la API responde `401 Unauthorized` a una petición hecha con una sesión 
 #### Scenario: Login con credenciales incorrectas
 - **WHEN** la API responde `401` a la petición de login
 - **THEN** la interfaz muestra "Credenciales incorrectas." y no trata la respuesta como una sesión rechazada
+
+### Requirement: Evaluadores en el detalle de la prueba
+El detalle de una prueba (`/admin/pruebas/{id}`) SHALL mostrar sus evaluadores asignados y SHALL permitir al administrador añadir un evaluador activo, elegido de una lista, y quitar cualquiera de los asignados. Si la prueba tiene preguntas abiertas y ningún evaluador, la tarjeta SHALL avisar de que solo la corregirá el administrador.
+
+#### Scenario: Añadir un evaluador desde el detalle
+- **GIVEN** un administrador en el detalle de una prueba
+- **WHEN** elige un evaluador de la lista y lo añade
+- **THEN** la tarjeta muestra al evaluador entre los asignados
+
+#### Scenario: Prueba con abiertas y sin evaluador
+- **GIVEN** una prueba con preguntas abiertas y sin evaluadores
+- **WHEN** el administrador abre su detalle
+- **THEN** la tarjeta avisa de que solo el administrador corregirá sus resultados
+
+### Requirement: Aviso de pruebas sin evaluador en el dashboard
+El dashboard SHALL mostrar las pruebas activas que tienen preguntas abiertas y ningún evaluador asignado, con un acceso al detalle de cada una. Si no hay ninguna, SHALL NOT mostrar el aviso.
+
+#### Scenario: Prueba sin evaluador
+- **GIVEN** una prueba activa con una pregunta abierta y sin evaluadores
+- **WHEN** el administrador abre el dashboard
+- **THEN** el dashboard muestra esa prueba en el aviso, con un acceso a su detalle
+
+### Requirement: Reservas en la cola y en la corrección del administrador
+La cola de correcciones del administrador SHALL indicar, en cada resultado reservado, quién tiene la reserva y hasta cuándo, y SHALL ofrecer liberarla. La pantalla de corrección del administrador SHALL tomar y renovar la reserva igual que la del evaluador, y SHALL liberarla al cancelar. Si al abrir la corrección el resultado está reservado por otra persona, la pantalla SHALL decir quién lo tiene y hasta cuándo, y SHALL NOT mostrar el formulario.
+
+#### Scenario: Liberar una reserva desde la cola
+- **GIVEN** un administrador en `/admin/results/pending` con un resultado reservado por un evaluador
+- **WHEN** pulsa «Liberar» en esa fila y confirma
+- **THEN** la fila deja de mostrar la reserva
+
+#### Scenario: Abrir un resultado reservado por un evaluador
+- **WHEN** el administrador abre la corrección de un resultado reservado por un evaluador
+- **THEN** la pantalla dice qué evaluador lo tiene y hasta cuándo, y no muestra el formulario

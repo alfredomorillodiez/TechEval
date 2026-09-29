@@ -88,6 +88,67 @@
             </div>
         </div>
 
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-0 pt-3">
+                <h5 class="mb-0">Evaluadores <span class="badge bg-secondary ms-1">@_evaluators.Count</span></h5>
+            </div>
+            <div class="card-body">
+                @if (HasOpenQuestions && _evaluators.Count == 0)
+                {
+                    <div class="alert alert-warning py-2">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        Esta prueba tiene preguntas abiertas y ningún evaluador: solo el administrador corregirá sus resultados.
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_evaluatorError))
+                {
+                    <div class="alert alert-danger py-2">@_evaluatorError</div>
+                }
+                @if (_evaluators.Count > 0)
+                {
+                    <ul class="list-group list-group-flush mb-3">
+                        @foreach (var ev in _evaluators)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                <div>
+                                    <span class="fw-semibold">@ev.Name</span>
+                                    <span class="text-muted small ms-2">@ev.Email</span>
+                                    @if (!ev.IsActive) { <span class="badge bg-secondary ms-2">Inactivo</span> }
+                                </div>
+                                <button class="btn btn-sm btn-outline-danger" title="Quitar" disabled="@_evaluatorBusy"
+                                        @onclick="() => UnassignAsync(ev.UserId)">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                }
+                @{ var candidates = _availableEvaluators.Where(u => _evaluators.All(e => e.UserId != u.Id)).ToList(); }
+                @if (candidates.Count > 0)
+                {
+                    <div class="d-flex gap-2" style="max-width:480px;">
+                        <select class="form-select form-select-sm" @bind="_selectedEvaluatorId">
+                            <option value="0">Elige un evaluador…</option>
+                            @foreach (var u in candidates)
+                            {
+                                <option value="@u.Id">@u.Name (@u.Email)</option>
+                            }
+                        </select>
+                        <button class="btn btn-sm btn-primary text-nowrap" disabled="@(_selectedEvaluatorId == 0 || _evaluatorBusy)"
+                                @onclick="AssignAsync">
+                            <i class="bi bi-person-plus me-1"></i> Añadir
+                        </button>
+                    </div>
+                }
+                else if (_availableEvaluators.Count == 0)
+                {
+                    <p class="text-muted small mb-0">
+                        No hay evaluadores activos. Créalos en <a href="/admin/usuarios">Usuarios</a>.
+                    </p>
+                }
+            </div>
+        </div>
+
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-0 pt-3">
                 <h5 class="mb-0">Preguntas <span class="badge bg-secondary ms-1">@_exam.Questions.Count</span></h5>
@@ -210,8 +271,42 @@
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
         _exam = await Api.GetExamAsync(Id);
-        if (_exam is not null) PopulateFields(_exam);
+        if (_exam is not null)
+        {
+            PopulateFields(_exam);
+            _evaluators = await Api.GetExamEvaluatorsAsync(Id) ?? new();
+            _availableEvaluators = await Api.GetUsersAsync(UserRole.Evaluador, active: true) ?? new();
+        }
         _loading = false;
+    }
+
+    // ---- Evaluadores ----------------------------------------------------------------------
+
+    private List<ExamEvaluatorDto> _evaluators = new();
+    private List<UserDto> _availableEvaluators = new();
+    private int _selectedEvaluatorId;
+    private bool _evaluatorBusy;
+    private string? _evaluatorError;
+
+    private bool HasOpenQuestions => _exam?.Questions.Any(q => q.QuestionType == QuestionType.OpenEnded) ?? false;
+
+    private async Task AssignAsync()
+    {
+        _evaluatorBusy = true; _evaluatorError = null;
+        var (list, _, error) = await Api.AssignEvaluatorAsync(Id, _selectedEvaluatorId);
+        _evaluatorBusy = false;
+        if (list is null) { _evaluatorError = error ?? "No se pudo asignar el evaluador."; return; }
+        _evaluators = list;
+        _selectedEvaluatorId = 0;
+    }
+
+    private async Task UnassignAsync(int userId)
+    {
+        _evaluatorBusy = true; _evaluatorError = null;
+        var (list, _, error) = await Api.UnassignEvaluatorAsync(Id, userId);
+        _evaluatorBusy = false;
+        if (list is null) { _evaluatorError = error ?? "No se pudo quitar el evaluador."; return; }
+        _evaluators = list;
     }
 
     private void PopulateFields(ExamDto exam)

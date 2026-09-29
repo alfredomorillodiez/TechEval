@@ -33,6 +33,12 @@ public class OpenQuestionReviewServiceTests
                 1, "Ana", "ana@test.com", "Prueba", 10, 8, 80m, true,
                 ExamResultStatus.Reviewed, DateTime.UtcNow, new List<AnswerReviewDto>()));
 
+        // Reserva libre: estas pruebas no tratan de la reserva, que tiene las suyas.
+        _resultRepo.Setup(r => r.TryReserveAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _resultRepo.Setup(r => r.TryReleaseForSubmitAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
         _sut = new OpenQuestionReviewService(
             _resultRepo.Object, _examRepo.Object, _answerRepo.Object,
             _email.Object, _resultService.Object, _uow);
@@ -215,7 +221,7 @@ public class OpenQuestionReviewServiceTests
         result.ExamSession!.UserAnswers.Add(blank);
         Setup(result);
 
-        var detail = await _sut.GetDetailAsync(1);
+        var detail = await _sut.GetDetailAsync(1, 9);
 
         detail!.Answers.Should().HaveCount(2);   // ambas abiertas, no solo la respondida
         var blankDto = detail.Answers.Single(a => a.UserAnswerId == 300);
@@ -228,7 +234,7 @@ public class OpenQuestionReviewServiceTests
     {
         Setup(BuildPendingResult(status: ExamResultStatus.Reviewed));
 
-        var act = async () => await _sut.GetDetailAsync(1);
+        var act = async () => await _sut.GetDetailAsync(1, 9);
 
         await act.Should().ThrowAsync<AlreadyReviewedException>();
     }

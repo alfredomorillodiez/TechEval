@@ -39,6 +39,9 @@ public class AuthorizationPolicyTests
     [InlineData(UserRole.Alumno, Policies.Alumno, true)]
     [InlineData(UserRole.Evaluador, Policies.Alumno, false)]
     [InlineData(UserRole.Admin, Policies.Alumno, false)]
+    [InlineData(UserRole.Evaluador, Policies.Evaluacion, true)]
+    [InlineData(UserRole.Admin, Policies.Evaluacion, false)]
+    [InlineData(UserRole.Alumno, Policies.Evaluacion, false)]
     public async Task Cada_rol_pasa_solo_su_politica(UserRole rol, string politica, bool pasa)
     {
         var resultado = await Autorizacion.AuthorizeAsync(Con(rol), politica);
@@ -65,6 +68,13 @@ public class AuthorizationPolicyTests
         atributo.Should().NotBeNull();
         atributo!.Policy.Should().Be(Policies.Gestion);
         atributo.Roles.Should().BeNull("los roles se nombran en Policies, no en cada controlador");
+    }
+
+    [Fact]
+    public void La_evaluacion_exige_Evaluacion()
+    {
+        typeof(EvaluationController).GetCustomAttribute<AuthorizeAttribute>()!
+            .Policy.Should().Be(Policies.Evaluacion);
     }
 
     [Fact]

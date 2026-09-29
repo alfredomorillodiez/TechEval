@@ -64,6 +64,9 @@ public class TransactionalWritesTests
                     1, "Ana", "ana@test.com", "Prueba", 10, 8, 80m, true,
                     ExamResultStatus.Reviewed, DateTime.UtcNow, new List<AnswerReviewDto>()));
 
+            ResultRepo.Setup(r => r.TryReleaseForSubmitAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
             Sut = new OpenQuestionReviewService(
                 ResultRepo.Object, ExamRepo.Object, AnswerRepo.Object,
                 Email.Object, ResultService.Object, Uow);

@@ -109,6 +109,28 @@
             </div>
         }
 
+        @if (_stats.ExamsWithoutEvaluator is { Count: > 0 } sinEvaluador)
+        {
+            <div class="alert alert-info mb-4">
+                <div class="d-flex align-items-center gap-3 mb-2">
+                    <i class="bi bi-person-exclamation fs-4"></i>
+                    <div>
+                        <strong>@sinEvaluador.Count</strong>
+                        @(sinEvaluador.Count == 1
+                            ? " prueba con preguntas abiertas no tiene evaluador"
+                            : " pruebas con preguntas abiertas no tienen evaluador")
+                        <div class="small">Solo el administrador corregirá sus resultados.</div>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var e in sinEvaluador)
+                    {
+                        <a href="/admin/pruebas/@e.Id" class="btn btn-sm btn-outline-primary">@e.Title</a>
+                    }
+                </div>
+            </div>
+        }
+
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-0 pt-3">
                 <h5 class="mb-0">Últimas evaluaciones</h5>

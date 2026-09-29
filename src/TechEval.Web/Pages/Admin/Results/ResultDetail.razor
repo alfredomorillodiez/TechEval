@@ -73,6 +73,17 @@
                         <p class="small mb-0">@_result.CompletedAt.ToLocalTime().ToString("HH:mm")</p>
                     </div>
                 </div>
+                @if (_result.ReviewedByName is not null)
+                {
+                    <p class="small text-muted mt-3 mb-0">
+                        <i class="bi bi-person-check me-1"></i>
+                        Corregido por <strong>@_result.ReviewedByName</strong>
+                        @if (_result.ReviewedAt is DateTime at)
+                        {
+                            @: el @at.ToLocalTime().ToString("dd/MM/yyyy 'a las' HH:mm")
+                        }
+                    </p>
+                }
             </div>
         </div>
 

@@ -39,6 +39,7 @@ GO
 -- ============================================================
 IF OBJECT_ID('dbo.ExamIntegrityEvents', 'U') IS NOT NULL DROP TABLE dbo.ExamIntegrityEvents;
 IF OBJECT_ID('dbo.PasswordSetupTokens', 'U') IS NOT NULL DROP TABLE dbo.PasswordSetupTokens;
+IF OBJECT_ID('dbo.ExamEvaluators',   'U') IS NOT NULL DROP TABLE dbo.ExamEvaluators;
 IF OBJECT_ID('dbo.ExamResults',   'U') IS NOT NULL DROP TABLE dbo.ExamResults;
 IF OBJECT_ID('dbo.UserAnswers',   'U') IS NOT NULL DROP TABLE dbo.UserAnswers;
 IF OBJECT_ID('dbo.ExamSessions',  'U') IS NOT NULL DROP TABLE dbo.ExamSessions;
@@ -275,7 +276,9 @@ CREATE TABLE dbo.ExamResults (
     Passed          BIT           NULL,       -- NULL mientras esté pendiente de corrección
     Status          INT           NOT NULL CONSTRAINT DF_ExamResults_Status        DEFAULT 2, -- 1=PendingReview, 2=Reviewed
     ReviewedAt      DATETIME2     NULL,
-    ReviewedByUserId INT          NULL,       -- administrador que corrigió las abiertas
+    ReviewedByUserId INT          NULL,       -- administrador o evaluador que corrigió las abiertas
+    ReservedByUserId INT          NULL,       -- quién corrige ahora; NULL = libre
+    ReservedUntil   DATETIME2     NULL,       -- fin de la reserva; caducada cuenta como libre
     CompletedAt     DATETIME2     NOT NULL CONSTRAINT DF_ExamResults_CompletedAt   DEFAULT GETUTCDATE(),
 
     CONSTRAINT PK_ExamResults PRIMARY KEY (Id),
@@ -286,6 +289,8 @@ CREATE TABLE dbo.ExamResults (
     CONSTRAINT FK_ExamResults_Users FOREIGN KEY (UserId)
         REFERENCES dbo.Users (Id) ON DELETE SET NULL ON UPDATE NO ACTION,
     CONSTRAINT FK_ExamResults_ReviewedByUser FOREIGN KEY (ReviewedByUserId)
+        REFERENCES dbo.Users (Id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_ExamResults_ReservedByUser FOREIGN KEY (ReservedByUserId)
         REFERENCES dbo.Users (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
 );
 GO
@@ -298,6 +303,7 @@ CREATE INDEX IX_ExamResults_CompletedAt          ON dbo.ExamResults (CompletedAt
 CREATE INDEX IX_ExamResults_UserId               ON dbo.ExamResults (UserId);
 CREATE INDEX IX_ExamResults_ReviewedByUserId     ON dbo.ExamResults (ReviewedByUserId);
 CREATE INDEX IX_ExamResults_Status               ON dbo.ExamResults (Status);
+CREATE INDEX IX_ExamResults_ReservedByUserId     ON dbo.ExamResults (ReservedByUserId);
 GO
 
 -- ============================================================
@@ -342,6 +348,28 @@ GO
 
 CREATE UNIQUE INDEX IX_PasswordSetupTokens_TokenHash ON dbo.PasswordSetupTokens (TokenHash);
 CREATE INDEX IX_PasswordSetupTokens_UserId ON dbo.PasswordSetupTokens (UserId);
+GO
+
+-- ============================================================
+-- 13. ExamEvaluators  (evaluadores asignados a cada prueba)
+-- ============================================================
+CREATE TABLE dbo.ExamEvaluators (
+    ExamId           INT       NOT NULL,
+    UserId           INT       NOT NULL,   -- usuario con rol Evaluador
+    AssignedAt       DATETIME2 NOT NULL CONSTRAINT DF_ExamEvaluators_AssignedAt DEFAULT GETUTCDATE(),
+    AssignedByUserId INT       NOT NULL,   -- administrador que asignó
+
+    CONSTRAINT PK_ExamEvaluators PRIMARY KEY (ExamId, UserId),
+    CONSTRAINT FK_ExamEvaluators_Exams FOREIGN KEY (ExamId)
+        REFERENCES dbo.Exams (Id) ON DELETE CASCADE ON UPDATE NO ACTION,
+    CONSTRAINT FK_ExamEvaluators_Users FOREIGN KEY (UserId)
+        REFERENCES dbo.Users (Id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_ExamEvaluators_AssignedBy FOREIGN KEY (AssignedByUserId)
+        REFERENCES dbo.Users (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
+);
+GO
+
+CREATE INDEX IX_ExamEvaluators_UserId ON dbo.ExamEvaluators (UserId);
 GO
 
 -- ============================================================

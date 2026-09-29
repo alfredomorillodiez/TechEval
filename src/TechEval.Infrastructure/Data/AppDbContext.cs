@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<ExamResult> ExamResults => Set<ExamResult>();
     public DbSet<ExamIntegrityEvent> ExamIntegrityEvents => Set<ExamIntegrityEvent>();
     public DbSet<PasswordSetupToken> PasswordSetupTokens => Set<PasswordSetupToken>();
+    public DbSet<ExamEvaluator> ExamEvaluators => Set<ExamEvaluator>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

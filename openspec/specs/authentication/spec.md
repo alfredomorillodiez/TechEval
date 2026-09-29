@@ -74,8 +74,8 @@ El sistema SHALL exigir un JWT válido con rol `Admin` para acceder a los endpoi
 
 #### Scenario: Token válido de un evaluador
 - **GIVEN** un JWT válido emitido para un usuario con rol `Evaluador`
-- **WHEN** se envía una petición a cualquier endpoint de gestión, incluidos los de corrección de preguntas abiertas
-- **THEN** el sistema MUST responder `403 Forbidden`, porque el acceso del evaluador a la corrección se define en un cambio posterior
+- **WHEN** se envía una petición a cualquier endpoint de gestión, incluidos los de corrección de preguntas abiertas del administrador
+- **THEN** el sistema MUST responder `403 Forbidden`, porque esos endpoints muestran la identidad del candidato; el evaluador corrige por los endpoints de evaluación
 
 ### Requirement: Hash de contraseña
 El sistema SHALL almacenar únicamente una derivación de la contraseña, nunca la contraseña en texto plano. La derivación SHALL usar PBKDF2-HMAC-SHA256 con una sal aleatoria de al menos 16 bytes generada por cada contraseña, y un coste de al menos 600 000 iteraciones. El valor almacenado SHALL identificar el algoritmo, el número de iteraciones y la sal, de modo que el coste pueda subirse más adelante sin invalidar los hashes existentes.
@@ -258,3 +258,20 @@ El sistema SHALL cambiar el sello de un usuario cuando cambia su rol, cuando se 
 - **GIVEN** un JWT vigente de un usuario cuyo rol, estado y sello no han cambiado
 - **WHEN** envía una petición autenticada
 - **THEN** la API procesa la petición con normalidad
+
+### Requirement: Autorización por rol Evaluador en endpoints de evaluación
+El sistema SHALL exigir un JWT válido con rol `Evaluador` para acceder a los endpoints de evaluación (cola, detalle, reserva, envío, señales e historial del evaluador), y SHALL responder `401 Unauthorized` sin token válido o `403 Forbidden` con un token de otro rol. El administrador SHALL NOT usar estos endpoints: corrige por los suyos, que le muestran la identidad del candidato. La exigencia SHALL definirse en el mismo punto de la API que las demás políticas.
+
+#### Scenario: Token de administrador contra un endpoint de evaluación
+- **GIVEN** un JWT válido de un usuario con rol `Admin`
+- **WHEN** se envía una petición a un endpoint de evaluación
+- **THEN** el sistema MUST responder `403 Forbidden`
+
+#### Scenario: Token de alumno contra un endpoint de evaluación
+- **GIVEN** un JWT válido de un usuario con rol `Alumno`
+- **WHEN** se envía una petición a un endpoint de evaluación
+- **THEN** el sistema MUST responder `403 Forbidden`
+
+#### Scenario: Petición sin token a un endpoint de evaluación
+- **WHEN** se envía una petición a un endpoint de evaluación sin header `Authorization`
+- **THEN** el sistema MUST responder `401 Unauthorized`

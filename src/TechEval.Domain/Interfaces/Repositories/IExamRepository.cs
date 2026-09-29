@@ -13,4 +13,10 @@ public interface IExamRepository : IRepository<Exam>
     /// con uniones que multiplican filas.
     /// </summary>
     Task<int> CountActiveAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Pruebas activas con alguna pregunta abierta y ningún evaluador asignado: sus resultados
+    /// solo los puede corregir el administrador. Solo Id y Title vienen rellenos.
+    /// </summary>
+    Task<IReadOnlyList<Exam>> GetActiveWithoutEvaluatorAsync(CancellationToken ct = default);
 }

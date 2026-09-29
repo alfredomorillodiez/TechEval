@@ -246,5 +246,39 @@ public class ExamResultConfiguration : IEntityTypeConfiguration<ExamResult>
         builder.HasIndex(r => r.UserId);
         builder.HasIndex(r => r.ReviewedByUserId);
         builder.HasIndex(r => r.Status);
+
+        builder.HasOne(r => r.ReservedByUser)
+            .WithMany()
+            .HasForeignKey(r => r.ReservedByUserId)
+            .OnDelete(DeleteBehavior.NoAction)
+            .IsRequired(false);
+        builder.HasIndex(r => r.ReservedByUserId);
+    }
+}
+
+public class ExamEvaluatorConfiguration : IEntityTypeConfiguration<ExamEvaluator>
+{
+    public void Configure(EntityTypeBuilder<ExamEvaluator> builder)
+    {
+        builder.ToTable("ExamEvaluators");
+        builder.HasKey(e => new { e.ExamId, e.UserId });
+        builder.HasIndex(e => e.UserId);
+
+        // Cascada solo desde la prueba. Los usuarios no se borran, se desactivan; y dos
+        // caminos de cascada hasta la misma tabla son algo que SQL Server rechaza.
+        builder.HasOne(e => e.Exam)
+            .WithMany()
+            .HasForeignKey(e => e.ExamId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(e => e.User)
+            .WithMany()
+            .HasForeignKey(e => e.UserId)
+            .OnDelete(DeleteBehavior.NoAction);
+
+        builder.HasOne<User>()
+            .WithMany()
+            .HasForeignKey(e => e.AssignedByUserId)
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }

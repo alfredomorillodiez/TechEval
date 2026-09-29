@@ -82,8 +82,16 @@ public class ApiService
     public Task<ExamDto?> CreateExamAsync(CreateExamDto dto)
         => PostAsync<CreateExamDto, ExamDto>("api/exams", dto);
 
-    public Task<ExamDto?> GenerateExamAsync(GenerateExamDto dto)
-        => PostAsync<GenerateExamDto, ExamDto>("api/exams/generate", dto);
+    /// <summary>Con el código y el mensaje: un reparto rechazado dice qué nivel no alcanza.</summary>
+    public Task<(ExamDto? Result, int StatusCode, string? Error)> GenerateExamAsync(GenerateExamDto dto)
+        => SendAsync<ExamDto>(HttpMethod.Post, "api/exams/generate", dto);
+
+    public Task<List<LevelCountDto>?> GetQuestionAvailabilityAsync(IEnumerable<int>? categoryIds)
+    {
+        var ids = categoryIds?.ToList() ?? new();
+        var qs = ids.Count > 0 ? "?" + string.Join("&", ids.Select(id => $"categoryIds={id}")) : "";
+        return GetAsync<List<LevelCountDto>>($"api/questions/availability{qs}");
+    }
 
     public Task<ExamDto?> UpdateExamAsync(int id, UpdateExamDto dto)
         => PutAsync<UpdateExamDto, ExamDto>($"api/exams/{id}", dto);

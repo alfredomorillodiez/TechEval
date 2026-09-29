@@ -21,6 +21,9 @@ public interface IQuestionService
     Task<QuestionDto> CreateAsync(CreateQuestionDto dto, CancellationToken ct = default);
     Task<QuestionDto?> UpdateAsync(int id, UpdateQuestionDto dto, CancellationToken ct = default);
     Task<bool> DeleteAsync(int id, CancellationToken ct = default);
+
+    /// <summary>Preguntas activas de cada nivel en esas categorías, para la vista previa del reparto.</summary>
+    Task<IReadOnlyList<LevelCountDto>> GetAvailabilityAsync(List<int>? categoryIds, CancellationToken ct = default);
 }
 
 public class QuestionService : IQuestionService
@@ -28,6 +31,13 @@ public class QuestionService : IQuestionService
     private readonly IQuestionRepository _repo;
 
     public QuestionService(IQuestionRepository repo) => _repo = repo;
+
+    public async Task<IReadOnlyList<LevelCountDto>> GetAvailabilityAsync(
+        List<int>? categoryIds, CancellationToken ct = default)
+        => (await _repo.CountByDifficultyAsync(categoryIds, ct))
+            .OrderBy(c => c.Key)
+            .Select(c => new LevelCountDto(c.Key, c.Value))
+            .ToList();
 
     public async Task<IReadOnlyList<QuestionSummaryDto>> GetAllAsync(
         int? categoryId, DifficultyLevel? difficulty, QuestionType? type, CancellationToken ct = default)

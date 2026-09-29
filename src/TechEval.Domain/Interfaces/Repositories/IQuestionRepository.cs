@@ -20,6 +20,13 @@ public interface IQuestionRepository : IRepository<Question>
         CancellationToken ct = default);
 
     /// <summary>
+    /// Preguntas activas de cada nivel en esas categorías (en todas, sin categorías). Los tres
+    /// niveles siempre, también los que tienen cero.
+    /// </summary>
+    Task<IReadOnlyDictionary<DifficultyLevel, int>> CountByDifficultyAsync(
+        List<int>? categoryIds, CancellationToken ct = default);
+
+    /// <summary>
     /// Identificadores de las opciones de esta pregunta que algún candidato ya eligió.
     /// Borrarlas rompería la clave foránea de `UserAnswer.SelectedAnswerId` y, con ella,
     /// el registro de lo que ese candidato respondió.

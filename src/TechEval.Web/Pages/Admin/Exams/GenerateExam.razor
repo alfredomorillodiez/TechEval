@@ -1,6 +1,7 @@
 @page "/admin/pruebas/generate"
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
+@using TechEval.Application.Services
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
@@ -34,7 +35,7 @@
             <div class="row g-3 mb-3">
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">Número de preguntas *</label>
-                    <input type="number" class="form-control" @bind="_questionCount" min="1" max="50" />
+                    <input type="number" class="form-control" @bind="_questionCount" @bind:event="oninput" min="1" max="50" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">Tiempo límite (min) *</label>
@@ -76,25 +77,76 @@
                     @if (_selectedCategoryIds.Count > 0)
                     {
                         <button class="btn btn-link btn-sm p-0 mt-1 text-muted"
-                                @onclick="() => _selectedCategoryIds.Clear()">
+                                @onclick="ClearCategoriesAsync">
                             Limpiar selección
                         </button>
                     }
                 </div>
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">Dificultad (opcional)</label>
-                    <select class="form-select" @bind="_difficulty">
+                    <select class="form-select" @bind="_mode">
                         <option value="">Todos los niveles</option>
                         <option value="@DifficultyLevel.Basic">Básico</option>
                         <option value="@DifficultyLevel.Intermediate">Intermedio</option>
                         <option value="@DifficultyLevel.Advanced">Avanzado</option>
+                        <option value="@DistributionMode">Reparto por nivel</option>
                     </select>
                 </div>
             </div>
 
+            @if (IsDistribution)
+            {
+                var plan = Preview;
+                var suma = _percentages.Values.Sum();
+                <div class="border rounded p-3 mb-4" style="background:#fafafa;">
+                    <p class="fw-semibold mb-2">Reparto por nivel <span class="text-muted fw-normal small">(porcentaje de preguntas)</span></p>
+                    <table class="table table-sm align-middle mb-2">
+                        <thead class="small text-muted">
+                            <tr><th>Nivel</th><th style="width:110px;">%</th><th>Preguntas</th><th>Disponibles</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var level in DifficultyPlanner.Levels)
+                            {
+                                var nivel = level;
+                                var falta = plan?.Shortages.FirstOrDefault(s => s.Level == nivel);
+                                <tr class="@(falta is null ? "" : "table-danger")">
+                                    <td>@LevelName(nivel)</td>
+                                    <td>
+                                        <input type="number" class="form-control form-control-sm" min="0" max="100"
+                                               value="@_percentages[nivel]"
+                                               @oninput="e => SetPercentage(nivel, e.Value)" />
+                                    </td>
+                                    <td>@(plan?.Requested[nivel].ToString() ?? "—")</td>
+                                    <td>
+                                        @(_available?.GetValueOrDefault(nivel).ToString() ?? "…")
+                                        @if (falta is not null)
+                                        {
+                                            <span class="small text-danger ms-1">necesita @falta.Needed, hay @falta.Available</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (suma != 100)
+                    {
+                        <p class="small text-danger mb-0">
+                            Los porcentajes suman @suma %: @(suma < 100 ? $"falta un {100 - suma} %" : $"sobra un {suma - 100} %").
+                        </p>
+                    }
+                    else if (plan is { CanGenerate: false })
+                    {
+                        <p class="small text-danger mb-0">
+                            No hay preguntas suficientes en los niveles marcados con las categorías elegidas.
+                            Cambia el reparto, el número de preguntas o las categorías.
+                        </p>
+                    }
+                </div>
+            }
+
             <div class="d-flex justify-content-end gap-2">
                 <a href="/admin/pruebas" class="btn btn-outline-secondary">Cancelar</a>
-                <button class="btn btn-primary" @onclick="GenerateAsync" disabled="@_loading">
+                <button class="btn btn-primary" @onclick="GenerateAsync" disabled="@(_loading || !CanGenerate)">
                     @if (_loading) { <span class="spinner-border spinner-border-sm me-1"></span> }
                     <i class="bi bi-magic me-1"></i> Generar prueba
                 </button>
@@ -104,25 +156,77 @@
 </div>
 
 @code {
+    private const string DistributionMode = "reparto";
+
     private string _title = string.Empty, _description = string.Empty, _error = string.Empty;
     private int _questionCount = 10, _timeLimitMinutes = 60, _passingScore = 70;
     private HashSet<int> _selectedCategoryIds = new();
-    private DifficultyLevel? _difficulty;
     private List<CategoryDto> _categories = new();
     private bool _loading;
+
+    // "" = todos los niveles; un DifficultyLevel = nivel único; "reparto" = reparto por nivel.
+    private string _mode = string.Empty;
+    private readonly Dictionary<DifficultyLevel, int> _percentages = new()
+    {
+        [DifficultyLevel.Basic] = 34,
+        [DifficultyLevel.Intermediate] = 33,
+        [DifficultyLevel.Advanced] = 33
+    };
+    private Dictionary<DifficultyLevel, int>? _available;
+
+    private bool IsDistribution => _mode == DistributionMode;
+    private DifficultyLevel? SingleLevel => Enum.TryParse<DifficultyLevel>(_mode, out var l) ? l : null;
+
+    // La misma regla que el servidor: la vista previa no puede prometer otra cosa.
+    private DifficultyPlan? Preview
+    {
+        get
+        {
+            if (_available is null || _questionCount < 1 || _percentages.Values.Sum() != 100
+                || _percentages.Values.Any(p => p is < 0 or > 100))
+                return null;
+            return DifficultyPlanner.Plan(_questionCount, _percentages, _available);
+        }
+    }
+
+    private bool CanGenerate => !IsDistribution || Preview is { CanGenerate: true };
 
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
         _categories = await Api.GetCategoriesAsync() ?? new();
+        await LoadAvailabilityAsync();
     }
 
-    private void ToggleCategory(int id)
+    private async Task LoadAvailabilityAsync()
+    {
+        var counts = await Api.GetQuestionAvailabilityAsync(_selectedCategoryIds);
+        _available = counts?.ToDictionary(c => c.Level, c => c.Count);
+    }
+
+    private async Task ToggleCategory(int id)
     {
         if (_selectedCategoryIds.Contains(id)) _selectedCategoryIds.Remove(id);
         else _selectedCategoryIds.Add(id);
+        await LoadAvailabilityAsync();
     }
+
+    private async Task ClearCategoriesAsync()
+    {
+        _selectedCategoryIds.Clear();
+        await LoadAvailabilityAsync();
+    }
+
+    private void SetPercentage(DifficultyLevel level, object? value)
+        => _percentages[level] = int.TryParse(value?.ToString(), out var p) ? p : 0;
+
+    private static string LevelName(DifficultyLevel level) => level switch
+    {
+        DifficultyLevel.Basic => "Básico",
+        DifficultyLevel.Intermediate => "Intermedio",
+        _ => "Avanzado"
+    };
 
     private async Task GenerateAsync()
     {
@@ -131,12 +235,20 @@
 
         _loading = true;
         var categoryIds = _selectedCategoryIds.Count > 0 ? _selectedCategoryIds.ToList() : null;
-        var result = await Api.GenerateExamAsync(new GenerateExamDto(
+        var (result, status, error) = await Api.GenerateExamAsync(new GenerateExamDto(
             _title, _description, _timeLimitMinutes, _passingScore,
-            _questionCount, categoryIds, _difficulty));
+            _questionCount, categoryIds, SingleLevel,
+            IsDistribution ? new Dictionary<DifficultyLevel, int>(_percentages) : null));
         _loading = false;
 
-        if (result is not null) Nav.NavigateTo("/admin/pruebas");
-        else _error = "No hay suficientes preguntas con los filtros seleccionados. Prueba cambiando los filtros.";
+        if (result is not null) { Nav.NavigateTo("/admin/pruebas"); return; }
+
+        // Con reparto, el mensaje del servidor dice qué nivel no alcanza. Sin reparto, el de siempre.
+        _error = IsDistribution && status == 400 && error is not null
+            ? error
+            : "No hay suficientes preguntas con los filtros seleccionados. Prueba cambiando los filtros.";
+
+        // La disponibilidad pudo cambiar desde que se cargó.
+        await LoadAvailabilityAsync();
     }
 }

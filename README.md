@@ -15,6 +15,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 
 - **Banco de preguntas** — tipo test (4 opciones) y respuesta abierta, con categorías y niveles de dificultad
 - **Generación de exámenes** — manual o automática con preguntas aleatorias por categoría y dificultad
+- **Reparto por nivel** — la generación automática acepta un porcentaje de preguntas por nivel (por ejemplo 30 % básicas, 50 % intermedias, 20 % avanzadas). El número de cada nivel se redondea por el método del mayor resto, así que la suma es siempre el total. Si un nivel no tiene bastantes preguntas en las categorías elegidas, la generación se rechaza: nunca se completa con otro nivel. La pantalla muestra antes cuántas preguntas saldrán y cuántas hay de cada nivel
 - **Envío por email** — enlace único por candidato con expiración configurable; envío masivo a múltiples candidatos desde CSV o lista manual
 - **Prueba del candidato** — temporizador, auto-guardado de respuestas y envío automático al agotar el tiempo
 - **Reanudación de la prueba** — una recarga, un cierre de pestaña o una pérdida de red no expulsan al candidato: vuelve a sus preguntas con las respuestas que ya tenía y con el tiempo restante que calcula el servidor. La invitación caducada no corta una prueba ya empezada
@@ -313,6 +314,7 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | `POST` | `/api/users/{id}/deactivate` · `/activate` · `/reset-access` | Admin |
 | `GET` `POST` `PUT` `DELETE` | `/api/categories` | Admin |
 | `GET` `POST` `PUT` `DELETE` | `/api/questions` | Admin |
+| `GET` | `/api/questions/availability?categoryIds=` | Admin — preguntas activas de cada nivel, para la vista previa del reparto |
 | `GET` `POST` `PUT` `DELETE` | `/api/exams` | Admin |
 | `POST` | `/api/exams/generate` | Admin |
 | `POST` | `/api/exams/send` · `/api/exams/send-bulk` | Admin |

@@ -451,6 +451,7 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
 | GET | `/api/questions?categoryId=&difficulty=&type=` | Admin | Listar con filtros |
+| GET | `/api/questions/availability?categoryIds=1&categoryIds=3` | Admin | Preguntas activas de cada nivel en esas categorías (los tres niveles siempre) |
 | GET | `/api/questions/{id}` | Admin | Detalle con respuestas |
 | POST | `/api/questions` | Admin | Crear pregunta (nace `Approved`) |
 | PUT | `/api/questions/{id}` | Admin | Actualizar (no altera el estado de revisión) |
@@ -478,9 +479,20 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
   "passingScorePercentage": 70,
   "questionCount": 10,
   "categoryIds": [1, 3],        // opcional
-  "difficulty": "Intermediate"  // opcional
+  "difficulty": "Intermediate"  // opcional: un nivel único
 }
 ```
+
+En lugar de `difficulty`, un reparto por nivel (porcentaje de preguntas; enteros de 0 a 100 que suman 100):
+
+```json
+  "difficultyPercentages": { "Basic": 30, "Intermediate": 50, "Advanced": 20 }
+```
+
+- **Redondeo:** método del mayor resto. Cada nivel recibe la parte entera de su cuota y las preguntas que faltan van a los niveles con mayor decimal; en el empate, al de mayor porcentaje y después al más fácil. Con 10 preguntas y 33 / 33 / 34 salen 3 / 3 / 4.
+- **Rechazo:** si un nivel necesita más preguntas de las que hay activas en esas categorías, `400` con un mensaje por nivel («nivel avanzado, se necesitan 5 y hay 2»). Nunca se completa con otro nivel ni con otra categoría.
+- **Nivel único:** sigue como antes; `difficulty` y `difficultyPercentages` a la vez dan `400`.
+- **Orden:** las preguntas de los distintos niveles salen mezcladas. El cálculo lo hace `DifficultyPlanner`, el mismo en la API y en la vista previa de la Web.
 
 **Body de `/api/exams/send`:**
 ```json

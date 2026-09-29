@@ -25,6 +25,12 @@ public class QuestionsController : ControllerBase
         CancellationToken ct)
         => Ok(await _service.GetAllAsync(categoryId, difficulty, type, ct));
 
+    /// <summary>Preguntas activas de cada nivel en unas categorías (todas, sin categorías)</summary>
+    [HttpGet("availability")]
+    [ProducesResponseType(typeof(IReadOnlyList<LevelCountDto>), 200)]
+    public async Task<IActionResult> GetAvailability([FromQuery] List<int>? categoryIds, CancellationToken ct)
+        => Ok(await _service.GetAvailabilityAsync(categoryIds, ct));
+
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {

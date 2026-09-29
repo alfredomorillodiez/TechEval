@@ -56,7 +56,12 @@ public record GenerateExamDto(
     int PassingScorePercentage,
     int QuestionCount,
     List<int>? CategoryIds,
-    DifficultyLevel? Difficulty);
+    DifficultyLevel? Difficulty,
+    // Porcentaje de preguntas por nivel; excluye a Difficulty. Null: la generación de siempre.
+    Dictionary<DifficultyLevel, int>? DifficultyPercentages = null);
+
+/// <summary>Preguntas de un nivel: disponibles en el banco o de una prueba.</summary>
+public record LevelCountDto(DifficultyLevel Level, int Count);
 
 public record SendExamDto(
     int ExamId,

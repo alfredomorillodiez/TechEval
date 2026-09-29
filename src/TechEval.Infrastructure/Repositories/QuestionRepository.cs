@@ -55,6 +55,23 @@ public class QuestionRepository : BaseRepository<Question>, IQuestionRepository
         return await query.OrderBy(_ => Guid.NewGuid()).Take(count).ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyDictionary<DifficultyLevel, int>> CountByDifficultyAsync(
+        List<int>? categoryIds, CancellationToken ct = default)
+    {
+        var query = Context.Questions.Where(q => q.IsActive);
+        if (categoryIds is { Count: > 0 }) query = query.Where(q => categoryIds.Contains(q.CategoryId));
+
+        // Un GROUP BY en la base; los niveles sin filas no salen del GROUP BY, así que se
+        // completan con cero aquí.
+        var counts = await query
+            .GroupBy(q => q.Difficulty)
+            .Select(g => new { Level = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        return Enum.GetValues<DifficultyLevel>()
+            .ToDictionary(l => l, l => counts.FirstOrDefault(c => c.Level == l)?.Count ?? 0);
+    }
+
     public async Task<IReadOnlyList<int>> GetReferencedAnswerIdsAsync(
         int questionId, CancellationToken ct = default)
         => await Context.UserAnswers

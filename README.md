@@ -79,7 +79,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 
 - [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9)
 - SQL Server 2019+ (o Docker)
-- Cuenta SMTP (SendGrid, Gmail…) — o [MailHog](https://github.com/mailhog/MailHog) para desarrollo
+- Una aplicación de Entra ID con el permiso `Mail.Send` de Microsoft Graph, y un buzón de Microsoft 365 para enviar. Sin ellos la API arranca en desarrollo, pero no envía correo.
 
 ---
 
@@ -90,8 +90,8 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 git clone https://github.com/alfredomorillodiez/TechEval.git
 cd TechEval
 
-# Arrancar SQL Server + API + Web + MailHog (entorno de desarrollo)
-docker-compose --profile dev up -d
+# Arrancar SQL Server + API + Web
+docker-compose up -d
 ```
 
 | Servicio | URL |
@@ -99,7 +99,6 @@ docker-compose --profile dev up -d
 | API | http://localhost:5000 |
 | Swagger | http://localhost:5000/swagger |
 | Web (Blazor) | http://localhost:5001 |
-| MailHog (emails) | http://localhost:8025 |
 
 **Administrador:** `admin@techeval.com`. Su contraseña sale de `AdminPassword`, que **no tiene valor por defecto**. En desarrollo la trae `appsettings.Development.json` con el valor público `Admin@123!`. Fuera de desarrollo, la API se niega a arrancar si falta, y también si conserva ese valor de desarrollo.
 
@@ -180,11 +179,20 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
 
 Una prueba de la batería compara el modelo con `create_database.sql` y falla si dejan de coincidir, para que una columna nueva no se quede fuera del guion.
 
-### 3. Configurar email (desarrollo)
+### 3. Configurar email
 
-```bash
-docker run -d -p 1025:1025 -p 8025:8025 mailhog/mailhog
+El correo sale por Microsoft Graph, con el mismo mecanismo que `EmailService365` de iECS. Pon en `appsettings.Local.json` el buzón y los datos de la aplicación de Entra ID:
+
+```json
+{
+  "Email": {
+    "FromEmail": "techeval@tudominio.com",
+    "Office365": { "TenantId": "…", "ClientId": "…", "ClientSecret": "…" }
+  }
+}
 ```
+
+Sin ellos la API arranca en desarrollo igual, y cada envío falla con su error en el log. No hay servidor de captura local: lo que se envía llega de verdad. Prueba con tu propia dirección.
 
 ### 4. Arrancar API y frontend
 
@@ -202,14 +210,15 @@ cd src/TechEval.Web && dotnet run
 
 Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`appsettings.Development.json`, `appsettings.Local.json` — este último ignorado por git) o mediante variables de entorno usando doble guion bajo (`Jwt__SecretKey`).
 
-> **`appsettings.Local.json` manda sobre todo lo demás**, también sobre las variables de entorno y la línea de órdenes, porque `Program.cs` lo carga el último. Si ese fichero trae un servidor SMTP real, `Email__Host=...` no lo sustituye y la API envía correo de verdad. Para probar el correo en local sin él, arranca la API con `--contentRoot` apuntando a una carpeta que no lo tenga.
+> **`appsettings.Local.json` manda sobre todo lo demás**, también sobre las variables de entorno y la línea de órdenes, porque `Program.cs` lo carga el último. Si ese fichero trae las credenciales del correo, una variable `Email__...` no las sustituye y la API envía correo de verdad. Para arrancar en local sin enviar, usa `--contentRoot` con una carpeta que no tenga ese fichero.
 
 | Clave | Descripción | Por defecto |
 |-------|-------------|-------------|
 | `ConnectionStrings:DefaultConnection` | Cadena de conexión a SQL Server | `Server=localhost;Database=TechEvalDb;…` |
 | `Jwt:SecretKey` | Clave de firma HMAC-SHA256 — **obligatoria, sin valor por defecto** | vacío |
 | `Jwt:ExpirationHours` | Vigencia del token de sesión | `8` |
-| `Email:*` | Host, puerto, credenciales y remitente SMTP | vacío |
+| `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — **obligatorio fuera de desarrollo** | vacío |
+| `Email:Office365:*` | `TenantId`, `ClientId` y `ClientSecret` de la aplicación de Entra ID — **obligatorios fuera de desarrollo** | vacío |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del administrador creado en el primer arranque — **obligatoria** | vacío |
@@ -240,7 +249,7 @@ TechEval.Application  (Services · DTOs · Validaciones)
         │
 TechEval.Domain  (Entities · Interfaces · Enums)
         │
-TechEval.Infrastructure  (EF Core · Repositorios · SMTP · JWT)
+TechEval.Infrastructure  (EF Core · Repositorios · Microsoft Graph · JWT)
         │
     SQL Server
 ```

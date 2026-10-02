@@ -59,9 +59,11 @@ SA_PASSWORD=$(New-ContrasenaSql)
 JWT_SECRET_KEY=$(New-ClaveAleatoria -Bytes 48)
 ADMIN_PASSWORD=$(New-ContrasenaSql)
 
-# La clave del proveedor de correo NO se puede generar aquí: la emite el proveedor.
-# Revoca la anterior en su panel, emite una nueva y pégala.
-SENDGRID_API_KEY=
+# El secreto de la aplicación de correo NO se puede generar aquí: lo emite Entra ID.
+# Emite uno nuevo en el registro de la aplicación, revoca el anterior y pégalo.
+O365_TENANT_ID=
+O365_CLIENT_ID=
+O365_CLIENT_SECRET=
 EMAIL_FROM=
 "@
 
@@ -73,9 +75,9 @@ Write-Host "No se muestran por pantalla a proposito."
 Write-Host ""
 Write-Host "FALTA lo que este guion no puede hacer:"
 Write-Host "  1. Cambiar la contrasena de 'sa' en el SQL Server de destino."
-Write-Host "  2. Revocar la clave de correo anterior en el panel del proveedor."
+Write-Host "  2. Revocar en Entra ID el secreto de cliente anterior de la aplicación de correo."
 Write-Host "  3. Reasignar la contrasena del administrador ya creado."
-Write-Host "  4. Rellenar SENDGRID_API_KEY y EMAIL_FROM."
+Write-Host "  4. Rellenar EMAIL_FROM y las tres variables O365_*."
 Write-Host ""
 Write-Host "AVISO: la clave JWT nueva cierra todas las sesiones abiertas, tambien las"
 Write-Host "invitaciones de examen en curso. Elige una hora sin examenes."

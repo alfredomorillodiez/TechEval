@@ -34,7 +34,8 @@ public static class DependencyInjection
         // Services
         services.Configure<EmailSettings>(configuration.GetSection("Email"));
         services.Configure<JwtSettings>(configuration.GetSection("Jwt"));
-        services.AddScoped<IEmailService, SmtpEmailService>();
+        services.AddSingleton<IGraphAccessTokenProvider, MsalGraphAccessTokenProvider>();
+        services.AddHttpClient<IEmailService, GraphEmailService>();
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<SecurityStampValidator>();
 

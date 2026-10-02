@@ -1,29 +1,37 @@
 using System.Net;
-using System.Net.Mail;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Identity.Client;
 using TechEval.Domain.Interfaces.Services;
 
 namespace TechEval.Infrastructure.Email;
 
-public class EmailSettings
+/// <summary>
+/// Envío por Microsoft Graph, el mismo mecanismo que `EmailService365` de iECS.
+/// </summary>
+/// <remarks>
+/// Sustituye a SMTP. Allí la cuenta que se autenticaba y el `From` podían no coincidir, y
+/// Exchange lo trataba como suplantación. Aquí el remitente es, por construcción, el buzón en
+/// cuyo nombre se publica el mensaje. Tampoco viaja ninguna contraseña de buzón: la
+/// aplicación se identifica ante Entra ID y Graph valida el permiso `Mail.Send`.
+/// </remarks>
+public class GraphEmailService : IEmailService
 {
-    public string Host { get; set; } = string.Empty;
-    public int Port { get; set; } = 587;
-    public string UserName { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
-    public string FromEmail { get; set; } = string.Empty;
-    public string FromName { get; set; } = "TechEval Platform";
-    public bool EnableSsl { get; set; } = true;
-}
+    private const string GraphBaseUrl = "https://graph.microsoft.com/v1.0";
 
-public class SmtpEmailService : IEmailService
-{
+    private readonly HttpClient _http;
+    private readonly IGraphAccessTokenProvider _tokens;
     private readonly EmailSettings _settings;
-    private readonly ILogger<SmtpEmailService> _logger;
+    private readonly ILogger<GraphEmailService> _logger;
 
-    public SmtpEmailService(IOptions<EmailSettings> settings, ILogger<SmtpEmailService> logger)
+    public GraphEmailService(
+        HttpClient http, IGraphAccessTokenProvider tokens,
+        IOptions<EmailSettings> settings, ILogger<GraphEmailService> logger)
     {
+        _http = http;
+        _tokens = tokens;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -67,22 +75,7 @@ public class SmtpEmailService : IEmailService
     {
         try
         {
-            using var client = new SmtpClient(_settings.Host, _settings.Port)
-            {
-                Credentials = new NetworkCredential(_settings.UserName, _settings.Password),
-                EnableSsl = _settings.EnableSsl
-            };
-
-            using var message = new MailMessage
-            {
-                From = new MailAddress(_settings.FromEmail, _settings.FromName),
-                Subject = subject,
-                Body = body,
-                IsBodyHtml = true
-            };
-            message.To.Add(new MailAddress(toEmail, toName));
-
-            await client.SendMailAsync(message, ct);
+            await PostSendMailAsync(toEmail, toName, subject, body, ct);
             _logger.LogInformation("Email enviado a {Email}: {Subject}", toEmail, subject);
         }
         catch (Exception ex)
@@ -90,6 +83,42 @@ public class SmtpEmailService : IEmailService
             _logger.LogError(ex, "Error enviando email a {Email}", toEmail);
             throw;
         }
+    }
+
+    private async Task PostSendMailAsync(
+        string toEmail, string toName, string subject, string htmlBody, CancellationToken ct)
+    {
+        var accessToken = await _tokens.GetAccessTokenAsync(ct);
+
+        var payload = new
+        {
+            message = new
+            {
+                subject,
+                body = new { contentType = "HTML", content = htmlBody },
+                toRecipients = new[] { new { emailAddress = new { address = toEmail, name = toName } } }
+            },
+            saveToSentItems = true
+        };
+
+        // La cabecera va en cada petición y no en el HttpClient: el cliente lo comparten
+        // envíos simultáneos, y el token caduca.
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"{GraphBaseUrl}/users/{Uri.EscapeDataString(_settings.FromEmail)}/sendMail")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        using var response = await _http.SendAsync(request, ct);
+        if (response.IsSuccessStatusCode) return;
+
+        // Graph explica el rechazo en el cuerpo (buzón inexistente, permiso sin conceder...).
+        // No lleva secretos, y sin él el error del log no dice nada útil.
+        var detail = await response.Content.ReadAsStringAsync(ct);
+        throw new HttpRequestException(
+            $"Microsoft Graph rechazó el envío ({(int)response.StatusCode} {response.StatusCode}): {detail}",
+            null, response.StatusCode);
     }
 
     private static string BuildInvitationHtml(
@@ -205,4 +234,41 @@ public class SmtpEmailService : IEmailService
         </body>
         </html>
         """;
+}
+
+/// <summary>Token de aplicación para llamar a Microsoft Graph.</summary>
+public interface IGraphAccessTokenProvider
+{
+    Task<string> GetAccessTokenAsync(CancellationToken ct);
+}
+
+/// <summary>
+/// Credenciales de cliente con MSAL. Va como singleton: MSAL guarda el token en la instancia
+/// y lo reutiliza hasta poco antes de que caduque, así que no se pide uno por correo.
+/// </summary>
+/// <remarks>
+/// La aplicación de MSAL se construye en el primer envío y no al arrancar. En desarrollo,
+/// sin credenciales, la API arranca igual y cada envío falla con su error en el log.
+/// </remarks>
+public class MsalGraphAccessTokenProvider : IGraphAccessTokenProvider
+{
+    private static readonly string[] Scopes = ["https://graph.microsoft.com/.default"];
+
+    private readonly Lazy<IConfidentialClientApplication> _app;
+
+    public MsalGraphAccessTokenProvider(IOptions<EmailSettings> settings)
+    {
+        var office365 = settings.Value.Office365;
+        _app = new Lazy<IConfidentialClientApplication>(() => ConfidentialClientApplicationBuilder
+            .Create(office365.ClientId)
+            .WithAuthority(AzureCloudInstance.AzurePublic, office365.TenantId)
+            .WithClientSecret(office365.ClientSecret)
+            .Build());
+    }
+
+    public async Task<string> GetAccessTokenAsync(CancellationToken ct)
+    {
+        var result = await _app.Value.AcquireTokenForClient(Scopes).ExecuteAsync(ct);
+        return result.AccessToken;
+    }
 }

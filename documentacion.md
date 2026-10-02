@@ -58,7 +58,7 @@ El JWT lleva además el claim `stamp`, con el `SecurityStamp` del usuario. En ca
 | Autenticación | JWT Bearer (roles `Admin` / `Evaluador` / `Alumno`, sello de seguridad) | 9.0.0 |
 | Documentación API | Swashbuckle (Swagger) | 7.2.0 |
 | Logging | Serilog (consola + fichero diario) | 9.0.0 |
-| Email | SMTP (`System.Net.Mail`) | — |
+| Email | Microsoft Graph (MSAL) | 4.90.1 |
 | Trabajos en segundo plano | `BackgroundService` + `System.Threading.Channels` | — |
 | Contenedores | Docker / Docker Compose | — |
 
@@ -92,7 +92,7 @@ Se aplica **Clean Architecture** con separación estricta de responsabilidades e
                       │
 ┌─────────────────────────────────────────────────────┐
 │              TechEval.Infrastructure                │  ← Persistencia y servicios externos
-│  EF Core · Repositorios · SMTP · JWT                │
+│  EF Core · Repositorios · Microsoft Graph · JWT     │
 └─────────────────────────────────────────────────────┘
                       │
                  SQL Server
@@ -329,7 +329,8 @@ TechEval/
 │   │   ├── BackgroundJobs/
 │   │   │   └── BackgroundTaskQueue.cs          -- Channel<int> en memoria
 │   │   ├── Email/
-│   │   │   └── SmtpEmailService.cs             -- SMTP con HTML templates
+│   │   │   ├── EmailSettings.cs                -- Buzón y aplicación de Entra ID
+│   │   │   └── GraphEmailService.cs            -- Microsoft Graph con plantillas HTML
 │   │   ├── Security/
 │   │   │   └── TokenService.cs                 -- JWT + secure random tokens
 │   │   └── DependencyInjection.cs              -- Registro de servicios
@@ -728,7 +729,7 @@ Los `ExamToken` y `ExamResult` creados antes de este modelo tienen `UserId = NUL
 
 - .NET 9 SDK
 - SQL Server (local o Docker)
-- Cuenta SMTP (SendGrid, Gmail, etc.) — o MailHog para desarrollo
+- Aplicación de Entra ID con el permiso `Mail.Send` de Microsoft Graph, y un buzón de Microsoft 365 (opcional en desarrollo: sin ellos no sale correo)
 
 ### Referencia de configuración
 
@@ -740,7 +741,8 @@ Las claves se leen de `appsettings.json`, se sobrescriben por entorno (`appsetti
 | `Jwt:SecretKey` | Clave de firma HMAC-SHA256 — obligatoria, sin valor por defecto | vacío |
 | `Jwt:Issuer` / `Jwt:Audience` | Emisor y audiencia validados en cada petición | `TechEvalAPI` / `TechEvalClient` |
 | `Jwt:ExpirationHours` | Vigencia del token | `8` |
-| `Email:Host` · `Port` · `UserName` · `Password` · `FromEmail` · `FromName` · `EnableSsl` | Configuración SMTP | vacío |
+| `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — obligatorio fuera de desarrollo | vacío |
+| `Email:Office365:TenantId` · `ClientId` · `ClientSecret` | Aplicación de Entra ID con permiso `Mail.Send` — obligatorios fuera de desarrollo | vacío |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del admin creado en el primer arranque — **obligatoria, sin valor por defecto** | vacío |
@@ -784,36 +786,26 @@ Sobre una base de datos ya creada con una versión anterior, aplica los guiones 
 
 #### 4. Configurar email
 
-**Para desarrollo (MailHog):**
-```bash
-docker run -d -p 1025:1025 -p 8025:8025 mailhog/mailhog
-```
+El correo sale por Microsoft Graph, con el mismo mecanismo que `EmailService365` de iECS. La aplicación pide un token a Entra ID con sus credenciales de cliente y publica en `POST /users/{FromEmail}/sendMail`. No hay contraseña de buzón, y el remitente es siempre el buzón que envía, así que Exchange no lo trata como suplantación.
 
-En `appsettings.Development.json`:
+En local, en `appsettings.Local.json`; en Docker, con las variables `EMAIL_FROM` y `O365_*` del `.env`:
+
 ```json
 {
   "Email": {
-    "Host": "localhost",
-    "Port": 1025,
-    "EnableSsl": false
+    "FromEmail": "techeval@tudominio.com",
+    "Office365": {
+      "TenantId": "<id del inquilino>",
+      "ClientId": "<id de la aplicación>",
+      "ClientSecret": "<secreto de cliente>"
+    }
   }
 }
 ```
-UI de MailHog: http://localhost:8025
 
-**Para producción (SendGrid):**
-```json
-{
-  "Email": {
-    "Host": "smtp.sendgrid.net",
-    "Port": 587,
-    "UserName": "apikey",
-    "Password": "SG.xxxx",
-    "FromEmail": "noreply@tudominio.com",
-    "EnableSsl": true
-  }
-}
-```
+La aplicación de Entra ID necesita el permiso de aplicación `Mail.Send` de Microsoft Graph, con consentimiento de administrador. Ese permiso deja enviar como cualquier buzón del inquilino: pide a sistemas que lo limiten al buzón de `FromEmail` con una directiva de acceso de aplicación de Exchange. El destinatario ve el nombre que el buzón tiene en Exchange.
+
+En desarrollo, sin estos datos, la API arranca igual y cada envío falla con su error en el log. Fuera de desarrollo, la API no arranca si falta uno. No hay servidor de captura local: lo que se envía llega de verdad, así que prueba con tu propia dirección.
 
 #### 6. Arrancar la API
 
@@ -1031,10 +1023,7 @@ Cada candidato ve las opciones de una pregunta de test en un orden propio de su 
 ### Desarrollo rápido con Docker Compose
 
 ```bash
-# Arrancar SQL Server + API + Web + MailHog
-docker-compose --profile dev up -d
-
-# Solo producción (sin MailHog)
+# Arrancar SQL Server + API + Web
 docker-compose up -d
 ```
 
@@ -1045,15 +1034,12 @@ docker-compose up -d
 | `sqlserver` | 1433 | SQL Server 2022 Developer |
 | `api` | 5000 | ASP.NET Core API |
 | `web` | 5001 | Blazor WebAssembly (Nginx) |
-| `mailhog` | 8025 | UI de email (solo perfil dev) |
 
 Volumen persistente: `sqlserver_data` (datos de SQL Server).
 
-### Configurar API key de SendGrid en Docker
+### Configurar el correo en Docker
 
-```bash
-SENDGRID_API_KEY=SG.xxx docker-compose up -d
-```
+Rellena en `.env` el buzón (`EMAIL_FROM`) y los datos de la aplicación de Entra ID (`O365_TENANT_ID`, `O365_CLIENT_ID`, `O365_CLIENT_SECRET`). Si falta uno, Compose no arranca y lo nombra.
 
 ---
 
@@ -1238,9 +1224,15 @@ Los `record` de C# son inmutables por defecto, tienen igualdad por valor y sinta
 
 AutoMapper añade magia implícita difícil de depurar. Los mapeos manuales en los servicios son explícitos, fáciles de testear y no introducen dependencia adicional. Para proyectos muy grandes con decenas de entidades, sí tiene sentido considerarlo.
 
-### ¿Por qué SMTP directo y no SendGrid SDK?
+### ¿Por qué Microsoft Graph y no SMTP?
 
-El `IEmailService` desacopla la implementación. La `SmtpEmailService` funciona con cualquier servidor SMTP (SendGrid, Gmail, Mailtrap, MailHog). Para cambiar a SendGrid SDK basta crear `SendGridEmailService : IEmailService` y registrarlo en DI.
+Hasta el 02·10·2026 el correo salía por SMTP. La cuenta de prueba se autenticaba con un buzón y ponía en el `From` otro buzón de otro dominio, y sistemas recibía alertas de suplantación. Además, la contraseña del buzón viajaba sin cifrar.
+
+Con Graph eso no puede pasar: el remitente es el buzón en cuyo nombre se publica, y no hay contraseña de buzón. Es también lo que usan las demás aplicaciones de iECS (`EmailService365`), así que sistemas ya sabe administrarlo.
+
+El precio es que ya no hay servidor de captura local como MailHog: en desarrollo, lo que se envía llega de verdad.
+
+El `IEmailService` sigue desacoplando la implementación. Para otro proveedor basta otra implementación y cambiar su registro en `DependencyInjection`.
 
 ---
 

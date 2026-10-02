@@ -27,11 +27,10 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=TechEvalDb;User Id=sa;Password=${SA_PASSWORD:?define SA_PASSWORD en tu .env};TrustServerCertificate=True;
       - Jwt__SecretKey=${JWT_SECRET_KEY:?define JWT_SECRET_KEY en tu .env — ver .env.example}
-      - Email__Host=smtp.sendgrid.net
-      - Email__Port=587
-      - Email__UserName=apikey
-      - Email__Password=${SENDGRID_API_KEY:?define SENDGRID_API_KEY en tu .env}
       - Email__FromEmail=${EMAIL_FROM:?define EMAIL_FROM en tu .env}
+      - Email__Office365__TenantId=${O365_TENANT_ID:?define O365_TENANT_ID en tu .env}
+      - Email__Office365__ClientId=${O365_CLIENT_ID:?define O365_CLIENT_ID en tu .env}
+      - Email__Office365__ClientSecret=${O365_CLIENT_SECRET:?define O365_CLIENT_SECRET en tu .env}
       - AdminPassword=${ADMIN_PASSWORD:?define ADMIN_PASSWORD en tu .env}
     depends_on:
       sqlserver:
@@ -45,15 +44,6 @@ services:
       - "5001:80"
     depends_on:
       - api
-
-  # MailHog para desarrollo local (captura emails)
-  mailhog:
-    image: mailhog/mailhog
-    ports:
-      - "1025:1025"  # SMTP
-      - "8025:8025"  # Web UI
-    profiles:
-      - dev
 
 volumes:
   sqlserver_data:

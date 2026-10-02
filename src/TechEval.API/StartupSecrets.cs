@@ -24,7 +24,14 @@ public static class StartupSecrets
     [
         ("Jwt:SecretKey", "clave de firma de los tokens de sesión"),
         ("AdminPassword", "contraseña del administrador que se siembra al arrancar"),
-        ("ConnectionStrings:DefaultConnection", "cadena de conexión a la base de datos")
+        ("ConnectionStrings:DefaultConnection", "cadena de conexión a la base de datos"),
+        // Sin estos cuatro el correo no sale, y nadie se entera: quien envía solo lo registra
+        // en el log y sigue. FromEmail y los dos identificadores no son secretos, pero sin
+        // ellos el secreto de cliente no sirve de nada.
+        ("Email:FromEmail", "buzón desde el que se envía el correo"),
+        ("Email:Office365:TenantId", "inquilino de Entra ID de la aplicación de correo"),
+        ("Email:Office365:ClientId", "identificador de la aplicación de correo en Entra ID"),
+        ("Email:Office365:ClientSecret", "secreto de cliente de la aplicación de correo")
     ];
 
     /// <summary>

@@ -170,7 +170,7 @@ public sealed class ReviewWorkflow
         }, ct);
 
         // Después del cierre y sin revertir: una corrección válida no debe perderse
-        // porque el SMTP esté caído. SmtpEmailService ya registra el fallo en el log
+        // porque el correo esté caído. GraphEmailService ya registra el fallo en el log
         // antes de relanzar, así que aquí solo hay que evitar que tumbe la operación.
         try
         {

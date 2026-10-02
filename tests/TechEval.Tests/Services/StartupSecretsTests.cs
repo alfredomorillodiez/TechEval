@@ -16,13 +16,18 @@ public class StartupSecretsTests
     private static IConfiguration Configuracion(
         string? jwt = "clave-larga-y-aleatoria-de-produccion",
         string? admin = "contraseña-de-produccion",
-        string? conexion = "Server=db;Database=TechEvalDb;")
+        string? conexion = "Server=db;Database=TechEvalDb;",
+        string? secretoDeCorreo = "secreto-de-cliente-de-produccion")
     {
         var valores = new Dictionary<string, string?>
         {
             ["Jwt:SecretKey"] = jwt,
             ["AdminPassword"] = admin,
-            ["ConnectionStrings:DefaultConnection"] = conexion
+            ["ConnectionStrings:DefaultConnection"] = conexion,
+            ["Email:FromEmail"] = "techeval@pronet-ise.com",
+            ["Email:Office365:TenantId"] = "inquilino",
+            ["Email:Office365:ClientId"] = "aplicacion",
+            ["Email:Office365:ClientSecret"] = secretoDeCorreo
         };
 
         return new ConfigurationBuilder().AddInMemoryCollection(valores).Build();
@@ -62,6 +67,16 @@ public class StartupSecretsTests
 
         problemas.Should().ContainSingle();
         problemas[0].Should().Contain("ConnectionStrings:DefaultConnection");
+    }
+
+    [Fact]
+    public void FaltaElSecretoDeLaAplicacionDeCorreo_SeDetieneYLoNombra()
+    {
+        // Sin él el correo no sale, y quien envía solo lo registra en el log y sigue.
+        var problemas = StartupSecrets.Check(Configuracion(secretoDeCorreo: null));
+
+        problemas.Should().ContainSingle();
+        problemas[0].Should().Contain("Email:Office365:ClientSecret");
     }
 
     [Fact]

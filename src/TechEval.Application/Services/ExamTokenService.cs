@@ -371,7 +371,7 @@ public class ExamTokenService : IExamTokenService
         }, ct);
 
         // El correo va después de confirmar, y fuera de la transacción: mantenerla abierta
-        // mientras se espera al SMTP bloquearía filas durante segundos.
+        // mientras se espera al servidor de correo bloquearía filas durante segundos.
         if (status == Domain.Enums.ExamResultStatus.PendingReview)
         {
             // Acuse sin cifras: el resultado definitivo se envía al cerrar la corrección.

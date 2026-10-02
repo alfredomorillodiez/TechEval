@@ -53,11 +53,13 @@ docker compose exec sqlserver /opt/mssql-tools18/bin/sqlcmd \
   -Q "ALTER LOGIN sa WITH PASSWORD = '<la nueva, la del .env>'"
 ```
 
-### 3. Revocar la clave del proveedor de correo
+### 3. Revocar la credencial del correo
 
-En el panel del proveedor: revoca la clave anterior **antes** de emitir la nueva, para que no queden dos válidas. Pega la nueva en `SENDGRID_API_KEY` del `.env`, y el remitente en `EMAIL_FROM`.
+Las credenciales SMTP que estuvieron en git ya no las usa TechEval: desde el 02·10·2026 el correo sale por Microsoft Graph. Siguen en el historial, así que hay que cambiar la contraseña de ese buzón igualmente.
 
-Revocar es la parte que importa. Emitir otra sin revocar la anterior deja el problema donde estaba.
+Para el secreto de cliente de la aplicación de Entra ID: en el registro de la aplicación, emite uno nuevo y revoca el anterior. Pega el nuevo en `O365_CLIENT_SECRET` del `.env`. `O365_TENANT_ID`, `O365_CLIENT_ID` y `EMAIL_FROM` no cambian.
+
+Revocar es la parte que importa. Emitir otro sin revocar el anterior deja el problema donde estaba.
 
 ### 4. Reasignar la contraseña del administrador
 

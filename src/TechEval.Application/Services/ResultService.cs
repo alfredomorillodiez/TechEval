@@ -69,7 +69,8 @@ public class ResultService : IResultService
                 ua.IsCorrect,
                 ua.QuestionPointsSnapshot ?? ua.Question?.Points ?? 0,
                 ua.AwardedPoints,
-                ua.ReviewerComment);
+                ua.ReviewerComment,
+                OptionsAsAsked(ua, correct));
         }).ToList();
 
         return new ExamResultDto(
@@ -81,6 +82,36 @@ public class ResultService : IResultService
             // Solo cuando hubo corrección manual: un resultado de solo test no tiene corrector.
             result.ReviewedByUserId is null ? null : result.ReviewedByUser?.Name,
             result.ReviewedByUserId is null ? null : result.ReviewedAt);
+    }
+
+    /// <summary>
+    /// Las opciones de una pregunta de test, en el orden del examen, con la marcada y la
+    /// correcta señaladas.
+    /// </summary>
+    /// <remarks>
+    /// Salen del banco: al enviar solo se copian la opción marcada y la correcta. Si alguna
+    /// de esas dos copias ya no coincide con el banco, la pregunta se editó después del
+    /// examen, y las opciones de hoy no son las que vio el candidato. Entonces se devuelve
+    /// null y la ficha muestra solo las copias. El cambio de texto de las otras dos opciones
+    /// no se puede detectar, porque no tienen copia.
+    /// </remarks>
+    private static List<ResultOptionDto>? OptionsAsAsked(UserAnswer ua, Answer? correct)
+    {
+        var question = ua.Question;
+        if (question is null || question.Type != QuestionType.MultipleChoice || question.Answers.Count == 0)
+            return null;
+
+        var selected = question.Answers.FirstOrDefault(a => a.Id == ua.SelectedAnswerId);
+        var edited =
+            (ua.QuestionTextSnapshot is not null && ua.QuestionTextSnapshot != question.Text)
+            || (ua.SelectedAnswerTextSnapshot is not null && ua.SelectedAnswerTextSnapshot != selected?.Text)
+            || (ua.CorrectAnswerTextSnapshot is not null && ua.CorrectAnswerTextSnapshot != correct?.Text);
+        if (edited) return null;
+
+        return question.Answers
+            .OrderBy(a => a.Order)
+            .Select(a => new ResultOptionDto(a.Text, a.Id == ua.SelectedAnswerId, a.IsCorrect))
+            .ToList();
     }
 
     public async Task<DashboardStatsDto> GetDashboardStatsAsync(CancellationToken ct = default)

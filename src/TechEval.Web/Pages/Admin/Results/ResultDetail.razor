@@ -127,46 +127,80 @@
                                     </div>
                                 </div>
 
-                                <div class="row g-2 mt-1">
-                                    <div class="col-md-6">
-                                        <p class="text-muted small mb-1">Respuesta del candidato</p>
-                                        <div class="px-3 py-2 rounded border @(answer.IsCorrect == true ? "border-success bg-white" : answer.IsCorrect == false ? "border-danger bg-white" : "bg-light")">
-                                            @if (!string.IsNullOrEmpty(answer.SelectedAnswerText))
+                                @if (answer.Options is not null)
+                                {
+                                    @if (!answer.Options.Any(o => o.IsSelected))
+                                    {
+                                        <p class="text-muted small fst-italic mb-2">Sin respuesta</p>
+                                    }
+                                    <div class="d-flex flex-column gap-2 mt-1">
+                                        @foreach (var option in answer.Options)
+                                        {
+                                            <div class="d-flex align-items-center gap-2 px-3 py-2 rounded border @OptionClass(option)">
+                                                <i class="bi @OptionIcon(option) flex-shrink-0"></i>
+                                                <span class="flex-grow-1">@option.Text</span>
+                                                @if (option.IsSelected)
+                                                {
+                                                    <span class="badge @(option.IsCorrect ? "bg-success" : "bg-danger")">Marcada</span>
+                                                }
+                                                @if (option.IsCorrect)
+                                                {
+                                                    <span class="badge bg-success">Correcta</span>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    @if (answer.CorrectAnswerText is not null)
+                                    {
+                                        <p class="text-muted small mb-2">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            La pregunta se editó después del examen. Se muestra solo lo que consta del envío.
+                                        </p>
+                                    }
+                                    <div class="row g-2 mt-1">
+                                        <div class="col-md-6">
+                                            <p class="text-muted small mb-1">Respuesta del candidato</p>
+                                            <div class="px-3 py-2 rounded border @(answer.IsCorrect == true ? "border-success bg-white" : answer.IsCorrect == false ? "border-danger bg-white" : "bg-light")">
+                                                @if (!string.IsNullOrEmpty(answer.SelectedAnswerText))
+                                                {
+                                                    <span>@answer.SelectedAnswerText</span>
+                                                }
+                                                else if (!string.IsNullOrEmpty(answer.OpenAnswer))
+                                                {
+                                                    <span class="fst-italic">@answer.OpenAnswer</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted fst-italic">Sin respuesta</span>
+                                                }
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(answer.ReviewerComment))
                                             {
-                                                <span>@answer.SelectedAnswerText</span>
-                                            }
-                                            else if (!string.IsNullOrEmpty(answer.OpenAnswer))
-                                            {
-                                                <span class="fst-italic">@answer.OpenAnswer</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="text-muted fst-italic">Sin respuesta</span>
+                                                <div class="mt-2">
+                                                    <p class="text-muted small mb-1">
+                                                        <i class="bi bi-chat-left-text me-1"></i> Comentario del corrector
+                                                    </p>
+                                                    <div class="px-3 py-2 rounded border bg-white small">
+                                                        @answer.ReviewerComment
+                                                    </div>
+                                                </div>
                                             }
                                         </div>
-                                        @if (!string.IsNullOrWhiteSpace(answer.ReviewerComment))
+                                        @if (!string.IsNullOrEmpty(answer.CorrectAnswerText))
                                         {
-                                            <div class="mt-2">
-                                                <p class="text-muted small mb-1">
-                                                    <i class="bi bi-chat-left-text me-1"></i> Comentario del corrector
-                                                </p>
-                                                <div class="px-3 py-2 rounded border bg-white small">
-                                                    @answer.ReviewerComment
+                                            <div class="col-md-6">
+                                                <p class="text-muted small mb-1">Respuesta correcta</p>
+                                                <div class="px-3 py-2 rounded border border-success bg-success bg-opacity-10">
+                                                    <i class="bi bi-check-circle-fill text-success me-1"></i>
+                                                    @answer.CorrectAnswerText
                                                 </div>
                                             </div>
                                         }
                                     </div>
-                                    @if (!string.IsNullOrEmpty(answer.CorrectAnswerText))
-                                    {
-                                        <div class="col-md-6">
-                                            <p class="text-muted small mb-1">Respuesta correcta</p>
-                                            <div class="px-3 py-2 rounded border border-success bg-success bg-opacity-10">
-                                                <i class="bi bi-check-circle-fill text-success me-1"></i>
-                                                @answer.CorrectAnswerText
-                                            </div>
-                                        </div>
-                                    }
-                                </div>
+                                }
                             </div>
                         </div>
                     </div>
@@ -193,4 +227,18 @@
         _integrity = await integrity;
         _loading = false;
     }
+
+    private static string OptionClass(ResultOptionDto option) => option switch
+    {
+        { IsCorrect: true } => "border-success bg-success bg-opacity-10",
+        { IsSelected: true } => "border-danger bg-danger bg-opacity-10",
+        _ => "bg-white"
+    };
+
+    private static string OptionIcon(ResultOptionDto option) => option switch
+    {
+        { IsCorrect: true } => "bi-check-circle-fill text-success",
+        { IsSelected: true } => "bi-x-circle-fill text-danger",
+        _ => "bi-circle text-muted"
+    };
 }

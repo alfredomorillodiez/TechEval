@@ -25,7 +25,12 @@ public record AnswerReviewDto(
     bool? IsCorrect,
     int Points,
     int? AwardedPoints,
-    string? ReviewerComment);
+    string? ReviewerComment,
+    // Todas las opciones, en el orden del examen. Null en las preguntas abiertas y cuando
+    // la pregunta se editó después del examen: entonces solo valen las copias de arriba.
+    List<ResultOptionDto>? Options = null);
+
+public record ResultOptionDto(string Text, bool IsSelected, bool IsCorrect);
 
 public record ExamResultSummaryDto(
     int Id,

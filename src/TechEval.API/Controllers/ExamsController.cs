@@ -83,9 +83,8 @@ public class ExamsController : ControllerBase
     [HttpPost("send-bulk")]
     public async Task<IActionResult> SendExamBulk([FromBody] BulkSendExamDto dto, CancellationToken ct)
     {
-        if (dto.Candidates is null || dto.Candidates.Count == 0)
-            return BadRequest("La lista de candidatos no puede estar vacía.");
-
+        // La validación (lista vacía, correos, expiración) es del servicio: así llega como
+        // ProblemDetails con su mensaje, igual que el resto de rechazos.
         var baseUrl = _configuration["FrontendBaseUrl"] ?? $"{Request.Scheme}://{Request.Host}";
         var result = await _tokenService.SendExamBulkAsync(dto, baseUrl, ct);
         return Ok(result);

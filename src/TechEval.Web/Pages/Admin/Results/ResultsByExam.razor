@@ -38,7 +38,7 @@
     {
         <!-- KPIs -->
         <div class="row g-3 mb-4">
-            <div class="col-6 col-xl-2">
+            <div class="col-6 col-md-4 col-xl">
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body text-center">
                         <p class="text-muted small mb-1">Candidatos</p>
@@ -46,25 +46,35 @@
                     </div>
                 </div>
             </div>
-            <div class="col-6 col-xl-2">
+            <div class="col-6 col-md-4 col-xl">
                 <div class="card border-start border-success border-3 shadow-sm h-100">
                     <div class="card-body text-center">
                         <p class="text-muted small mb-1">Aprobados</p>
                         <p class="h2 fw-bold text-success mb-0">@_passedCount</p>
-                        <p class="text-muted small mb-0">@_passRate%</p>
+                        <p class="text-muted small mb-0">@(_reviewedCount > 0 ? $"{_passRate}%" : "—")</p>
                     </div>
                 </div>
             </div>
-            <div class="col-6 col-xl-2">
+            <div class="col-6 col-md-4 col-xl">
                 <div class="card border-start border-danger border-3 shadow-sm h-100">
                     <div class="card-body text-center">
                         <p class="text-muted small mb-1">Reprobados</p>
-                        <p class="h2 fw-bold text-danger mb-0">@(_all.Count - _passedCount)</p>
-                        <p class="text-muted small mb-0">@(100 - _passRate)%</p>
+                        <p class="h2 fw-bold text-danger mb-0">@(_reviewedCount - _passedCount)</p>
+                        <p class="text-muted small mb-0">@(_reviewedCount > 0 ? $"{100 - _passRate}%" : "—")</p>
                     </div>
                 </div>
             </div>
-            <div class="col-6 col-xl-2">
+            <div class="col-6 col-md-4 col-xl">
+                <div class="card border-start border-warning border-3 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        @* Aparte de los reprobados: un pendiente no está reprobado, solo sin corregir. *@
+                        <p class="text-muted small mb-1">Pendientes</p>
+                        <p class="h2 fw-bold text-warning mb-0">@_pendingCount</p>
+                        <p class="text-muted small mb-0">sin corregir</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl">
                 <div class="card border-start border-primary border-3 shadow-sm h-100">
                     <div class="card-body text-center">
                         <p class="text-muted small mb-1">Nota media</p>
@@ -72,7 +82,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-6 col-xl-2">
+            <div class="col-6 col-md-4 col-xl">
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body text-center">
                         <p class="text-muted small mb-1">Nota máxima</p>
@@ -80,7 +90,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-6 col-xl-2">
+            <div class="col-6 col-md-4 col-xl">
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body text-center">
                         <p class="text-muted small mb-1">Nota mínima</p>

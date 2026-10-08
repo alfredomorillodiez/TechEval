@@ -34,14 +34,26 @@ public class GraphEmailService : IEmailService
         _tokens = tokens;
         _settings = settings.Value;
         _logger = logger;
+
+        _zone = EmailDateFormat.Resolve(_settings.TimeZoneId, out var found);
+        if (!found)
+            _logger.LogWarning(
+                "La zona horaria «{Zone}» de Email:TimeZoneId no existe en este equipo: los correos llevarán la hora en UTC.",
+                _settings.TimeZoneId);
     }
+
+    private readonly TimeZoneInfo _zone;
+
+    /// <summary>Fecha de expiración en la zona configurada, con su nombre y su desfase.</summary>
+    private string FormatExpiry(DateTime expiresAtUtc)
+        => EmailDateFormat.Format(expiresAtUtc, _zone, _settings.TimeZoneId);
 
     public async Task SendExamInvitationAsync(
         string toEmail, string toName, string examTitle,
         string examLink, DateTime expiresAt, CancellationToken ct = default)
     {
         var subject = $"Invitación a una prueba técnica: {examTitle}";
-        var body = BuildInvitationHtml(toName, examTitle, examLink, expiresAt);
+        var body = BuildInvitationHtml(toName, examTitle, examLink, FormatExpiry(expiresAt));
         await SendAsync(toEmail, toName, subject, body, ct);
     }
 
@@ -66,7 +78,7 @@ public class GraphEmailService : IEmailService
         string toEmail, string toName, string setupLink, DateTime expiresAt, CancellationToken ct = default)
     {
         const string subject = "Fija tu contraseña de TechEval";
-        var body = BuildPasswordSetupHtml(toName, setupLink, expiresAt);
+        var body = BuildPasswordSetupHtml(toName, setupLink, FormatExpiry(expiresAt));
         await SendAsync(toEmail, toName, subject, body, ct);
     }
 
@@ -122,7 +134,7 @@ public class GraphEmailService : IEmailService
     }
 
     private static string BuildInvitationHtml(
-        string name, string examTitle, string link, DateTime expiresAt) => $"""
+        string name, string examTitle, string link, string expires) => $"""
         <!DOCTYPE html>
         <html>
         <head><meta charset="utf-8"></head>
@@ -140,7 +152,7 @@ public class GraphEmailService : IEmailService
                     Comenzar prueba
                 </a>
                 <p style="margin-top: 20px; color: #6b7280; font-size: 14px;">
-                    ⚠️ Este enlace expira el {expiresAt:dd/MM/yyyy HH:mm} UTC y solo puede usarse una vez.
+                    ⚠️ Este enlace expira el {expires} y solo puede usarse una vez.
                 </p>
                 <p style="color: #6b7280; font-size: 12px;">
                     Si el botón no funciona, copia este enlace: <br>{link}
@@ -179,7 +191,7 @@ public class GraphEmailService : IEmailService
 
     // El nombre lo escribe un administrador en el alta, así que se codifica antes de
     // insertarlo en el HTML.
-    private static string BuildPasswordSetupHtml(string name, string link, DateTime expiresAt) => $"""
+    private static string BuildPasswordSetupHtml(string name, string link, string expires) => $"""
         <!DOCTYPE html>
         <html>
         <head><meta charset="utf-8"></head>
@@ -195,7 +207,7 @@ public class GraphEmailService : IEmailService
                     Fijar contraseña
                 </a>
                 <p style="margin-top: 20px; color: #6b7280; font-size: 14px;">
-                    ⚠️ Este enlace expira el {expiresAt:dd/MM/yyyy HH:mm} UTC y solo puede usarse una vez.
+                    ⚠️ Este enlace expira el {expires} y solo puede usarse una vez.
                     Si caduca, pide uno nuevo al administrador.
                 </p>
                 <p style="color: #6b7280; font-size: 12px;">

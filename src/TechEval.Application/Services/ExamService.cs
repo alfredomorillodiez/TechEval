@@ -45,9 +45,28 @@ public class ExamService : IExamService
         return exam is null ? null : MapToDto(exam);
     }
 
+    /// <summary>
+    /// Comprueba los datos propios de una prueba antes de leer o escribir nada. Antes no se
+    /// comprobaba ninguno: una prueba de 0 minutos se enviaba sola, en blanco, al abrirla.
+    /// </summary>
+    private static void ValidateExamData(string? title, int timeLimitMinutes, int passingScore)
+    {
+        if (ExamLimits.ExamDataProblem(title, timeLimitMinutes, passingScore) is { } problem)
+            throw new ValidationException(problem);
+    }
+
     public async Task<ExamDto> CreateAsync(CreateExamDto dto, int createdByUserId, CancellationToken ct = default)
     {
-        var questions = await _questionRepo.FindAsync(q => dto.QuestionIds.Contains(q.Id) && q.IsActive, ct);
+        ValidateExamData(dto.Title, dto.TimeLimitMinutes, dto.PassingScorePercentage);
+
+        if (dto.QuestionIds is null || dto.QuestionIds.Count == 0)
+            throw new ValidationException("La prueba necesita al menos una pregunta.");
+        if (dto.QuestionIds.Distinct().Count() != dto.QuestionIds.Count)
+            throw new ValidationException("La lista de preguntas tiene preguntas repetidas.");
+
+        // Pregunta y categoría activas: una categoría dada de baja no aporta preguntas.
+        var questions = await _questionRepo.FindAsync(
+            q => dto.QuestionIds.Contains(q.Id) && q.IsActive && q.Category!.IsActive, ct);
         if (questions.Count != dto.QuestionIds.Count)
             throw new ValidationException("Algunas preguntas no existen o están inactivas.");
 
@@ -72,6 +91,11 @@ public class ExamService : IExamService
 
     public async Task<ExamDto> GenerateAsync(GenerateExamDto dto, int createdByUserId, CancellationToken ct = default)
     {
+        ValidateExamData(dto.Title, dto.TimeLimitMinutes, dto.PassingScorePercentage);
+        if (dto.QuestionCount < 1 || dto.QuestionCount > ExamLimits.MaxGeneratedQuestions)
+            throw new ValidationException(
+                $"Hay que pedir entre 1 y {ExamLimits.MaxGeneratedQuestions} preguntas.");
+
         IReadOnlyList<Question> questions;
         if (dto.DifficultyPercentages is null)
         {
@@ -160,6 +184,9 @@ public class ExamService : IExamService
 
     public async Task<ExamDto?> UpdateAsync(int id, UpdateExamDto dto, CancellationToken ct = default)
     {
+        // Antes de leer: una edición inválida no debe ni consultar la prueba.
+        ValidateExamData(dto.Title, dto.TimeLimitMinutes, dto.PassingScorePercentage);
+
         var exam = await _examRepo.GetByIdAsync(id, ct);
         if (exam is null) return null;
         exam.Title = dto.Title;

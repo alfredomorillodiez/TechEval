@@ -95,8 +95,10 @@ public class ApiService
     public Task<ExamDto?> GetExamAsync(int id)
         => GetAsync<ExamDto>($"api/exams/{id}");
 
-    public Task<ExamDto?> CreateExamAsync(CreateExamDto dto)
-        => PostAsync<CreateExamDto, ExamDto>("api/exams", dto);
+    // Con el código y el mensaje: una prueba rechazada por validación (0 minutos, sin preguntas)
+    // tiene que decir qué falla, no «Error al crear la prueba».
+    public Task<(ExamDto? Result, int StatusCode, string? Error)> CreateExamAsync(CreateExamDto dto)
+        => SendAsync<ExamDto>(HttpMethod.Post, "api/exams", dto);
 
     /// <summary>Con el código y el mensaje: un reparto rechazado dice qué nivel no alcanza.</summary>
     public Task<(ExamDto? Result, int StatusCode, string? Error)> GenerateExamAsync(GenerateExamDto dto)
@@ -109,26 +111,26 @@ public class ApiService
         return GetAsync<List<LevelCountDto>>($"api/questions/availability{qs}");
     }
 
-    public Task<ExamDto?> UpdateExamAsync(int id, UpdateExamDto dto)
-        => PutAsync<UpdateExamDto, ExamDto>($"api/exams/{id}", dto);
+    public Task<(ExamDto? Result, int StatusCode, string? Error)> UpdateExamAsync(int id, UpdateExamDto dto)
+        => SendAsync<ExamDto>(HttpMethod.Put, $"api/exams/{id}", dto);
 
     public Task<bool> DeleteExamAsync(int id)
         => DeleteAsync($"api/exams/{id}");
 
-    public async Task<string?> SendExamAsync(SendExamDto dto)
+    private sealed record SendTokenResponse(string Token);
+
+    /// <summary>
+    /// Con el código y el mensaje: un envío rechazado (prueba desactivada, correo inválido) tiene
+    /// que decir por qué, y no «verifica la configuración de email».
+    /// </summary>
+    public async Task<(string? Token, int StatusCode, string? Error)> SendExamAsync(SendExamDto dto)
     {
-        var response = await _http.PostAsJsonAsync("api/exams/send", dto, JsonOptions);
-        if (!response.IsSuccessStatusCode) return null;
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("token").GetString();
+        var (result, status, error) = await SendAsync<SendTokenResponse>(HttpMethod.Post, "api/exams/send", dto);
+        return (result?.Token, status, error);
     }
 
-    public async Task<BulkSendResultDto?> SendExamBulkAsync(BulkSendExamDto dto)
-    {
-        var response = await _http.PostAsJsonAsync("api/exams/send-bulk", dto, JsonOptions);
-        if (!response.IsSuccessStatusCode) return null;
-        return await response.Content.ReadFromJsonAsync<BulkSendResultDto>(JsonOptions);
-    }
+    public Task<(BulkSendResultDto? Result, int StatusCode, string? Error)> SendExamBulkAsync(BulkSendExamDto dto)
+        => SendAsync<BulkSendResultDto>(HttpMethod.Post, "api/exams/send-bulk", dto);
 
     // Results
     public Task<List<ExamResultSummaryDto>?> GetResultsAsync()

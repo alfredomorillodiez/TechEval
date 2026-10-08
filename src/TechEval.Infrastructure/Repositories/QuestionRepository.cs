@@ -44,9 +44,11 @@ public class QuestionRepository : BaseRepository<Question>, IQuestionRepository
     public async Task<IReadOnlyList<Question>> GetRandomAsync(
         int count, List<int>? categoryIds, DifficultyLevel? difficulty, CancellationToken ct = default)
     {
+        // Pregunta y categoría activas: las preguntas de una categoría dada de baja no entran en
+        // la generación, aunque ellas mismas sigan marcadas como activas.
         var query = Context.Questions
             .Include(q => q.Answers)
-            .Where(q => q.IsActive);
+            .Where(q => q.IsActive && q.Category!.IsActive);
 
         if (categoryIds is { Count: > 0 }) query = query.Where(q => categoryIds.Contains(q.CategoryId));
         if (difficulty.HasValue) query = query.Where(q => q.Difficulty == difficulty.Value);
@@ -58,7 +60,8 @@ public class QuestionRepository : BaseRepository<Question>, IQuestionRepository
     public async Task<IReadOnlyDictionary<DifficultyLevel, int>> CountByDifficultyAsync(
         List<int>? categoryIds, CancellationToken ct = default)
     {
-        var query = Context.Questions.Where(q => q.IsActive);
+        // La misma regla que la generación: la disponibilidad que se anuncia es la que se puede usar.
+        var query = Context.Questions.Where(q => q.IsActive && q.Category!.IsActive);
         if (categoryIds is { Count: > 0 }) query = query.Where(q => categoryIds.Contains(q.CategoryId));
 
         // Un GROUP BY en la base; los niveles sin filas no salen del GROUP BY, así que se

@@ -38,11 +38,11 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Tiempo límite (min)</label>
-                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="@TechEval.Application.ExamLimits.MinTimeLimitMinutes" max="@TechEval.Application.ExamLimits.MaxTimeLimitMinutes" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">% mínimo para aprobar</label>
-                        <input type="number" class="form-control" @bind="_passingScore" min="0" max="100" />
+                        <input type="number" class="form-control" @bind="_passingScore" min="@TechEval.Application.ExamLimits.MinPassingScore" max="@TechEval.Application.ExamLimits.MaxPassingScore" />
                     </div>
 
                     <hr />
@@ -220,17 +220,19 @@
     private async Task SaveAsync()
     {
         _error = string.Empty;
-        if (string.IsNullOrWhiteSpace(_title)) { _error = "El título es obligatorio."; return; }
+        // La misma comprobación y el mismo texto que el servidor: el aviso sale sin llamar a la API.
+        if (TechEval.Application.ExamLimits.ExamDataProblem(_title, _timeLimitMinutes, _passingScore) is { } problem)
+        { _error = problem; return; }
         if (_selectedIds.Count == 0) { _error = "Selecciona al menos una pregunta."; return; }
 
         _saving = true;
-        var result = await Api.CreateExamAsync(new CreateExamDto(
+        var (result, _, error) = await Api.CreateExamAsync(new CreateExamDto(
             _title, _description, _timeLimitMinutes, _passingScore,
             _selectedIds.ToList()));
         _saving = false;
 
         if (result is not null) Nav.NavigateTo($"/admin/pruebas/{result.Id}");
-        else _error = "Error al crear la prueba. Inténtalo de nuevo.";
+        else _error = error ?? "No se pudo crear la prueba. Inténtalo de nuevo.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

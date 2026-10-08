@@ -72,11 +72,11 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold">Tiempo límite (min)</label>
-                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="@TechEval.Application.ExamLimits.MinTimeLimitMinutes" max="@TechEval.Application.ExamLimits.MaxTimeLimitMinutes" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold">% mínimo para aprobar</label>
-                        <input type="number" class="form-control" @bind="_passingScore" min="0" max="100" />
+                        <input type="number" class="form-control" @bind="_passingScore" min="@TechEval.Application.ExamLimits.MinPassingScore" max="@TechEval.Application.ExamLimits.MaxPassingScore" />
                     </div>
                     <div class="col-md-6 d-flex align-items-end">
                         <div class="d-flex gap-4 pb-2 text-muted">
@@ -246,7 +246,7 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Expiración (horas)</label>
-                            <input type="number" class="form-control" @bind="_expirationHours" min="1" max="168" />
+                            <input type="number" class="form-control" @bind="_expirationHours" min="@TechEval.Application.ExamLimits.MinExpirationHours" max="@TechEval.Application.ExamLimits.MaxExpirationHours" />
                         </div>
                     }
                 </div>
@@ -359,9 +359,11 @@
     {
         _saveError = string.Empty;
         _saveSuccess = false;
-        if (string.IsNullOrWhiteSpace(_title)) { _saveError = "El título es obligatorio."; return; }
+        // La misma comprobación y el mismo texto que el servidor: el aviso sale sin llamar a la API.
+        if (TechEval.Application.ExamLimits.ExamDataProblem(_title, _timeLimitMinutes, _passingScore) is { } problem)
+        { _saveError = problem; return; }
         _saving = true;
-        var updated = await Api.UpdateExamAsync(Id, new UpdateExamDto(
+        var (updated, _, updateError) = await Api.UpdateExamAsync(Id, new UpdateExamDto(
             _title, _description, _timeLimitMinutes, _passingScore, _isActive));
         _saving = false;
         if (updated is not null)
@@ -372,7 +374,7 @@
         }
         else
         {
-            _saveError = "No se pudieron guardar los cambios.";
+            _saveError = updateError ?? "No se pudieron guardar los cambios.";
         }
     }
 
@@ -390,11 +392,11 @@
         if (string.IsNullOrWhiteSpace(_candidateName) || string.IsNullOrWhiteSpace(_candidateEmail))
         { _sendError = "Nombre y email son obligatorios."; return; }
         _sendLoading = true;
-        var token = await Api.SendExamAsync(new SendExamDto(
+        var (token, _, error) = await Api.SendExamAsync(new SendExamDto(
             _sendingExamId!.Value, _candidateName, _candidateEmail, _expirationHours));
         _sendLoading = false;
         if (token is not null) _sendSuccess = true;
-        else _sendError = "Error al enviar la prueba. Verifica la configuración de email.";
+        else _sendError = error ?? "No se pudo enviar la prueba. Verifica la configuración de email.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

@@ -222,6 +222,7 @@ Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`ap
 | `Jwt:ExpirationHours` | Vigencia del token de sesión | `8` |
 | `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — **obligatorio fuera de desarrollo** | vacío |
 | `Email:Office365:*` | `TenantId`, `ClientId` y `ClientSecret` de la aplicación de Entra ID — **obligatorios fuera de desarrollo** | vacío |
+| `Email:TimeZoneId` | Zona horaria de la fecha de expiración en los correos. Si el equipo no la conoce, los correos llevan la hora en UTC | `Europe/Madrid` |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del administrador creado en el primer arranque — **obligatoria** | vacío |

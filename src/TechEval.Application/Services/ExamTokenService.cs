@@ -79,10 +79,52 @@ public class ExamTokenService : IExamTokenService
         _tokenService = tokenService;
     }
 
+    /// <summary>
+    /// Datos de una invitación. Sin esto se creaba el token (y se intentaba el correo) con un
+    /// correo inventado o una expiración de 0 horas, que daba un enlace ya caducado.
+    /// </summary>
+    internal static void ValidateInvitation(string? name, string? email, int expirationHours)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ValidationException("El nombre del candidato es obligatorio.");
+        if (!IsValidEmail(email))
+            throw new ValidationException($"El correo «{email}» no es válido.");
+        ValidateExpiration(expirationHours);
+    }
+
+    private static void ValidateExpiration(int hours)
+    {
+        if (ExamLimits.ExpirationProblem(hours) is { } problem)
+            throw new ValidationException(problem);
+    }
+
+    /// <summary>
+    /// Formato de correo razonable: una dirección sola (no «Nombre &lt;x@y.com&gt;»), con
+    /// dominio que tenga un punto. No prueba que el buzón exista.
+    /// </summary>
+    internal static bool IsValidEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return false;
+        var text = email.Trim();
+        if (!System.Net.Mail.MailAddress.TryCreate(text, out var address)) return false;
+        return address.Address == text && address.Host.Contains('.');
+    }
+
+    /// <summary>Una prueba desactivada sale de circulación: no admite invitaciones nuevas.</summary>
+    private static void EnsureExamAcceptsInvitations(Exam exam)
+    {
+        if (!exam.IsActive)
+            throw new ConflictException(
+                $"La prueba «{exam.Title}» está desactivada y no admite invitaciones.");
+    }
+
     public async Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
+        ValidateInvitation(dto.CandidateName, dto.CandidateEmail, dto.ExpirationHours);
+
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
             ?? throw new NotFoundException("Prueba no encontrada.");
+        EnsureExamAcceptsInvitations(exam);
 
         await EnsureInvitableAsync(dto.CandidateEmail, ct);
 
@@ -110,8 +152,26 @@ public class ExamTokenService : IExamTokenService
 
     public async Task<BulkSendResultDto> SendExamBulkAsync(BulkSendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
+        // Todo se comprueba antes de crear ningún token: un alta masiva a medias es peor que
+        // ninguna. El fallo de correo de un candidato, que sí es por candidato, no cambia.
+        if (dto.Candidates is null || dto.Candidates.Count == 0)
+            throw new ValidationException("La lista de candidatos no puede estar vacía.");
+        if (dto.Candidates.Count > ExamLimits.MaxBulkCandidates)
+            throw new ValidationException(
+                $"Un envío masivo admite hasta {ExamLimits.MaxBulkCandidates} candidatos.");
+        ValidateExpiration(dto.ExpirationHours);
+        for (var i = 0; i < dto.Candidates.Count; i++)
+        {
+            try { ValidateInvitation(dto.Candidates[i].Name, dto.Candidates[i].Email, dto.ExpirationHours); }
+            catch (ValidationException ex)
+            {
+                throw new ValidationException($"Candidato {i + 1}: {ex.Message}");
+            }
+        }
+
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
             ?? throw new NotFoundException("Prueba no encontrada.");
+        EnsureExamAcceptsInvitations(exam);
 
         var results = new List<BulkSendItemResultDto>();
 

@@ -35,15 +35,15 @@
             <div class="row g-3 mb-3">
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">Número de preguntas *</label>
-                    <input type="number" class="form-control" @bind="_questionCount" @bind:event="oninput" min="1" max="50" />
+                    <input type="number" class="form-control" @bind="_questionCount" @bind:event="oninput" min="1" max="@TechEval.Application.ExamLimits.MaxGeneratedQuestions" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">Tiempo límite (min) *</label>
-                    <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                    <input type="number" class="form-control" @bind="_timeLimitMinutes" min="@TechEval.Application.ExamLimits.MinTimeLimitMinutes" max="@TechEval.Application.ExamLimits.MaxTimeLimitMinutes" />
                 </div>
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">% mínimo para aprobar</label>
-                    <input type="number" class="form-control" @bind="_passingScore" min="50" max="100" />
+                    <input type="number" class="form-control" @bind="_passingScore" min="@TechEval.Application.ExamLimits.MinPassingScore" max="@TechEval.Application.ExamLimits.MaxPassingScore" />
                 </div>
             </div>
 
@@ -243,7 +243,11 @@
     private async Task GenerateAsync()
     {
         _error = string.Empty;
-        if (string.IsNullOrWhiteSpace(_title)) { _error = "El título es obligatorio."; return; }
+        // La misma comprobación y el mismo texto que el servidor: el aviso sale sin llamar a la API.
+        if (TechEval.Application.ExamLimits.ExamDataProblem(_title, _timeLimitMinutes, _passingScore) is { } problem)
+        { _error = problem; return; }
+        if (_questionCount < 1 || _questionCount > TechEval.Application.ExamLimits.MaxGeneratedQuestions)
+        { _error = $"Hay que pedir entre 1 y {TechEval.Application.ExamLimits.MaxGeneratedQuestions} preguntas."; return; }
 
         _loading = true;
         var categoryIds = _selectedCategoryIds.Count > 0 ? _selectedCategoryIds.ToList() : null;
@@ -256,9 +260,11 @@
         if (result is not null) { Nav.NavigateTo("/admin/pruebas"); return; }
 
         // Con reparto, el mensaje del servidor dice qué nivel no alcanza. Sin reparto, el de siempre.
-        _error = IsDistribution && status == 400 && error is not null
+        // Un 400 trae su motivo (reparto que no alcanza, o un dato inválido) y se muestra siempre.
+        // El texto genérico queda para lo que no sea un 400 (red, servidor).
+        _error = status == 400 && error is not null
             ? error
-            : "No hay suficientes preguntas con los filtros seleccionados. Prueba cambiando los filtros.";
+            : "No se pudo generar la prueba. Comprueba la conexión e inténtalo de nuevo.";
 
         // La disponibilidad pudo cambiar desde que se cargó.
         await LoadAvailabilityAsync();

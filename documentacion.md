@@ -471,6 +471,8 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 | POST | `/api/exams/send` | Admin | Enviar por email a un candidato |
 | POST | `/api/exams/send-bulk` | Admin | Enviar por email a varios candidatos |
 
+**Validación (`400`):** título no vacío y de hasta 200 caracteres; tiempo límite de 1 a 600 minutos; nota de corte de 0 a 100; alta manual con al menos una pregunta y sin repetidas; generación de 1 a 200 preguntas; invitación con nombre, correo válido y expiración de 1 a 720 horas; envío masivo de 1 a 500 candidatos. Una prueba desactivada rechaza las invitaciones con `409`. Las preguntas de una categoría desactivada no entran en la generación ni en el alta manual. Los límites están en `ExamLimits`.
+
 **Body de `/api/exams/generate`:**
 ```json
 {
@@ -748,6 +750,7 @@ Las claves se leen de `appsettings.json`, se sobrescriben por entorno (`appsetti
 | `Jwt:ExpirationHours` | Vigencia del token | `8` |
 | `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — obligatorio fuera de desarrollo | vacío |
 | `Email:Office365:TenantId` · `ClientId` · `ClientSecret` | Aplicación de Entra ID con permiso `Mail.Send` — obligatorios fuera de desarrollo | vacío |
+| `Email:TimeZoneId` | Zona horaria de la fecha de expiración en los correos (id IANA o de Windows). Si el equipo no la conoce, los correos llevan la hora en UTC | `Europe/Madrid` |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del admin creado en el primer arranque — **obligatoria, sin valor por defecto** | vacío |

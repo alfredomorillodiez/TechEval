@@ -1,3 +1,4 @@
+using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 
 namespace TechEval.Application.DTOs;
@@ -32,19 +33,34 @@ public record SessionQuestionDto(
 public record SubmitAnswerDto(
     int QuestionId,
     int? SelectedAnswerId,
-    string? OpenAnswer);
+    string? OpenAnswer)
+{
+    /// <summary>
+    /// Máximo de caracteres de `OpenAnswer`. Es el de la entidad, publicado aquí para la Web,
+    /// que limita el área de texto con él y no debe leer de las entidades del dominio.
+    /// </summary>
+    public const int OpenAnswerMaxLength = UserAnswer.OpenAnswerMaxLength;
+}
 
 public record SubmitExamDto(
     int SessionId,
     List<SubmitAnswerDto> Answers);
 
+/// <summary>
+/// Respuesta de la validación del enlace. `QuestionCount` y `TimeLimitMinutes` son lo que
+/// muestra la bienvenida: con ellos la pantalla no necesita pedir la sesión antes de que el
+/// candidato pulse «Comenzar prueba», así que el reloj no corre mientras lee. Van al final
+/// y son opcionales porque las respuestas de error no los llevan.
+/// </summary>
 public record ExamTokenValidationDto(
     bool IsValid,
     string? Error,
     int? SessionId,
     string? ExamTitle,
     string? CandidateName,
-    string? AuthToken);
+    string? AuthToken,
+    int? QuestionCount = null,
+    int? TimeLimitMinutes = null);
 
 /// <summary>
 /// Acuse que recibe el candidato al enviar la prueba. Deliberadamente NO incluye la lista

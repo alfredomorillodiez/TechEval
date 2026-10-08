@@ -102,7 +102,7 @@ docker-compose up -d
 
 **Administrador:** `admin@techeval.com`. Su contraseña sale de `AdminPassword`, que **no tiene valor por defecto**. En desarrollo la trae `appsettings.Development.json` con el valor público `Admin@123!`. Fuera de desarrollo, la API se niega a arrancar si falta, y también si conserva ese valor de desarrollo.
 
-> Las cuentas de alumno se crean solas al abrir una invitación, y **nacen sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña era la parte local de su email, así que cualquiera que conociese el email entraba en su portal.
+> Las cuentas de alumno se crean solas al abrir una invitación, y **nacen sin nombre de usuario ni contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña era la parte local de su email, así que cualquiera que conociese el email entraba en su portal. Las cuentas de esa época pueden conservarla: [documentacion.md](documentacion.md) trae la sentencia que la vacía.
 
 > **Antes de levantar el stack**, copia `.env.example` a `.env` y rellena sus valores. Ni `docker-compose.yml` ni `appsettings.json` llevan secretos: si falta alguno, el arranque para y dice cuál.
 >

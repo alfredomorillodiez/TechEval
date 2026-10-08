@@ -58,7 +58,7 @@ GO
 CREATE TABLE dbo.Users (
     Id           INT           NOT NULL IDENTITY(1,1),
     Email        NVARCHAR(200) NOT NULL,
-    Username     NVARCHAR(200) NULL,        -- alumnos: parte local del email (ej. alejandro.robles)
+    Username     NVARCHAR(200) NULL,        -- solo cuentas antiguas: ninguna cuenta nueva lo rellena; el login lo acepta en lugar del email
     PasswordHash NVARCHAR(MAX) NOT NULL,   -- PBKDF2 (formato de PasswordHasher); vacio = sin contrasena utilizable
     Name         NVARCHAR(200) NOT NULL,
     Role         INT           NOT NULL,   -- 1=Admin | 2=Evaluador | 3=Alumno

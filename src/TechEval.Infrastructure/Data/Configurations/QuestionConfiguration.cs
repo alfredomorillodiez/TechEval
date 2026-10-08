@@ -190,7 +190,7 @@ public class UserAnswerConfiguration : IEntityTypeConfiguration<UserAnswer>
     public void Configure(EntityTypeBuilder<UserAnswer> builder)
     {
         builder.HasKey(a => a.Id);
-        builder.Property(a => a.OpenAnswer).HasMaxLength(4000);
+        builder.Property(a => a.OpenAnswer).HasMaxLength(UserAnswer.OpenAnswerMaxLength);
         builder.Property(a => a.ReviewerComment).HasMaxLength(2000);
 
         // Mismas longitudes que sus originales: Question.Text y Answer.Text.

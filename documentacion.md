@@ -112,7 +112,7 @@ Se aplica **Clean Architecture** con separación estricta de responsabilidades e
 Users
 ├── Id (PK)
 ├── Email (UNIQUE)
-├── Username (UNIQUE filtrado WHERE Username IS NOT NULL)
+├── Username (UNIQUE filtrado WHERE Username IS NOT NULL; solo cuentas antiguas, ninguna nueva lo rellena)
 ├── Name
 ├── PasswordHash (PBKDF2; vacío = sin contraseña utilizable)
 ├── Role             -- 1 = Admin, 2 = Evaluador, 3 = Alumno (CHECK)
@@ -642,15 +642,17 @@ Alumno consulta su nota en /portal
 ### Flujo del alumno recurrente
 
 ```
-Alumno entra en /login con su email (o username) y contraseña
+Alumno abre el enlace de una de sus invitaciones
     ↓
-POST /api/auth/login → JWT con rol Alumno → redirección a /portal
+GET /api/exam/validate/{token} → JWT con rol Alumno, válido 8 horas
     ↓
-Portal del alumno
+Portal del alumno (/portal)
     ├── GET /api/student/pending    → pruebas pendientes con su fecha de expiración
     │       └── "Comenzar" → /prueba/{token} (mismo flujo que desde el email)
     └── GET /api/student/completed  → historial de notas (%, aprobado/suspenso, fecha)
 ```
+
+El alumno no entra por `/login`: su cuenta no tiene contraseña utilizable. Cuando caduca su sesión, vuelve a abrir el enlace de una invitación pendiente. Si todas sus pruebas están enviadas, ningún enlace abre sesión y no puede volver al portal.
 
 ---
 
@@ -667,7 +669,7 @@ GET /api/exam/validate/{token}
     │      Sí, de otro rol o desactivado → "Token no válido.", sin JWT
     │      No → se crea:
     │             Email        = CandidateEmail
-    │             Username     = parte local del email (antes de la @)
+    │             Username     = null (el alumno no entra con usuario y contraseña)
     │             Name         = CandidateName de la invitación
     │             PasswordHash = vacío (sin contraseña utilizable)
     │             Role         = Alumno
@@ -676,7 +678,9 @@ GET /api/exam/validate/{token}
     └── Respuesta con authToken: JWT firmado con rol Alumno (auto-login)
 ```
 
-Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`. La cuenta nace **sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña inicial era esa misma parte local, así que quien conociera el email entraba en el portal del candidato.
+La cuenta nace **sin nombre de usuario y sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica.
+
+Hasta el 08·10·2026 el nombre de usuario era la parte local del email, con índice único. Dos candidatos de dominios distintos chocaban: si existía `maria.lopez@gmail.com`, la invitación de `maria.lopez@hotmail.com` daba error en cada intento. Hasta el 16·09·2026 la contraseña inicial era esa misma parte local, así que quien conociera el email entraba en el portal del candidato.
 
 ### Sesión y navegación
 
@@ -684,7 +688,7 @@ Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`. La cu
 |-----------|----------------|
 | Login de admin | `POST /api/auth/login` → JWT rol `Admin` → redirección a `/admin`, sidebar completo |
 | Login de evaluador | `POST /api/auth/login` → JWT rol `Evaluador` → redirección a `/evaluacion`, sidebar solo con «Inicio» |
-| Login de alumno | `POST /api/auth/login` (email o username) → JWT rol `Alumno` → redirección a `/portal`, barra superior simple |
+| Alumno en `/login` | Recibe `401`: su cuenta no tiene contraseña utilizable. Entra por el enlace de la invitación, que lleva a `/portal` con la barra superior simple |
 | Apertura del enlace de invitación | `authToken` devuelto por `validate` → sesión iniciada sin pedir credenciales |
 | Sesión previa en `localStorage` | `AuthStateService.InitializeAsync` la restaura y redirige según el rol (`auth_role`). Una sesión de la versión anterior, sin rol, se borra |
 | Página de otro rol | Cada página comprueba el rol y, si no es el suyo, lleva a la página de inicio del rol de la sesión |
@@ -1101,11 +1105,12 @@ var context = new AppDbContext(options);
 
 ### Cuentas de alumno aprovisionadas automáticamente
 
-La contraseña inicial de un alumno es **la parte local de su email**, un valor predecible a partir de la propia dirección. Es aceptable para un portal de consulta de notas, pero conviene tenerlo presente:
+Las cuentas de alumno nacen **sin nombre de usuario y sin contraseña utilizable**. Conocer el email de un candidato no da acceso a su portal: la única entrada es el enlace de la invitación, que abre una sesión de 8 horas.
 
-```
-✓ Forzar cambio de contraseña en el primer acceso al portal
-✓ O emitir una contraseña aleatoria y enviarla en el email de invitación
+Las cuentas de alumno creadas antes del 16·09·2026 pueden conservar como contraseña la parte local de su email, en el formato SHA-256 antiguo, que sigue verificando. Para cerrarlas en una base existente:
+
+```sql
+UPDATE dbo.Users SET PasswordHash = '' WHERE Role = 3;  -- 3 = Alumno
 ```
 
 El aislamiento entre alumnos sí está garantizado: los endpoints del portal resuelven el `UserId` desde el claim del JWT y nunca desde un parámetro de la petición.

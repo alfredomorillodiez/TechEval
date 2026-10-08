@@ -174,12 +174,16 @@ public class ExamTokenService : IExamTokenService
 
         var authToken = _tokenService.GenerateJwtToken(user);
 
+        // Validar no crea la sesión: nace al pulsar «Comenzar prueba». El número de preguntas
+        // y el tiempo viajan aquí para que la bienvenida no tenga que pedirla antes.
         return new ExamTokenValidationDto(
             true, null,
             examToken.ExamSession?.Id,
             examToken.Exam.Title,
             examToken.CandidateName,
-            authToken);
+            authToken,
+            QuestionCount: examToken.Exam.ExamQuestions.Count,
+            TimeLimitMinutes: examToken.Exam.TimeLimitMinutes);
     }
 
     /// <summary>
@@ -206,11 +210,13 @@ public class ExamTokenService : IExamTokenService
         if (existing.Count > 0)
             return existing[0] is { Role: UserRole.Alumno, IsActive: true } alumno ? alumno : null;
 
-        var username = email.Split('@')[0];
         var user = new User
         {
             Email = email,
-            Username = username,
+            // Sin nombre de usuario a propósito: el alumno no entra con usuario y contraseña.
+            // Derivarlo de la parte local del email chocaba con el índice único, y la
+            // invitación de maria.lopez@hotmail.com no se abría si existía la de gmail.com.
+            Username = null,
             Name = name,
             // Sin contraseña utilizable a propósito. Derivarla del email convertía un dato
             // que circula en cualquier proceso de selección en la llave del portal del
@@ -264,6 +270,8 @@ public class ExamTokenService : IExamTokenService
         // navegador y seguir trabajando. El envío tardío sí se acepta, pero vacío.
         if (IsPastDeadline(token))
             throw new ExamTimeExpiredException("El tiempo de la prueba ha terminado.");
+
+        EnsureOpenAnswerFits(dto);
 
         var existing = await _answerRepo.FindAsync(
             a => a.ExamSessionId == sessionId && a.QuestionId == dto.QuestionId, ct);
@@ -319,6 +327,12 @@ public class ExamTokenService : IExamTokenService
         var yaEnviado = await _resultRepo.FindAsync(r => r.ExamSessionId == session.Id, ct);
         if (yaEnviado.Count > 0)
             return BuildReceipt(yaEnviado[0], exam.Title);
+
+        // Antes de abrir la transacción, para no escribir nada. Fuera de plazo el cuerpo se
+        // descarta, así que su longitud no importa: rechazarlo dejaría la prueba sin cerrar.
+        if (!fueraDePlazo)
+            foreach (var answer in dto.Answers)
+                EnsureOpenAnswerFits(answer);
 
         // El estado lo decide la composición del examen, no lo que responda el candidato:
         // así es predecible desde que se monta la prueba y un humano siempre valida
@@ -538,6 +552,17 @@ public class ExamTokenService : IExamTokenService
 
         var limite = token.ExamSession.StartedAt.AddMinutes(minutos).Add(GraciaDePlazo);
         return DateTime.UtcNow > limite;
+    }
+
+    /// <summary>
+    /// Rechaza una respuesta abierta que no cabe en su columna. Sin esto llegaba a la base de
+    /// datos y salía como un 500: el autoguardado fallaba sin aviso y el envío se revertía.
+    /// </summary>
+    private static void EnsureOpenAnswerFits(SubmitAnswerDto answer)
+    {
+        if (answer.OpenAnswer is { Length: > UserAnswer.OpenAnswerMaxLength })
+            throw new ValidationException(
+                $"La respuesta abierta no puede superar los {UserAnswer.OpenAnswerMaxLength} caracteres.");
     }
 
     /// <summary>

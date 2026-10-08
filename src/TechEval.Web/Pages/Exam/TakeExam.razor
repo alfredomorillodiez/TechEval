@@ -37,21 +37,33 @@ else if (_state == ExamState.Welcome)
                 <div class="bg-primary bg-opacity-10 rounded-circle d-inline-flex p-3 mb-3">
                     <i class="bi bi-file-earmark-check text-primary" style="font-size:2rem;"></i>
                 </div>
-                <h2 class="h4">@_sessionInfo!.ExamTitle</h2>
-                <p class="text-muted mb-0">Hola, <strong>@_sessionInfo.CandidateName</strong></p>
+                <h2 class="h4">@_validation!.ExamTitle</h2>
+                <p class="text-muted mb-0">Hola, <strong>@_validation.CandidateName</strong></p>
             </div>
+            @* Todo sale de la validación: la sesión, y con ella el reloj, todavía no existe. Una
+               API anterior no manda el número ni el tiempo, y la línea se omite. *@
             <ul class="list-unstyled mb-4">
+                @if (_validation.QuestionCount is int count)
+                {
+                    <li class="d-flex align-items-center gap-2 mb-2">
+                        <i class="bi bi-list-check text-primary"></i>
+                        <span><strong>@count</strong> preguntas</span>
+                    </li>
+                }
+                @if (_validation.TimeLimitMinutes is int minutes)
+                {
+                    <li class="d-flex align-items-center gap-2 mb-2">
+                        <i class="bi bi-clock text-primary"></i>
+                        <span>Tiempo límite: <strong>@minutes minutos</strong></span>
+                    </li>
+                }
                 <li class="d-flex align-items-center gap-2 mb-2">
-                    <i class="bi bi-list-check text-primary"></i>
-                    <span><strong>@_sessionInfo.Questions.Count</strong> preguntas</span>
-                </li>
-                <li class="d-flex align-items-center gap-2 mb-2">
-                    <i class="bi bi-clock text-primary"></i>
-                    <span>Tiempo límite: <strong>@_sessionInfo.TimeLimitMinutes minutos</strong></span>
+                    <i class="bi bi-hourglass-split text-primary"></i>
+                    <span>El tiempo empieza a contar al pulsar «Comenzar prueba».</span>
                 </li>
                 <li class="d-flex align-items-center gap-2">
                     <i class="bi bi-exclamation-triangle text-warning"></i>
-                    <span>Una vez iniciada no puedes pausar la prueba.</span>
+                    <span>Una vez iniciada no puedes pausarla: cerrar la página no detiene el tiempo.</span>
                 </li>
             </ul>
             @* El registro de actividad es un tratamiento de datos del candidato: se informa
@@ -67,7 +79,8 @@ else if (_state == ExamState.Welcome)
                 <p class="mb-2">Las preguntas muestran una marca de agua con tu nombre y tu correo.</p>
                 <p class="mb-0">El equipo evaluador ve este registro. El registro no cambia la nota de forma automática.</p>
             </div>
-            <button class="btn btn-primary btn-lg w-100" @onclick="StartExam">
+            <button class="btn btn-primary btn-lg w-100" @onclick="BeginExamAsync" disabled="@_starting">
+                @if (_starting) { <span class="spinner-border spinner-border-sm me-2"></span> }
                 Comenzar prueba <i class="bi bi-arrow-right ms-1"></i>
             </button>
         </div>
@@ -134,13 +147,27 @@ else if (_state == ExamState.InProgress)
                     }
                     else
                     {
+                        // El máximo es el de la columna. El navegador no deja escribir ni pegar
+                        // más, y recorta lo pegado para que quepa: por eso el aviso al llegar.
+                        var length = draft?.OpenAnswer?.Length ?? 0;
+                        var atLimit = length >= SubmitAnswerDto.OpenAnswerMaxLength;
                         <textarea class="form-control" rows="6"
                                   data-question-id="@q.QuestionId"
+                                  maxlength="@SubmitAnswerDto.OpenAnswerMaxLength"
+                                  aria-describedby="answer-help-@q.QuestionId"
                                   placeholder="Escribe tu respuesta aquí..."
                                   value="@draft?.OpenAnswer"
                                   @oninput="e => UpdateOpenAnswer(q.QuestionId, e.Value?.ToString())"
                                   @onblur="() => AutoSave(q.QuestionId)"></textarea>
-                        <div class="text-muted small mt-1">El campo se guarda automáticamente.</div>
+                        <div id="answer-help-@q.QuestionId"
+                             class="d-flex justify-content-between gap-3 small mt-1 @(atLimit ? "text-danger" : "text-muted")">
+                            <span>
+                                @(atLimit
+                                    ? $"Has llegado al máximo de {SubmitAnswerDto.OpenAnswerMaxLength} caracteres."
+                                    : "El campo se guarda automáticamente.")
+                            </span>
+                            <span class="text-nowrap">@length / @SubmitAnswerDto.OpenAnswerMaxLength</span>
+                        </div>
                     }
                 </div>
             </div>
@@ -271,11 +298,12 @@ else if (_state == ExamState.Completed)
     private enum ExamState { Validating, Invalid, Welcome, InProgress, Completed }
     private ExamState _state = ExamState.Validating;
 
+    private ExamTokenValidationDto? _validation;
     private ExamSessionInfoDto? _sessionInfo;
     private ExamSubmissionReceiptDto? _result;
     private string _errorMessage = string.Empty;
     private int _currentQuestion = 0;
-    private bool _showConfirm, _submitting;
+    private bool _showConfirm, _submitting, _starting;
 
     private List<DraftAnswer> _drafts = new();
     private System.Timers.Timer? _timer;
@@ -313,15 +341,62 @@ else if (_state == ExamState.Completed)
             return;
         }
 
+        _validation = validation;
+
         if (!string.IsNullOrEmpty(validation.AuthToken))
             await Auth.LoginAsync(validation.AuthToken, validation.CandidateName ?? string.Empty, UserRole.Alumno);
 
-        // El backend devuelve SessionId cuando la prueba ya estaba empezada. En ese caso no
-        // hay bienvenida que mostrar: el candidato vuelve de una recarga y espera continuar.
-        var resuming = validation.SessionId is not null;
+        // Sin SessionId la prueba no ha empezado. La bienvenida se pinta con la validación, y
+        // la sesión se pide al pulsar «Comenzar prueba». Pedirla aquí ponía el reloj en marcha
+        // mientras el candidato leía, y quien abría el enlace solo para verlo encontraba su
+        // prueba enviada en blanco al volver.
+        if (validation.SessionId is null)
+        {
+            _state = ExamState.Welcome;
+            return;
+        }
 
+        // Con SessionId la prueba ya estaba empezada: el candidato vuelve de una recarga y
+        // espera continuar, así que no hay bienvenida que mostrar.
+        if (!await LoadSessionAsync()) return;
+
+        if (_remainingSeconds <= 0)
+        {
+            // Volvió fuera de plazo: se cierra con lo que tenga guardado, sin preguntar.
+            _state = ExamState.InProgress;
+            await SubmitExamAsync();
+            return;
+        }
+
+        StartExam();
+    }
+
+    /// <summary>«Comenzar prueba». Aquí, y no al abrir el enlace, nace la sesión con su reloj.</summary>
+    private async Task BeginExamAsync()
+    {
+        // Un doble clic no crearía otra sesión, porque el servidor devuelve la abierta, pero
+        // arrancaría dos veces los relojes y el temporizador.
+        if (_starting) return;
+        _starting = true;
+
+        if (await LoadSessionAsync()) StartExam();
+
+        _starting = false;
+    }
+
+    /// <summary>
+    /// Pide la sesión al servidor, que la crea o devuelve la que ya estaba abierta, y prepara
+    /// los relojes locales y los borradores. Devuelve false si el servidor la rechaza.
+    /// </summary>
+    private async Task<bool> LoadSessionAsync()
+    {
         var session = await Api.StartSessionAsync(Token);
-        if (session is null) { _state = ExamState.Invalid; _errorMessage = "Error al iniciar sesión."; return; }
+        if (session is null)
+        {
+            _state = ExamState.Invalid;
+            _errorMessage = "No se pudo iniciar la prueba. Vuelve a abrir el enlace del correo.";
+            return false;
+        }
 
         _sessionInfo = session;
         // El tiempo lo mide el servidor. Inicializarlo con TimeLimitMinutes daría una prueba
@@ -333,18 +408,7 @@ else if (_state == ExamState.Completed)
         _startedAtUtc = DateTime.UtcNow;
         _drafts = session.Questions.Select(q => new DraftAnswer { QuestionId = q.QuestionId }).ToList();
         RestoreSavedAnswers(session);
-
-        if (!resuming) { _state = ExamState.Welcome; return; }
-
-        if (_remainingSeconds <= 0)
-        {
-            // Volvió fuera de plazo: se cierra con lo que tenga guardado, sin preguntar.
-            _state = ExamState.InProgress;
-            await SubmitExamAsync();
-            return;
-        }
-
-        StartExam();
+        return true;
     }
 
     /// <summary>

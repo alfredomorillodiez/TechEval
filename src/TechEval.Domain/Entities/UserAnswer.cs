@@ -2,6 +2,12 @@ namespace TechEval.Domain.Entities;
 
 public class UserAnswer
 {
+    /// <summary>
+    /// Tamaño de la columna `OpenAnswer`. Antes nada lo comprobaba, y una respuesta más larga
+    /// fallaba contra la base de datos: el autoguardado sin aviso y el envío entero.
+    /// </summary>
+    public const int OpenAnswerMaxLength = 4000;
+
     public int Id { get; set; }
     public int ExamSessionId { get; set; }
     public int QuestionId { get; set; }

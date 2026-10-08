@@ -1,9 +1,12 @@
 @page "/admin/results"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Resultados — TechEval</PageTitle>
 
@@ -154,11 +157,11 @@
                             <thead class="table-light">
                                 <tr>
                                     <th class="ps-3">#</th>
-                                    <th>Candidato</th>
-                                    <th>Prueba</th>
-                                    <th style="min-width:160px;">Puntuación</th>
-                                    <th>Resultado</th>
-                                    <th>Fecha</th>
+                                    <SortHeader Key="candidate" State="_sort" OnSort="SortBy">Candidato</SortHeader>
+                                    <SortHeader Key="exam" State="_sort" OnSort="SortBy">Prueba</SortHeader>
+                                    <SortHeader Key="score" State="_sort" OnSort="SortBy" Style="min-width:160px;">Puntuación</SortHeader>
+                                    <SortHeader Key="outcome" State="_sort" OnSort="SortBy">Resultado</SortHeader>
+                                    <SortHeader Key="date" State="_sort" OnSort="SortBy">Fecha</SortHeader>
                                     <th></th>
                                 </tr>
                             </thead>
@@ -253,10 +256,41 @@
     private int _passRate;
     private decimal _avgScore;
 
+    // Filtros y orden se conservan al abrir un detalle y volver.
+    private const string StateKey = "results";
+    private readonly SortState _sort = new();
+
+    private sealed record Saved(
+        string Search, string ExamTitle, string Passed, int? Min, int? Max,
+        DateTime? From, DateTime? To, SortState Sort);
+
+    // Un pendiente no tiene nota definitiva: va al final al ordenar por nota.
+    private static readonly IReadOnlyDictionary<string, Func<ExamResultSummaryDto, object?>> Columns =
+        new Dictionary<string, Func<ExamResultSummaryDto, object?>>
+        {
+            ["candidate"] = r => r.CandidateName,
+            ["exam"] = r => r.ExamTitle,
+            ["score"] = r => r.Status == ExamResultStatus.Reviewed ? r.ScorePercentage : null,
+            ["outcome"] = r => r.Status == ExamResultStatus.PendingReview ? 2 : r.Passed == true ? 0 : 1,
+            ["date"] = r => r.CompletedAt
+        };
+
+    private void SortBy(string key) { _sort.Toggle(key); ApplyFilter(); }
+
+    public void Dispose() => Lists.Set(StateKey, new Saved(
+        _fSearch, _fExamTitle, _fPassed, _fScoreMin, _fScoreMax, _fDateFrom, _fDateTo, _sort.Clone()));
+
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
+
+        if (Lists.Get<Saved>(StateKey) is { } saved)
+        {
+            _fSearch = saved.Search; _fExamTitle = saved.ExamTitle; _fPassed = saved.Passed;
+            _fScoreMin = saved.Min; _fScoreMax = saved.Max; _fDateFrom = saved.From; _fDateTo = saved.To;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+        }
 
         await LoadAsync();
     }
@@ -273,7 +307,7 @@
             _all = all;
             _examTitles = _all.Select(r => r.ExamTitle).Distinct().OrderBy(t => t).ToList();
             ComputeKpis();
-            _filtered = _all.ToList();
+            ApplyFilter();
         }
         _loading = false;
     }
@@ -314,6 +348,7 @@
             (_fDateFrom is null || r.CompletedAt.ToLocalTime().Date >= _fDateFrom.Value.Date) &&
             (_fDateTo is null || r.CompletedAt.ToLocalTime().Date <= _fDateTo.Value.Date)
         ).ToList();
+        _filtered = ListSort.Apply(_filtered, _sort, Columns).ToList();
     }
 
     private void ClearFilters()
@@ -325,6 +360,6 @@
         _fScoreMax = null;
         _fDateFrom = null;
         _fDateTo = null;
-        _filtered = _all.ToList();
+        ApplyFilter();
     }
 }

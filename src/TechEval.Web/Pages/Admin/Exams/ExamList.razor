@@ -1,8 +1,11 @@
 @page "/admin/pruebas"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Pruebas — TechEval</PageTitle>
 
@@ -29,8 +32,34 @@
     }
     else
     {
+        @* Las pruebas son tarjetas, no una tabla: el orden se elige en un selector en lugar de en las cabeceras. *@
+        <div class="row g-2 mb-3 align-items-center">
+            <div class="col-md-5">
+                <input class="form-control" type="search" placeholder="Buscar por título…"
+                       aria-label="Buscar pruebas" value="@_search"
+                       @oninput="e => _search = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" aria-label="Ordenar pruebas" value="@SortValue" @onchange="OnSortChange">
+                    <option value="">Orden por defecto</option>
+                    <option value="title">Título (A–Z)</option>
+                    <option value="title-desc">Título (Z–A)</option>
+                    <option value="created-desc">Más recientes primero</option>
+                    <option value="created">Más antiguas primero</option>
+                    <option value="questions-desc">Más preguntas primero</option>
+                    <option value="results-desc">Más resultados primero</option>
+                </select>
+            </div>
+            <div class="col-md-auto text-muted small">
+                Mostrando <strong>@Displayed.Count</strong> de @_exams.Count pruebas
+            </div>
+        </div>
+        @if (_exams.Count > 0 && Displayed.Count == 0)
+        {
+            <div class="text-center text-muted py-5">Ninguna prueba coincide con la búsqueda.</div>
+        }
         <div class="row g-4">
-            @foreach (var exam in _exams)
+            @foreach (var exam in Displayed)
             {
                 <div class="col-md-6 col-xl-4">
                     <div class="card border-0 shadow-sm h-100">
@@ -351,6 +380,38 @@
     private List<ExamSummaryDto> _exams = new();
     private bool _loading = true, _loadFailed;
 
+    // Búsqueda y orden se conservan al abrir una prueba y volver.
+    private const string StateKey = "exams";
+    private string _search = string.Empty;
+    private readonly SortState _sort = new();
+    private sealed record Saved(string Search, SortState Sort);
+
+    private static readonly IReadOnlyDictionary<string, Func<ExamSummaryDto, object?>> Columns =
+        new Dictionary<string, Func<ExamSummaryDto, object?>>
+        {
+            ["title"] = x => x.Title,
+            ["created"] = x => x.CreatedAt,
+            ["questions"] = x => x.QuestionCount,
+            ["results"] = x => x.ResultsCount
+        };
+
+    private List<ExamSummaryDto> Displayed => ListSort.Apply(
+            _exams.Where(x => string.IsNullOrWhiteSpace(_search)
+                || x.Title.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)),
+            _sort, Columns).ToList();
+
+    // El selector junta columna y dirección en un solo valor: «title», «title-desc»…
+    private string SortValue => _sort.Key is null ? "" : _sort.Descending ? _sort.Key + "-desc" : _sort.Key;
+
+    private void OnSortChange(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "";
+        _sort.Descending = value.EndsWith("-desc");
+        _sort.Key = value.Length == 0 ? null : value.Replace("-desc", "");
+    }
+
+    public void Dispose() => Lists.Set(StateKey, new Saved(_search, _sort.Clone()));
+
     // Estado individual
     private int? _sendingExamId;
     private string _candidateName = string.Empty;
@@ -372,6 +433,13 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
+
+        if (Lists.Get<Saved>(StateKey) is { } saved)
+        {
+            _search = saved.Search;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+        }
+
         await LoadAsync();
     }
 

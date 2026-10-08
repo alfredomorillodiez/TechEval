@@ -17,6 +17,7 @@ builder.Services.AddScoped(sp => new HttpClient(
     BaseAddress = new Uri(apiBaseUrl)
 });
 builder.Services.AddScoped<ApiService>();
+builder.Services.AddScoped<ListState>();
 builder.Services.AddScoped<AuthStateService>();
 
 builder.Logging.SetMinimumLevel(LogLevel.Warning);

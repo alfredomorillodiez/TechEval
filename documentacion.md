@@ -441,10 +441,10 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/categories` | Admin | Listar categorías (incluye `questionCount` y `allowsAiGeneration`) |
+| GET | `/api/categories` | Admin | Listar las categorías **activas** (con `questionCount`, las preguntas activas, e `isActive`). Con `?includeInactive=true`, todas |
 | GET | `/api/categories/{id}` | Admin | Detalle |
-| POST | `/api/categories` | Admin | Crear categoría |
-| PUT | `/api/categories/{id}` | Admin | Actualizar |
+| POST | `/api/categories` | Admin | Crear categoría. `400` si el nombre está vacío o pasa de 100 caracteres, o la descripción pasa de 500; `409` si el nombre ya existe (sin distinguir mayúsculas) |
+| PUT | `/api/categories/{id}` | Admin | Actualizar. Las mismas validaciones. `isActive` opcional: con `true` reactiva la categoría; si falta, conserva el estado |
 | DELETE | `/api/categories/{id}` | Admin | Desactivar (soft delete) |
 
 ### Preguntas

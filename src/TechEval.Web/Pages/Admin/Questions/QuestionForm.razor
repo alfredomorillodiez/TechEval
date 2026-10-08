@@ -113,9 +113,11 @@
                             <label class="form-label fw-semibold small">Categoría *</label>
                             <select class="form-select" @bind="_categoryId">
                                 <option value="0">Selecciona...</option>
-                                @foreach (var c in _categories)
+                                @* Solo se ofrecen las activas. La de la pregunta que se edita se
+                                   conserva aunque esté de baja, marcada, para no cambiársela sin avisar. *@
+                                @foreach (var c in _categories.Where(c => c.IsActive || c.Id == _categoryId))
                                 {
-                                    <option value="@c.Id">@c.Name</option>
+                                    <option value="@c.Id">@c.Name@(c.IsActive ? "" : " (desactivada)")</option>
                                 }
                             </select>
                         </div>
@@ -216,7 +218,7 @@
         _loading = true;
         _loadFailed = false;
 
-        var categories = await Api.GetCategoriesAsync();
+        var categories = await Api.GetCategoriesAsync(includeInactive: true);
         if (categories is null)
         {
             _loadFailed = true;

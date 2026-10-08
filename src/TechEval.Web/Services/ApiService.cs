@@ -50,14 +50,16 @@ public class ApiService
         => SendAsync<AuthResultDto>(HttpMethod.Post, "api/auth/login", dto);
 
     // Categories
-    public Task<List<CategoryDto>?> GetCategoriesAsync()
-        => GetAsync<List<CategoryDto>>("api/categories");
+    /// <summary>Por defecto solo las activas; la pantalla de categorías y el filtro de preguntas piden todas.</summary>
+    public Task<List<CategoryDto>?> GetCategoriesAsync(bool includeInactive = false)
+        => GetAsync<List<CategoryDto>>(includeInactive ? "api/categories?includeInactive=true" : "api/categories");
 
-    public Task<CategoryDto?> CreateCategoryAsync(CreateCategoryDto dto)
-        => PostAsync<CreateCategoryDto, CategoryDto>("api/categories", dto);
+    // Con el código y el mensaje: un nombre repetido (409) o inválido (400) se explica en el diálogo.
+    public Task<(CategoryDto? Result, int StatusCode, string? Error)> CreateCategoryAsync(CreateCategoryDto dto)
+        => SendAsync<CategoryDto>(HttpMethod.Post, "api/categories", dto);
 
-    public Task<CategoryDto?> UpdateCategoryAsync(int id, UpdateCategoryDto dto)
-        => PutAsync<UpdateCategoryDto, CategoryDto>($"api/categories/{id}", dto);
+    public Task<(CategoryDto? Result, int StatusCode, string? Error)> UpdateCategoryAsync(int id, UpdateCategoryDto dto)
+        => SendAsync<CategoryDto>(HttpMethod.Put, $"api/categories/{id}", dto);
 
     public Task<bool> DeleteCategoryAsync(int id)
         => DeleteAsync($"api/categories/{id}");

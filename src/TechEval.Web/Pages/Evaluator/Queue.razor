@@ -1,8 +1,11 @@
 @page "/evaluacion"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Correcciones — TechEval</PageTitle>
 
@@ -40,24 +43,34 @@
     else
     {
         <p class="text-muted small mb-3">
-            Ordenadas por antigüedad: arriba las que llevan más tiempo esperando.
+            Por defecto, ordenadas por antigüedad: arriba las que llevan más tiempo esperando.
         </p>
+        <div class="row g-2 mb-3 align-items-center">
+            <div class="col-md-6">
+                <input class="form-control" type="search" placeholder="Buscar por prueba o candidato…"
+                       aria-label="Buscar en tu cola" value="@_search"
+                       @oninput="e => _search = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="col-md-auto text-muted small">
+                Mostrando <strong>@Displayed.Count</strong> de @_queue.Count
+            </div>
+        </div>
         <div class="card border-0 shadow-sm">
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-hover mb-0 align-middle">
                         <thead class="table-light">
                             <tr>
-                                <th class="ps-3">Candidato</th>
-                                <th>Prueba</th>
-                                <th>Enviada</th>
-                                <th>Esperando</th>
-                                <th>Por corregir</th>
+                                <SortHeader Key="candidate" State="_sort" OnSort="SortBy" Class="ps-3">Candidato</SortHeader>
+                                <SortHeader Key="exam" State="_sort" OnSort="SortBy">Prueba</SortHeader>
+                                <SortHeader Key="sent" State="_sort" OnSort="SortBy">Enviada</SortHeader>
+                                <SortHeader Key="waiting" State="_sort" OnSort="SortBy">Esperando</SortHeader>
+                                <SortHeader Key="open" State="_sort" OnSort="SortBy">Por corregir</SortHeader>
                                 <th class="text-end pe-3"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var q in _queue)
+                            @foreach (var q in Displayed)
                             {
                                 <tr>
                                     <td class="ps-3 fw-semibold">@q.CandidateAlias</td>
@@ -102,6 +115,32 @@
     private bool _loading = true, _loadFailed;
     private List<EvaluatorQueueItemDto> _queue = new();
 
+    // Búsqueda y orden se conservan al abrir una corrección y volver. Sin orden elegido, el de la API (antigüedad).
+    private const string StateKey = "evaluator-queue";
+    private string _search = string.Empty;
+    private readonly SortState _sort = new();
+    private sealed record Saved(string Search, SortState Sort);
+
+    private static readonly IReadOnlyDictionary<string, Func<EvaluatorQueueItemDto, object?>> Columns =
+        new Dictionary<string, Func<EvaluatorQueueItemDto, object?>>
+        {
+            ["candidate"] = q => q.CandidateAlias,
+            ["exam"] = q => q.ExamTitle,
+            ["sent"] = q => q.CompletedOn,
+            ["waiting"] = q => q.DaysWaiting,
+            ["open"] = q => q.OpenAnswerCount
+        };
+
+    private List<EvaluatorQueueItemDto> Displayed => ListSort.Apply(
+            _queue.Where(q => string.IsNullOrWhiteSpace(_search)
+                || q.CandidateAlias.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                || q.ExamTitle.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)),
+            _sort, Columns).ToList();
+
+    private void SortBy(string key) => _sort.Toggle(key);
+
+    public void Dispose() => Lists.Set(StateKey, new Saved(_search, _sort.Clone()));
+
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
@@ -109,6 +148,12 @@
         {
             Nav.NavigateTo(Auth.Home);
             return;
+        }
+
+        if (Lists.Get<Saved>(StateKey) is { } saved)
+        {
+            _search = saved.Search;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
         }
 
         await LoadAsync();

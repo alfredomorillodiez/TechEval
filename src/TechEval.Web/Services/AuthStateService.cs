@@ -7,6 +7,7 @@ public class AuthStateService
 {
     private readonly IJSRuntime _js;
     private readonly ApiService _api;
+    private readonly ListState _lists;
 
     public string? Token { get; private set; }
     public string? UserName { get; private set; }
@@ -23,10 +24,11 @@ public class AuthStateService
 
     public event Action? OnChange;
 
-    public AuthStateService(IJSRuntime js, ApiService api)
+    public AuthStateService(IJSRuntime js, ApiService api, ListState lists)
     {
         _js = js;
         _api = api;
+        _lists = lists;
     }
 
     public static string HomeFor(UserRole? role) => role switch
@@ -63,6 +65,8 @@ public class AuthStateService
         UserName = userName;
         Email = email;
         Role = role;
+        // Otra persona en el mismo navegador no hereda los filtros de la anterior.
+        _lists.Clear();
         _api.SetAuthToken(token);
         await _js.InvokeVoidAsync("localStorage.setItem", "auth_token", token);
         await _js.InvokeVoidAsync("localStorage.setItem", "auth_user", userName);
@@ -78,6 +82,7 @@ public class AuthStateService
         UserName = null;
         Email = null;
         Role = null;
+        _lists.Clear();
         _api.ClearAuthToken();
         await _js.InvokeVoidAsync("localStorage.removeItem", "auth_token");
         await _js.InvokeVoidAsync("localStorage.removeItem", "auth_user");

@@ -1,0 +1,32 @@
+@using TechEval.Application
+
+@* Cabecera de columna ordenable. El botón es lo que recibe el teclado; `aria-sort` dice a un
+   lector de pantalla por qué columna y en qué sentido está ordenada la tabla. La flecha solo sale
+   en la columna activa. *@
+<th scope="col" class="@Class" style="@Style" aria-sort="@State.AriaSort(Key)">
+    <button type="button" class="btn btn-link p-0 border-0 text-reset text-decoration-none fw-semibold"
+            @onclick="() => OnSort.InvokeAsync(Key)">
+        @ChildContent
+        @if (State.Key == Key)
+        {
+            <i class="bi @(State.Descending ? "bi-caret-down-fill" : "bi-caret-up-fill") ms-1 small" aria-hidden="true"></i>
+        }
+    </button>
+</th>
+
+@code {
+    /// <summary>Nombre de la columna: el que usa el diccionario de columnas de la pantalla.</summary>
+    [Parameter, EditorRequired] public string Key { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public SortState State { get; set; } = default!;
+
+    /// <summary>Se lanza con la clave al pulsar. La pantalla llama a `State.Toggle(key)` y reordena.</summary>
+    [Parameter, EditorRequired] public EventCallback<string> OnSort { get; set; }
+
+    /// <summary>Las clases del `th` que ya tenía la pantalla (`ps-3`, `text-end`…).</summary>
+    [Parameter] public string? Class { get; set; }
+
+    [Parameter] public string? Style { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

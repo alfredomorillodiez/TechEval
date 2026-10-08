@@ -295,7 +295,8 @@ TechEval/
 |------|-----|-------------|
 | `/` · `/login` | — | Acceso con email (o usuario) y contraseña; lleva a la página de inicio del rol |
 | `/admin` · `/admin/dashboard` | Admin | Dashboard con indicadores generales |
-| `/admin/questions` | Admin | Banco de preguntas con filtros |
+| `/admin/questions` | Admin | Banco de preguntas con filtros y orden por columna |
+| `/admin/categorias` | Admin | Categorías: alta, edición, baja con confirmación y reactivación, con buscador y orden por columna |
 | `/admin/questions/new` · `/admin/questions/{id}` | Admin | Alta y edición de preguntas |
 | `/admin/pruebas` · `/admin/pruebas/{id}` | Admin | Listado de pruebas y detalle |
 | `/admin/pruebas/new` · `/admin/pruebas/generate` | Admin | Creación manual y generación automática |

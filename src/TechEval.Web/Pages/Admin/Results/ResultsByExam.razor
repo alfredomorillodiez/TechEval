@@ -1,9 +1,12 @@
 @page "/admin/results/prueba/{ExamId:int}"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Estadísticas de la prueba — TechEval</PageTitle>
 
@@ -193,15 +196,15 @@
                             <thead class="table-light">
                                 <tr>
                                     <th class="ps-3">#</th>
-                                    <th>Candidato</th>
-                                    <th style="min-width:180px;">Puntuación</th>
-                                    <th>Resultado</th>
-                                    <th>Fecha</th>
+                                    <SortHeader Key="candidate" State="_sort" OnSort="SortBy">Candidato</SortHeader>
+                                    <SortHeader Key="score" State="_sort" OnSort="SortBy" Style="min-width:180px;">Puntuación</SortHeader>
+                                    <SortHeader Key="outcome" State="_sort" OnSort="SortBy">Resultado</SortHeader>
+                                    <SortHeader Key="date" State="_sort" OnSort="SortBy">Fecha</SortHeader>
                                     <th></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var (r, i) in _filtered.OrderByDescending(r => r.ScorePercentage).Select((r, i) => (r, i + 1)))
+                                @foreach (var (r, i) in _filtered.Select((r, i) => (r, i + 1)))
                                 {
                                     <tr>
                                         <td class="ps-3 text-muted small">@i</td>
@@ -288,10 +291,66 @@
     private DateTime? _fDateFrom;
     private DateTime? _fDateTo;
 
+    // Cada prueba tiene su propio estado: los filtros de una no se heredan en otra.
+    private static string KeyFor(int examId) => $"results-exam-{examId}";
+
+    // Por defecto, el ranking: de mayor a menor nota (lo que hacía antes el listado fijo).
+    private readonly SortState _sort = new() { Key = "score", Descending = true };
+
+    private sealed record Saved(
+        string Search, string Passed, int? Min, int? Max, DateTime? From, DateTime? To, SortState Sort);
+
+    // Un pendiente no tiene nota definitiva: va al final al ordenar por nota.
+    private static readonly IReadOnlyDictionary<string, Func<ExamResultSummaryDto, object?>> Columns =
+        new Dictionary<string, Func<ExamResultSummaryDto, object?>>
+        {
+            ["candidate"] = r => r.CandidateName,
+            ["score"] = r => r.Status == ExamResultStatus.Reviewed ? r.ScorePercentage : null,
+            ["outcome"] = r => r.Status == ExamResultStatus.PendingReview ? 2 : r.Passed == true ? 0 : 1,
+            ["date"] = r => r.CompletedAt
+        };
+
+    private void SortBy(string key) { _sort.Toggle(key); ApplyFilter(); }
+
+    private Saved Snapshot() => new(
+        _fSearch, _fPassed, _fScoreMin, _fScoreMax, _fDateFrom, _fDateTo, _sort.Clone());
+
+    public void Dispose()
+    {
+        if (_loadedExamId != -1) Lists.Set(KeyFor(_loadedExamId), Snapshot());
+    }
+
+    private bool _authorized;
+    private int _loadedExamId = -1;
+
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
+        _authorized = true;
+    }
+
+    // Pasar de los resultados de una prueba a los de otra reutiliza el componente: sin esto, la
+    // segunda pantalla mostraba los datos y los filtros de la primera. Cada cambio de prueba guarda
+    // el estado de la anterior, restaura el de la nueva (o los valores por defecto) y recarga.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_authorized || _loadedExamId == ExamId) return;
+
+        if (_loadedExamId != -1) Lists.Set(KeyFor(_loadedExamId), Snapshot());
+        _loadedExamId = ExamId;
+
+        _fSearch = _fPassed = string.Empty;
+        _fScoreMin = _fScoreMax = null;
+        _fDateFrom = _fDateTo = null;
+        _sort.Key = "score"; _sort.Descending = true;
+
+        if (Lists.Get<Saved>(KeyFor(ExamId)) is { } saved)
+        {
+            _fSearch = saved.Search; _fPassed = saved.Passed;
+            _fScoreMin = saved.Min; _fScoreMax = saved.Max; _fDateFrom = saved.From; _fDateTo = saved.To;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+        }
 
         await LoadAsync();
     }
@@ -308,7 +367,7 @@
 
             ComputeKpis();
             BuildDistribution();
-            _filtered = _all.ToList();
+            ApplyFilter();
         }
         _loading = false;
     }
@@ -371,6 +430,7 @@
             (_fDateFrom is null || r.CompletedAt.ToLocalTime().Date >= _fDateFrom.Value.Date) &&
             (_fDateTo is null || r.CompletedAt.ToLocalTime().Date <= _fDateTo.Value.Date)
         ).ToList();
+        _filtered = ListSort.Apply(_filtered, _sort, Columns).ToList();
     }
 
     private void ClearFilters()
@@ -381,6 +441,6 @@
         _fScoreMax = null;
         _fDateFrom = null;
         _fDateTo = null;
-        _filtered = _all.ToList();
+        ApplyFilter();
     }
 }

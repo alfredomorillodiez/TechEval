@@ -28,7 +28,7 @@ TechEval es una plataforma de evaluación técnica que permite:
 - **Gestionar un banco de preguntas** con categorías, niveles de dificultad y tipos (test / respuesta abierta).
 - **Generar exámenes** manualmente o de forma automática y aleatoria.
 - **Enviar exámenes por email** con un enlace de un solo uso y tiempo de expiración configurable, de forma individual o masiva.
-- **Realizar exámenes** con temporizador, auto-guardado y UI responsive.
+- **Realizar exámenes** con temporizador, progreso real, marcas para revisar, estado del guardado y aviso de falta de conexión, y UI responsive.
 - **Consultar resultados** con corrección automática (tipo test) y dashboard con estadísticas.
 - **Ofrecer un portal al alumno** donde consulta sus pruebas pendientes y su historial de notas, con cuenta creada automáticamente al abrir su primera invitación.
 

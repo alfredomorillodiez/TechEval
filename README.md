@@ -17,7 +17,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 - **Generación de exámenes** — manual o automática con preguntas aleatorias por categoría y dificultad
 - **Reparto por nivel** — la generación automática acepta un porcentaje de preguntas por nivel (por ejemplo 30 % básicas, 50 % intermedias, 20 % avanzadas). El número de cada nivel se redondea por el método del mayor resto, así que la suma es siempre el total. Si un nivel no tiene bastantes preguntas en las categorías elegidas, la generación se rechaza: nunca se completa con otro nivel. La pantalla muestra antes cuántas preguntas saldrán y cuántas hay de cada nivel
 - **Envío por email** — enlace único por candidato con expiración configurable; envío masivo a múltiples candidatos desde CSV o lista manual
-- **Prueba del candidato** — temporizador, auto-guardado de respuestas y envío automático al agotar el tiempo
+- **Prueba del candidato** — temporizador, progreso real («N de M respondidas»), preguntas marcadas para revisar, «Finalizar» siempre visible, estado del guardado con aviso de falta de conexión y envío automático al agotar el tiempo
 - **Reanudación de la prueba** — una recarga, un cierre de pestaña o una pérdida de red no expulsan al candidato: vuelve a sus preguntas con las respuestas que ya tenía y con el tiempo restante que calcula el servidor. La invitación caducada no corta una prueba ya empezada
 - **Corrección automática** — para preguntas tipo test; preguntas abiertas pendientes de revisión manual
 - **Dashboard de resultados** — historial, estadísticas y detalle por candidato, con filtros combinables

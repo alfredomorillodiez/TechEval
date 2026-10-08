@@ -95,22 +95,48 @@ else if (_state == ExamState.InProgress)
     <div class="min-vh-100 bg-light">
         <!-- Header con temporizador -->
         <div class="bg-white shadow-sm sticky-top">
-            <div class="container-fluid py-2 px-4 d-flex justify-content-between align-items-center">
+            <div class="container-fluid py-2 px-4 d-flex flex-wrap justify-content-between align-items-center gap-2">
                 <div>
                     <strong>@_sessionInfo!.ExamTitle</strong>
                     <span class="text-muted ms-2">@_sessionInfo.CandidateName</span>
                 </div>
-                <div class="d-flex align-items-center gap-3">
-                    <span class="text-muted small">@(_currentQuestion + 1)/@_sessionInfo.Questions.Count</span>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                    @* El progreso son las respondidas, no la posición: ver IsAnswered. *@
+                    <span class="small fw-semibold" role="status">
+                        @AnsweredCount() de @_sessionInfo.Questions.Count respondidas
+                    </span>
+                    <span class="small @SaveStatusClass()" role="status" aria-live="polite">@SaveStatusText()</span>
                     <div class="badge @TimerClass() fs-6 px-3 py-2">
                         <i class="bi bi-clock me-1"></i> @FormatTimer()
                     </div>
+                    <button class="btn btn-success btn-sm" @onclick="OpenConfirm">
+                        <i class="bi bi-check-lg me-1"></i> Finalizar prueba
+                    </button>
                 </div>
             </div>
             <!-- Progress bar -->
             <div class="progress" style="height:4px;border-radius:0;">
-                <div class="progress-bar bg-primary" style="width:@((_currentQuestion + 1.0) / _sessionInfo!.Questions.Count * 100)%"></div>
+                <div class="progress-bar bg-primary" role="progressbar"
+                     aria-valuenow="@AnsweredCount()" aria-valuemin="0" aria-valuemax="@_sessionInfo!.Questions.Count"
+                     style="width:@(AnsweredCount() * 100.0 / _sessionInfo!.Questions.Count)%"></div>
             </div>
+            @if (!_online || _unsaved.Count > 0)
+            {
+                @* Sale con cualquiera de las dos señales: el navegador puede decir que hay red
+                   y no llegar al servidor, y puede fallar un guardado sin avisar de la conexión. *@
+                <div class="alert alert-danger rounded-0 border-0 mb-0 py-2 text-center small" role="alert">
+                    <i class="bi bi-wifi-off me-1"></i>
+                    <strong>Sin conexión.</strong> Tus respuestas no se están guardando. No cierres la página.
+                </div>
+            }
+            @if (_submitError is not null && !_showConfirm)
+            {
+                @* El auto-envío por tiempo agotado no abre el diálogo: su fallo se ve aquí. *@
+                <div class="alert alert-danger rounded-0 border-0 mb-0 py-2 text-center small" role="alert">
+                    <strong>La prueba no se ha enviado.</strong> @_submitError
+                    <button class="btn btn-sm btn-danger ms-2" @onclick="SubmitExamAsync" disabled="@_submitting">Reintentar</button>
+                </div>
+            }
         </div>
 
         <div class="container py-4" style="max-width:750px;">
@@ -126,6 +152,12 @@ else if (_state == ExamState.InProgress)
                             @(q.Type == QuestionType.MultipleChoice ? "Test" : "Abierta")
                         </span>
                         <span class="badge bg-secondary">@q.Points @(q.Points == 1 ? "punto" : "puntos")</span>
+                        <button class="btn btn-sm ms-auto @(_flagged.Contains(q.QuestionId) ? "btn-warning" : "btn-outline-secondary")"
+                                aria-pressed="@(_flagged.Contains(q.QuestionId) ? "true" : "false")"
+                                @onclick="() => ToggleFlag(q.QuestionId)">
+                            <i class="bi @(_flagged.Contains(q.QuestionId) ? "bi-flag-fill" : "bi-flag") me-1"></i>
+                            @(_flagged.Contains(q.QuestionId) ? "Quitar marca" : "Marcar para revisar")
+                        </button>
                     </div>
                     <p class="fs-5 mb-4">@q.Text</p>
 
@@ -187,7 +219,7 @@ else if (_state == ExamState.InProgress)
                 }
                 else
                 {
-                    <button class="btn btn-success" @onclick="() => _showConfirm = true">
+                    <button class="btn btn-success" @onclick="OpenConfirm">
                         <i class="bi bi-check-lg me-1"></i> Finalizar prueba
                     </button>
                 }
@@ -196,17 +228,31 @@ else if (_state == ExamState.InProgress)
             <!-- Mini mapa de preguntas -->
             <div class="card border-0 shadow-sm mt-4">
                 <div class="card-body p-3">
-                    <p class="small text-muted mb-2">Navegación rápida</p>
+                    <p class="small text-muted mb-2">
+                        Navegación rápida
+                        <span class="ms-2"><span class="badge bg-success">&nbsp;</span> respondida</span>
+                        <span class="ms-2"><i class="bi bi-flag-fill text-warning"></i> marcada para revisar</span>
+                    </p>
                     <div class="d-flex flex-wrap gap-1">
                         @for (int i = 0; i < _sessionInfo!.Questions.Count; i++)
                         {
                             var idx = i;
-                            var answered = GetDraft(_sessionInfo.Questions[i].QuestionId) is { } d
-                                && (d.SelectedAnswerId.HasValue || !string.IsNullOrEmpty(d.OpenAnswer));
+                            var qid = _sessionInfo.Questions[i].QuestionId;
+                            var answered = IsAnswered(GetDraft(qid));
+                            var flagged = _flagged.Contains(qid);
+                            var label = $"Pregunta {idx + 1}{(answered ? ", respondida" : "")}{(flagged ? ", marcada para revisar" : "")}";
+                            var flagClass = idx == _currentQuestion ? "" : "text-warning";
+                            // El símbolo de la marca va aparte del color: el color solo no lo ve
+                            // quien no distingue los tonos.
                             <button class="btn btn-sm @(idx == _currentQuestion ? "btn-primary" : answered ? "btn-success" : "btn-outline-secondary")"
                                     style="min-width:36px;"
+                                    aria-label="@label"
                                     @onclick="() => _currentQuestion = idx">
                                 @(idx + 1)
+                                @if (flagged)
+                                {
+                                    <i class="bi bi-flag-fill ms-1 @flagClass"></i>
+                                }
                             </button>
                         }
                     </div>
@@ -223,11 +269,34 @@ else if (_state == ExamState.InProgress)
                     <div class="modal-body text-center p-4">
                         <i class="bi bi-question-circle text-warning" style="font-size:3rem;"></i>
                         <h4 class="mt-3">¿Finalizar la prueba?</h4>
-                        <p class="text-muted">
-                            Has respondido <strong>@_drafts.Count(d => d.SelectedAnswerId.HasValue || !string.IsNullOrEmpty(d.OpenAnswer))</strong>
+                        <p class="text-muted mb-1">
+                            Has respondido <strong>@AnsweredCount()</strong>
                             de <strong>@_sessionInfo!.Questions.Count</strong> preguntas.
                         </p>
-                        <p class="text-muted small">Esta acción no se puede deshacer.</p>
+                        @if (_sessionInfo.Questions.Count - AnsweredCount() > 0)
+                        {
+                            <p class="text-danger mb-1">
+                                Te quedan <strong>@(_sessionInfo.Questions.Count - AnsweredCount())</strong> sin responder.
+                            </p>
+                        }
+                        @if (_flagged.Count > 0)
+                        {
+                            <p class="text-warning-emphasis mb-1">
+                                <i class="bi bi-flag-fill"></i>
+                                Tienes <strong>@_flagged.Count</strong> marcadas para revisar.
+                            </p>
+                        }
+                        @if (_unsaved.Count > 0 || !_online)
+                        {
+                            <p class="text-danger small mb-1">
+                                Hay respuestas sin guardar por falta de conexión. Al finalizar se enviarán todas.
+                            </p>
+                        }
+                        @if (_submitError is not null)
+                        {
+                            <div class="alert alert-danger small mt-3 mb-0" role="alert">@_submitError</div>
+                        }
+                        <p class="text-muted small mt-2">Esta acción no se puede deshacer.</p>
                     </div>
                     <div class="modal-footer justify-content-center gap-2">
                         <button class="btn btn-outline-secondary" @onclick="() => _showConfirm = false">
@@ -305,6 +374,22 @@ else if (_state == ExamState.Completed)
     private int _currentQuestion = 0;
     private bool _showConfirm, _submitting, _starting;
 
+    // Estado del guardado. `_unsaved` guarda las preguntas cuyo último guardado falló; el
+    // reintento envía siempre el borrador actual de cada una, así que un cambio posterior
+    // sustituye al pendiente. `_online` es lo que dice el navegador: no basta por sí solo.
+    private static readonly TimeSpan RetryEvery = TimeSpan.FromSeconds(5);
+    private readonly HashSet<int> _unsaved = new();
+    private readonly HashSet<int> _flagged = new();
+    // Preguntas cuyo último guardado rechazó el servidor (plazo vencido, por ejemplo). No se
+    // reintentan, pero el indicador no puede decir «Guardado» mientras el texto sea otro.
+    private readonly HashSet<int> _rejected = new();
+    private int _savesInFlight;
+    private DateTime? _lastSavedAt;
+    private DateTime _lastRetryUtc = DateTime.MinValue;
+    private DateTime _nextSubmitAttemptUtc = DateTime.MinValue;
+    private bool _online = true;
+    private string? _submitError;
+
     private List<DraftAnswer> _drafts = new();
     private System.Timers.Timer? _timer;
 
@@ -362,8 +447,9 @@ else if (_state == ExamState.Completed)
 
         if (_remainingSeconds <= 0)
         {
-            // Volvió fuera de plazo: se cierra con lo que tenga guardado, sin preguntar.
-            _state = ExamState.InProgress;
+            // Volvió fuera de plazo: se cierra con lo que tenga guardado, sin preguntar. Con el
+            // temporizador en marcha, un envío que falle se reintenta solo.
+            StartExam();
             await SubmitExamAsync();
             return;
         }
@@ -408,7 +494,27 @@ else if (_state == ExamState.Completed)
         _startedAtUtc = DateTime.UtcNow;
         _drafts = session.Questions.Select(q => new DraftAnswer { QuestionId = q.QuestionId }).ToList();
         RestoreSavedAnswers(session);
+        await RestoreFlagsAsync(session);
         return true;
+    }
+
+    /// <summary>
+    /// Recupera las marcas «para revisar» del navegador. Solo las de preguntas que siguen en la
+    /// sesión, y sin romper la prueba si el almacenamiento no responde.
+    /// </summary>
+    private async Task RestoreFlagsAsync(ExamSessionInfoDto session)
+    {
+        _flagged.Clear();
+        try
+        {
+            var ids = await JS.InvokeAsync<int[]>("examUi.getFlags", session.SessionId);
+            var valid = session.Questions.Select(q => q.QuestionId).ToHashSet();
+            foreach (var id in ids) if (valid.Contains(id)) _flagged.Add(id);
+        }
+        catch (JSException)
+        {
+            // Sin almacenamiento: las marcas empiezan vacías y funcionan en memoria.
+        }
     }
 
     /// <summary>
@@ -445,6 +551,16 @@ else if (_state == ExamState.Completed)
         _selfRef = DotNetObjectReference.Create(this);
         await JS.InvokeVoidAsync("examTimer.register", _selfRef);
         await JS.InvokeVoidAsync("examIntegrity.register", _selfRef);
+        await JS.InvokeVoidAsync("examUi.registerConnection", _selfRef);
+    }
+
+    /// <summary>Lo llama el navegador al ganar o perder la conexión, y una vez al registrarse.</summary>
+    [JSInvokable]
+    public async Task OnConnectionChanged(bool online)
+    {
+        _online = online;
+        if (online && _state == ExamState.InProgress) await RetryUnsavedAsync(force: true);
+        await InvokeAsync(StateHasChanged);
     }
 
     // ---------- Señales de integridad ----------
@@ -545,16 +661,39 @@ else if (_state == ExamState.Completed)
 
     private async Task OnTimerTickAsync()
     {
+        if (_state != ExamState.InProgress) return;
+
         _remainingSeconds = Math.Max(0, _secondsAtStart - ElapsedSeconds());
 
         if (_remainingSeconds == 0)
         {
-            _timer?.Stop();
-            await SubmitExamAsync();
-            return;
+            // El temporizador sigue en marcha tras un envío fallido: reintenta cada pocos
+            // segundos hasta que el servidor responde. `_submitting` evita el envío doble.
+            if (!_submitting && DateTime.UtcNow >= _nextSubmitAttemptUtc)
+            {
+                await SubmitExamAsync();
+                return;
+            }
+        }
+        else
+        {
+            await RetryUnsavedAsync();
         }
 
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Reintenta los guardados que fallaron. Con el reloj de un segundo que ya existe y un
+    /// intervalo de unos segundos, salvo que `force` lo pida (al volver la conexión).
+    /// </summary>
+    private async Task RetryUnsavedAsync(bool force = false)
+    {
+        if (_unsaved.Count == 0 || _savesInFlight > 0) return;
+        if (!force && DateTime.UtcNow - _lastRetryUtc < RetryEvery) return;
+
+        _lastRetryUtc = DateTime.UtcNow;
+        foreach (var questionId in _unsaved.ToList()) await AutoSave(questionId);
     }
 
     private void NextQuestion() { if (_currentQuestion < _sessionInfo!.Questions.Count - 1) _currentQuestion++; }
@@ -616,11 +755,45 @@ else if (_state == ExamState.Completed)
         var draft = GetDraft(questionId);
         if (draft is null) return;
 
-        // Un rechazo por plazo vencido no se trata aquí a propósito. `SaveAnswerAsync` no
-        // lanza ante un 409, y el borrador sigue en pantalla: el envío final puntúa con lo
-        // último que entró en plazo. Borrar el texto castigaría al candidato dos veces.
-        await Api.SaveAnswerAsync(_sessionInfo!.SessionId, new SubmitAnswerDto(
-            questionId, draft.SelectedAnswerId, draft.OpenAnswer));
+        _savesInFlight++;
+        SaveOutcome outcome;
+        try
+        {
+            // Siempre el borrador actual de la pregunta, no el de cuando falló.
+            outcome = await Api.SaveAnswerAsync(_sessionInfo!.SessionId, new SubmitAnswerDto(
+                questionId, draft.SelectedAnswerId, draft.OpenAnswer));
+        }
+        finally
+        {
+            _savesInFlight--;
+        }
+
+        switch (outcome)
+        {
+            case SaveOutcome.Saved:
+                _unsaved.Remove(questionId);
+                _rejected.Remove(questionId);
+                _lastSavedAt = DateTime.UtcNow;
+                break;
+            case SaveOutcome.Rejected:
+                // Un 409 por plazo vencido, o un 400/403: reintentar no cambia nada. El borrador
+                // sigue en pantalla, y el envío final puntúa con lo último que entró en plazo.
+                // Borrar el texto castigaría al candidato dos veces.
+                _unsaved.Remove(questionId);
+                _rejected.Add(questionId);
+                break;
+            default:
+                _unsaved.Add(questionId);
+                break;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenConfirm()
+    {
+        _submitError = null;
+        _showConfirm = true;
     }
 
     private async Task SubmitExamAsync()
@@ -630,9 +803,8 @@ else if (_state == ExamState.Completed)
         // que se descarta.
         if (_submitting) return;
 
-        _showConfirm = false;
         _submitting = true;
-        _timer?.Stop();
+        _submitError = null;
 
         // Un retardo pendiente escribiría en una sesión ya cerrada. El cuerpo del envío
         // lleva los borradores completos, así que no se pierde nada al cancelarlos.
@@ -641,10 +813,64 @@ else if (_state == ExamState.Completed)
         var answers = _drafts.Select(d => new SubmitAnswerDto(
             d.QuestionId, d.SelectedAnswerId, d.OpenAnswer)).ToList();
 
-        _result = await Api.SubmitExamAsync(new SubmitExamDto(_sessionInfo!.SessionId, answers));
-        _state = ExamState.Completed;
+        var (receipt, status, error) = await Api.SubmitExamAsync(
+            new SubmitExamDto(_sessionInfo!.SessionId, answers));
         _submitting = false;
+
+        if (receipt is null)
+        {
+            // Sin acuse del servidor no hay pantalla de resultado: la prueba sigue abierta con
+            // las respuestas intactas. Un rechazo con mensaje (400) se muestra tal cual; un
+            // fallo de red o de servidor, no.
+            _submitError = status == 400 && !string.IsNullOrWhiteSpace(error)
+                ? error
+                : "No se pudo enviar la prueba. Comprueba tu conexión e inténtalo de nuevo.";
+            _nextSubmitAttemptUtc = DateTime.UtcNow + RetryEvery;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _timer?.Stop();
+        _showConfirm = false;
+        _result = receipt;
+        _state = ExamState.Completed;
+        await InvokeAsync(StateHasChanged);
     }
+
+    // Una sola definición de «respondida» para el contador, la barra, el mapa y el diálogo:
+    // las cuatro cifras no pueden discrepar. Un texto solo con espacios cuenta como en blanco,
+    // igual que lo trata el servidor al corregir.
+    private static bool IsAnswered(DraftAnswer? draft)
+        => draft is not null
+        && (draft.SelectedAnswerId.HasValue || !string.IsNullOrWhiteSpace(draft.OpenAnswer));
+
+    private int AnsweredCount() => _drafts.Count(IsAnswered);
+
+    private async Task ToggleFlag(int questionId)
+    {
+        if (!_flagged.Remove(questionId)) _flagged.Add(questionId);
+
+        try
+        {
+            await JS.InvokeVoidAsync("examUi.setFlags", _sessionInfo!.SessionId, _flagged.ToArray());
+        }
+        catch (JSException)
+        {
+            // Sin almacenamiento: la marca vale mientras la página siga abierta.
+        }
+    }
+
+    private string SaveStatusText()
+        => _savesInFlight > 0 ? "Guardando…"
+         : _unsaved.Count > 0 ? "Sin guardar"
+         : _rejected.Count > 0 ? "No guardado: el servidor rechazó el cambio"
+         : _lastSavedAt is { } at ? $"Guardado {at.ToLocalTime():HH:mm}"
+         : string.Empty;
+
+    private string SaveStatusClass()
+        => _unsaved.Count > 0 || _rejected.Count > 0 ? "text-danger fw-semibold"
+         : _savesInFlight > 0 ? "text-muted"
+         : "text-success";
 
     private DraftAnswer? GetDraft(int questionId)
         => _drafts.FirstOrDefault(d => d.QuestionId == questionId);
@@ -671,6 +897,7 @@ else if (_state == ExamState.Completed)
         // No esperamos a que termine: Dispose no admite await.
         _ = JS.InvokeVoidAsync("examTimer.unregister");
         _ = JS.InvokeVoidAsync("examIntegrity.unregister");
+        _ = JS.InvokeVoidAsync("examUi.unregisterConnection");
         _selfRef?.Dispose();
 
         // Sin esto, salir de la página con un retardo en vuelo dejaría una llamada que

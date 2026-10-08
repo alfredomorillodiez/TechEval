@@ -7,6 +7,9 @@ using TechEval.Domain.Enums;
 
 namespace TechEval.Web.Services;
 
+/// <summary>Resultado de guardar una respuesta. Ver `ApiService.SaveAnswerAsync`.</summary>
+public enum SaveOutcome { Saved, Rejected, Failed }
+
 public class ApiService
 {
     private readonly HttpClient _http;
@@ -141,9 +144,29 @@ public class ApiService
     public Task<ExamSessionInfoDto?> StartSessionAsync(string token)
         => PostAsync<object, ExamSessionInfoDto>($"api/exam/start/{token}", new { });
 
-    public async Task SaveAnswerAsync(int sessionId, SubmitAnswerDto dto)
+    /// <summary>
+    /// Guarda una respuesta y dice qué pasó, para que la pantalla pueda mostrarlo. Nunca lanza:
+    /// un fallo de red no debe romper la prueba. Un rechazo que un reintento no cambia (400,
+    /// 403, 409) es `Rejected`; todo lo demás (red, 429, 5xx) es `Failed` y se reintenta.
+    /// </summary>
+    public async Task<SaveOutcome> SaveAnswerAsync(int sessionId, SubmitAnswerDto dto)
     {
-        await _http.PostAsJsonAsync($"api/exam/answer/{sessionId}", dto, JsonOptions);
+        try
+        {
+            var response = await _http.PostAsJsonAsync($"api/exam/answer/{sessionId}", dto, JsonOptions);
+            if (response.IsSuccessStatusCode) return SaveOutcome.Saved;
+
+            return response.StatusCode is System.Net.HttpStatusCode.BadRequest
+                    or System.Net.HttpStatusCode.Forbidden
+                    or System.Net.HttpStatusCode.Conflict
+                ? SaveOutcome.Rejected
+                : SaveOutcome.Failed;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "No se pudo guardar una respuesta; se reintentará.");
+            return SaveOutcome.Failed;
+        }
     }
 
     /// <summary>
@@ -172,8 +195,12 @@ public class ApiService
     public Task<IntegrityReportDto?> GetIntegrityReportAsync(int resultId)
         => GetAsync<IntegrityReportDto>($"api/results/{resultId}/integrity");
 
-    public Task<ExamSubmissionReceiptDto?> SubmitExamAsync(SubmitExamDto dto)
-        => PostAsync<SubmitExamDto, ExamSubmissionReceiptDto>("api/exam/submit", dto);
+    /// <summary>
+    /// Con el código y el mensaje: un envío rechazado (por ejemplo, una respuesta demasiado
+    /// larga) tiene que decir por qué, y un fallo de red no puede parecer un envío hecho.
+    /// </summary>
+    public Task<(ExamSubmissionReceiptDto? Result, int StatusCode, string? Error)> SubmitExamAsync(SubmitExamDto dto)
+        => SendAsync<ExamSubmissionReceiptDto>(HttpMethod.Post, "api/exam/submit", dto);
 
     // Corrección manual de preguntas abiertas
     public Task<List<PendingReviewSummaryDto>?> GetPendingReviewsAsync()

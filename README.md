@@ -163,6 +163,9 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
 
 # Evaluadores: tabla ExamEvaluators y la reserva en ExamResults (ReservedByUserId, ReservedUntil)
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
+
+# Una respuesta por pregunta y sesión: índice único en UserAnswers. Si hay duplicados, no borra nada: los lista y se detiene
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_useranswers_unique_index.sql
 ```
 
 > **Antes de aplicar `add_user_roles.sql`**, comprueba que no hay pruebas en curso. Desde este cambio el JWT lleva un sello de seguridad, y la API rechaza los tokens emitidos por la versión anterior. Un candidato a mitad de prueba perdería el guardado de sus respuestas hasta volver a abrir su enlace. Despliega cuando esta consulta devuelva `0`:

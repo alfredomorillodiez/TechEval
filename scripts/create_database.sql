@@ -260,6 +260,12 @@ CREATE TABLE dbo.UserAnswers (
 );
 GO
 
+-- Una respuesta por pregunta y sesión: sin la unicidad, dos autoguardados que coincidían
+-- creaban dos filas y la corrección puntuaba la pregunta dos veces.
+CREATE UNIQUE INDEX IX_UserAnswers_ExamSessionId_QuestionId ON dbo.UserAnswers (ExamSessionId, QuestionId);
+CREATE INDEX IX_UserAnswers_QuestionId ON dbo.UserAnswers (QuestionId);
+GO
+
 -- ============================================================
 -- 10. ExamResults  (resultado final, 1:1 con ExamSession)
 -- ============================================================

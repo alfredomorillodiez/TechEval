@@ -29,7 +29,18 @@ public class BaseRepository<T> : IRepository<T> where T : class
     public virtual async Task<T> AddAsync(T entity, CancellationToken ct = default)
     {
         await DbSet.AddAsync(entity, ct);
-        await Context.SaveChangesAsync(ct);
+        try
+        {
+            await Context.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // La entidad que no se pudo insertar no debe quedar rastreada: el contexto es uno
+            // por petición, y el siguiente SaveChanges (por ejemplo, el de una actualización
+            // tras una carrera de inserción) intentaría insertarla de nuevo y fallaría igual.
+            Context.Entry(entity).State = EntityState.Detached;
+            throw;
+        }
         return entity;
     }
 

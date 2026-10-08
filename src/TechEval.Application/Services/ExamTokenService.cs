@@ -25,6 +25,16 @@ public class ExamTimeExpiredException : ConflictException
     public ExamTimeExpiredException(string message) : base(message) { }
 }
 
+/// <summary>
+/// Se lanza cuando la sesión ya se envió y alguien intenta seguir escribiendo en ella: la API
+/// la traduce a 409. Sin ella, el autoguardado reescribía respuestas de una prueba con
+/// resultado hasta que pasaba el plazo.
+/// </summary>
+public class ExamAlreadySubmittedException : ConflictException
+{
+    public ExamAlreadySubmittedException(string message) : base(message) { }
+}
+
 public interface IExamTokenService
 {
     Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default);
@@ -266,6 +276,13 @@ public class ExamTokenService : IExamTokenService
 
         EnsureOwnedBy(token, userId);
 
+        // Una prueba enviada ya no cambia. Se mira el resultado además del estado, como hace
+        // el envío: los dos se escriben juntos, pero un fallo antiguo pudo dejarlos a medias.
+        // Va antes que el plazo y la longitud: una sesión cerrada no admite nada.
+        if (token.ExamSession is { Status: not SessionStatus.InProgress }
+            || (await _resultRepo.FindAsync(r => r.ExamSessionId == sessionId, ct)).Count > 0)
+            throw new ExamAlreadySubmittedException("La prueba ya se ha enviado.");
+
         // Guardar fuera de plazo es lo que hace posible congelar el temporizador del
         // navegador y seguir trabajando. El envío tardío sí se acepta, pero vacío.
         if (IsPastDeadline(token))
@@ -273,18 +290,15 @@ public class ExamTokenService : IExamTokenService
 
         EnsureOpenAnswerFits(dto);
 
-        var existing = await _answerRepo.FindAsync(
-            a => a.ExamSessionId == sessionId && a.QuestionId == dto.QuestionId, ct);
+        var existing = await FindAnswerAsync(sessionId, dto.QuestionId, ct);
 
-        if (existing.Any())
+        if (existing is not null)
         {
-            var answer = existing.First();
-            answer.SelectedAnswerId = dto.SelectedAnswerId;
-            answer.OpenAnswer = dto.OpenAnswer;
-            answer.AnsweredAt = DateTime.UtcNow;
-            await _answerRepo.UpdateAsync(answer, ct);
+            await OverwriteDraftAsync(existing, dto, ct);
+            return;
         }
-        else
+
+        try
         {
             await _answerRepo.AddAsync(new UserAnswer
             {
@@ -294,6 +308,29 @@ public class ExamTokenService : IExamTokenService
                 OpenAnswer = dto.OpenAnswer
             }, ct);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Dos autoguardados de la misma pregunta que coinciden leen «no hay fila» y los
+            // dos insertan; el índice único deja pasar al primero. Si la fila existe ahora,
+            // era eso, y esta petición pasa a ser una corrección. Si no existe, el fallo era
+            // otro y se relanza sin tocar: no se oculta una base de datos caída.
+            var winner = await FindAnswerAsync(sessionId, dto.QuestionId, ct);
+            if (winner is null) throw;
+
+            await OverwriteDraftAsync(winner, dto, ct);
+        }
+    }
+
+    private async Task<UserAnswer?> FindAnswerAsync(int sessionId, int questionId, CancellationToken ct)
+        => (await _answerRepo.FindAsync(
+            a => a.ExamSessionId == sessionId && a.QuestionId == questionId, ct)).FirstOrDefault();
+
+    private async Task OverwriteDraftAsync(UserAnswer answer, SubmitAnswerDto dto, CancellationToken ct)
+    {
+        answer.SelectedAnswerId = dto.SelectedAnswerId;
+        answer.OpenAnswer = dto.OpenAnswer;
+        answer.AnsweredAt = DateTime.UtcNow;
+        await _answerRepo.UpdateAsync(answer, ct);
     }
 
     public async Task<ExamSubmissionReceiptDto> SubmitExamAsync(
@@ -389,17 +426,36 @@ public class ExamTokenService : IExamTokenService
         if (status == Domain.Enums.ExamResultStatus.PendingReview)
         {
             // Acuse sin cifras: el resultado definitivo se envía al cerrar la corrección.
-            await _emailService.SendExamPendingReviewAsync(
-                examToken.CandidateEmail, examToken.CandidateName, exam.Title, ct);
+            await TryNotifyAsync(() => _emailService.SendExamPendingReviewAsync(
+                examToken.CandidateEmail, examToken.CandidateName, exam.Title, ct));
 
             return BuildReceipt(result, exam.Title);
         }
 
-        await _emailService.SendExamResultAsync(
+        await TryNotifyAsync(() => _emailService.SendExamResultAsync(
             examToken.CandidateEmail, examToken.CandidateName,
-            exam.Title, pct, passed!.Value, ct);
+            exam.Title, pct, passed!.Value, ct));
 
         return BuildReceipt(result, exam.Title);
+    }
+
+    /// <summary>
+    /// Envía un correo que viene después de un envío ya confirmado, sin dejar que su fallo
+    /// llegue al candidato. Antes un Graph caído devolvía 500 con la prueba ya guardada, y el
+    /// segundo envío, que es idempotente, no repetía el correo: el aviso no salía nunca.
+    /// GraphEmailService ya registra el fallo en el log antes de relanzarlo, como en la
+    /// corrección (ReviewWorkflow). La cancelación sí se deja pasar: no hay a quién responder.
+    /// </summary>
+    private static async Task TryNotifyAsync(Func<Task> send)
+    {
+        try
+        {
+            await send();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Silenciado a propósito: el resultado ya está persistido y es el que manda.
+        }
     }
 
     /// <summary>

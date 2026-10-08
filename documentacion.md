@@ -623,7 +623,8 @@ POST /api/exam/start/{token}
 Candidato responde preguntas con temporizador visible
     ├── Preguntas y opciones en el orden propio de su sesión
     ├── Marca de agua con su nombre y su correo sobre las preguntas
-    ├── Auto-guardado: POST /api/exam/answer/{sessionId} (cada respuesta)
+    ├── Auto-guardado: POST /api/exam/answer/{sessionId} (cada respuesta; una sola fila por pregunta y sesión)
+    │       (una prueba ya enviada responde 409 y no admite más cambios)
     ├── Salidas de la página y pegados en abiertas: POST /api/exam/integrity/{sessionId}
     │       (una señal que falla se guarda en memoria y se reintenta con la siguiente)
     └── Si el tiempo se agota → auto-envío
@@ -633,7 +634,7 @@ Candidato pulsa "Finalizar" → POST /api/exam/submit
     ├── Calcula puntuación y % de éxito
     ├── Crea ExamResult (con UserId del alumno)
     ├── Actualiza ExamSession.Status = Completed
-    └── Envía email con resultado al candidato
+    └── Envía email con resultado al candidato (si el correo falla, el candidato recibe igualmente su acuse con 200)
     ↓
 Admin consulta resultados en el dashboard
 Alumno consulta su nota en /portal
@@ -948,6 +949,7 @@ Para bases de datos **ya existentes** creadas con una versión anterior. Son adi
 | [`add_category_ai_generation_flag.sql`](scripts/add_category_ai_generation_flag.sql) | Añade `Categories.AllowsAiGeneration` con default `1` y marca la categoría `iECS` como no apta para generación por IA |
 | [`add_user_roles.sql`](scripts/add_user_roles.sql) | Añade `Users.Role` (rellenado desde `IsAdmin`: 1 → Admin, 0 → Alumno) con su `CHECK`, `Users.SecurityStamp` con un valor propio por fila, y la tabla `PasswordSetupTokens`. Después **quita `Users.IsAdmin`**: el binario anterior ya no arranca contra la base actualizada. La cabecera trae el SQL para volver atrás |
 | [`add_evaluator_columns.sql`](scripts/add_evaluator_columns.sql) | Crea `ExamEvaluators` y añade `ExamResults.ReservedByUserId` y `ReservedUntil`. Solo añade: el binario anterior sigue funcionando contra la base actualizada |
+| [`add_useranswers_unique_index.sql`](scripts/add_useranswers_unique_index.sql) | Crea el índice único `IX_UserAnswers_ExamSessionId_QuestionId` (una respuesta por pregunta y sesión) y el índice `IX_UserAnswers_QuestionId`. Solo añade. **Si la base ya tiene respuestas duplicadas, no borra nada**: lista las parejas repetidas con sus `Id` y puntos y termina con error; borra a mano la fila sobrante y vuelve a ejecutarlo |
 
 ```bash
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_link_columns.sql
@@ -955,6 +957,7 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_category_ai_generation_flag.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_useranswers_unique_index.sql
 ```
 
 > **Antes de `add_user_roles.sql`**, comprueba que no hay pruebas en curso: los tokens de la versión anterior no llevan sello y la API los rechaza, así que un candidato a mitad de prueba perdería el guardado hasta volver a abrir su enlace. Despliega cuando `SELECT COUNT(*) FROM dbo.ExamSessions WHERE Status = 1` devuelva `0`.

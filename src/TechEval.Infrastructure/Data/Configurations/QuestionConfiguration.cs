@@ -193,6 +193,14 @@ public class UserAnswerConfiguration : IEntityTypeConfiguration<UserAnswer>
         builder.Property(a => a.OpenAnswer).HasMaxLength(UserAnswer.OpenAnswerMaxLength);
         builder.Property(a => a.ReviewerComment).HasMaxLength(2000);
 
+        // Una respuesta por pregunta y sesión. Sin la unicidad, dos autoguardados que
+        // coincidían creaban dos filas y la corrección puntuaba la pregunta dos veces. El
+        // índice único sirve también a las consultas por sesión.
+        builder.HasIndex(a => new { a.ExamSessionId, a.QuestionId })
+            .IsUnique()
+            .HasDatabaseName("IX_UserAnswers_ExamSessionId_QuestionId");
+        builder.HasIndex(a => a.QuestionId).HasDatabaseName("IX_UserAnswers_QuestionId");
+
         // Mismas longitudes que sus originales: Question.Text y Answer.Text.
         builder.Property(a => a.QuestionTextSnapshot).HasMaxLength(2000);
         builder.Property(a => a.SelectedAnswerTextSnapshot).HasMaxLength(1000);

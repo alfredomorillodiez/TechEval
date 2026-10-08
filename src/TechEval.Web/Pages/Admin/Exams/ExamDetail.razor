@@ -27,7 +27,8 @@
     }
     else if (_exam is null)
     {
-        <div class="alert alert-warning">No se encontró la prueba.</div>
+        @* La API no distingue aquí un 404 de una caída: los dos llegan como nulo. *@
+        <LoadError What="la prueba (puede que ya no exista)" OnRetry="LoadAsync" />
     }
     else
     {
@@ -93,7 +94,12 @@
                 <h5 class="mb-0">Evaluadores <span class="badge bg-secondary ms-1">@_evaluators.Count</span></h5>
             </div>
             <div class="card-body">
-                @if (HasOpenQuestions && _evaluators.Count == 0)
+                @if (_evaluatorsFailed)
+                {
+                    @* Sin esto, una caída decía «ningún evaluador» y «no hay evaluadores activos». *@
+                    <LoadError What="los evaluadores" OnRetry="LoadEvaluatorsAsync" />
+                }
+                @if (!_evaluatorsFailed && HasOpenQuestions && _evaluators.Count == 0)
                 {
                     <div class="alert alert-warning py-2">
                         <i class="bi bi-exclamation-triangle me-1"></i>
@@ -124,7 +130,11 @@
                     </ul>
                 }
                 @{ var candidates = _availableEvaluators.Where(u => _evaluators.All(e => e.UserId != u.Id)).ToList(); }
-                @if (candidates.Count > 0)
+                @if (_evaluatorsFailed)
+                {
+                    @* Ya avisado arriba: no se ofrece un desplegable de datos que no se cargaron. *@
+                }
+                else if (candidates.Count > 0)
                 {
                     <div class="d-flex gap-2" style="max-width:480px;">
                         <select class="form-select form-select-sm" @bind="_selectedEvaluatorId">
@@ -283,14 +293,28 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
         _exam = await Api.GetExamAsync(Id);
         if (_exam is not null)
         {
             PopulateFields(_exam);
-            _evaluators = await Api.GetExamEvaluatorsAsync(Id) ?? new();
-            _availableEvaluators = await Api.GetUsersAsync(UserRole.Evaluador, active: true) ?? new();
+            await LoadEvaluatorsAsync();
         }
         _loading = false;
+    }
+
+    private async Task LoadEvaluatorsAsync()
+    {
+        var assigned = await Api.GetExamEvaluatorsAsync(Id);
+        var available = await Api.GetUsersAsync(UserRole.Evaluador, active: true);
+        _evaluatorsFailed = assigned is null || available is null;
+        if (assigned is not null) _evaluators = assigned;
+        if (available is not null) _availableEvaluators = available;
     }
 
     // ---- Evaluadores ----------------------------------------------------------------------
@@ -298,7 +322,7 @@
     private List<ExamEvaluatorDto> _evaluators = new();
     private List<UserDto> _availableEvaluators = new();
     private int _selectedEvaluatorId;
-    private bool _evaluatorBusy;
+    private bool _evaluatorBusy, _evaluatorsFailed;
     private string? _evaluatorError;
 
     private bool HasOpenQuestions => _exam?.Questions.Any(q => q.QuestionType == QuestionType.OpenEnded) ?? false;

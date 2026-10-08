@@ -17,6 +17,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="los resultados" OnRetry="LoadAsync" />
+    }
     else
     {
         <!-- KPIs -->
@@ -231,7 +235,7 @@
     private List<ExamResultSummaryDto> _all = new();
     private List<ExamResultSummaryDto> _filtered = new();
     private List<string> _examTitles = new();
-    private bool _loading = true;
+    private bool _loading = true, _loadFailed;
 
     // Filtros
     private string _fSearch = string.Empty;
@@ -254,11 +258,23 @@
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
 
-        _all = await Api.GetResultsAsync() ?? new();
-        _examTitles = _all.Select(r => r.ExamTitle).Distinct().OrderBy(t => t).ToList();
+        await LoadAsync();
+    }
 
-        ComputeKpis();
-        _filtered = _all.ToList();
+    // Unos resultados que no cargan no son cero resultados: con la API caída, los KPIs
+    // decían «0 resultados» como si no se hubiera enviado ninguna prueba.
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var all = await Api.GetResultsAsync();
+        _loadFailed = all is null;
+        if (all is not null)
+        {
+            _all = all;
+            _examTitles = _all.Select(r => r.ExamTitle).Distinct().OrderBy(t => t).ToList();
+            ComputeKpis();
+            _filtered = _all.ToList();
+        }
         _loading = false;
     }
 

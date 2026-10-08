@@ -23,6 +23,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="los resultados de esta prueba" OnRetry="LoadAsync" />
+    }
     else if (!_all.Any())
     {
         <div class="alert alert-info">
@@ -251,7 +255,7 @@
     private List<ExamResultSummaryDto> _all = new();
     private List<ExamResultSummaryDto> _filtered = new();
     private string _examTitle = string.Empty;
-    private bool _loading = true;
+    private bool _loading = true, _loadFailed;
 
     // KPIs
     private int _passedCount;
@@ -279,12 +283,23 @@
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
 
-        _all = await Api.GetResultsByExamAsync(ExamId) ?? new();
-        _examTitle = _all.FirstOrDefault()?.ExamTitle ?? $"Prueba #{ExamId}";
+        await LoadAsync();
+    }
 
-        ComputeKpis();
-        BuildDistribution();
-        _filtered = _all.ToList();
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var all = await Api.GetResultsByExamAsync(ExamId);
+        _loadFailed = all is null;
+        if (all is not null)
+        {
+            _all = all;
+            _examTitle = _all.FirstOrDefault()?.ExamTitle ?? $"Prueba #{ExamId}";
+
+            ComputeKpis();
+            BuildDistribution();
+            _filtered = _all.ToList();
+        }
         _loading = false;
     }
 

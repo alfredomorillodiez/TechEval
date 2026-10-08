@@ -10,10 +10,17 @@ namespace TechEval.Web.Services;
 /// <summary>Resultado de guardar una respuesta. Ver `ApiService.SaveAnswerAsync`.</summary>
 public enum SaveOutcome { Saved, Rejected, Failed }
 
+/// <summary>Resultado de renovar una reserva. Ver `ApiService.RenewReviewReservationAsync`.</summary>
+public enum ReservationRenewal { Renewed, Lost, Unreachable }
+
 public class ApiService
 {
     private readonly HttpClient _http;
     private readonly ILogger<ApiService> _logger;
+
+    // Lo que ve la persona cuando la petición no llegó (código 0). El texto de la excepción
+    // es del navegador («Failed to fetch») y no dice nada útil.
+    private const string NetworkError = "No se pudo conectar con el servidor. Comprueba tu conexión.";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -35,8 +42,12 @@ public class ApiService
         => _http.DefaultRequestHeaders.Authorization = null;
 
     // Auth
-    public Task<AuthResultDto?> LoginAsync(LoginDto dto)
-        => PostAsync<LoginDto, AuthResultDto>("api/auth/login", dto);
+    /// <summary>
+    /// Con el código y el mensaje: un 401 (credenciales incorrectas) no es lo mismo que un 429
+    /// (demasiados intentos), un fallo de red (código 0) o un error del servidor.
+    /// </summary>
+    public Task<(AuthResultDto? Result, int StatusCode, string? Error)> LoginAsync(LoginDto dto)
+        => SendAsync<AuthResultDto>(HttpMethod.Post, "api/auth/login", dto);
 
     // Categories
     public Task<List<CategoryDto>?> GetCategoriesAsync()
@@ -66,11 +77,13 @@ public class ApiService
     public Task<QuestionDto?> GetQuestionAsync(int id)
         => GetAsync<QuestionDto>($"api/questions/{id}");
 
-    public Task<QuestionDto?> CreateQuestionAsync(CreateQuestionDto dto)
-        => PostAsync<CreateQuestionDto, QuestionDto>("api/questions", dto);
+    // Con el código y el mensaje: el formulario tiene que decir por qué falla un alta o una
+    // edición, y un 409 (la pregunta ya tiene respuestas) no es un fallo de red.
+    public Task<(QuestionDto? Result, int StatusCode, string? Error)> CreateQuestionAsync(CreateQuestionDto dto)
+        => SendAsync<QuestionDto>(HttpMethod.Post, "api/questions", dto);
 
-    public Task<QuestionDto?> UpdateQuestionAsync(int id, UpdateQuestionDto dto)
-        => PutAsync<UpdateQuestionDto, QuestionDto>($"api/questions/{id}", dto);
+    public Task<(QuestionDto? Result, int StatusCode, string? Error)> UpdateQuestionAsync(int id, UpdateQuestionDto dto)
+        => SendAsync<QuestionDto>(HttpMethod.Put, $"api/questions/{id}", dto);
 
     public Task<bool> DeleteQuestionAsync(int id)
         => DeleteAsync($"api/questions/{id}");
@@ -213,8 +226,19 @@ public class ApiService
     public Task<(PendingReviewDetailDto? Result, int StatusCode, string? Error)> GetReviewDetailAsync(int resultId)
         => SendAsync<PendingReviewDetailDto>(HttpMethod.Get, $"api/review/{resultId}", null);
 
-    public async Task<bool> RenewReviewReservationAsync(int resultId)
-        => (await SendAsync<object>(HttpMethod.Post, $"api/review/{resultId}/reservation", null)).StatusCode == 200;
+    public async Task<ReservationRenewal> RenewReviewReservationAsync(int resultId)
+        => ToRenewal((await SendAsync<object>(HttpMethod.Post, $"api/review/{resultId}/reservation", null)).StatusCode);
+
+    /// <summary>
+    /// Una reserva perdida (otra persona la tiene, o el resultado ya no está) no es lo mismo que
+    /// una renovación que no llegó: la primera cierra el formulario, la segunda no puede tocarlo.
+    /// </summary>
+    private static ReservationRenewal ToRenewal(int status) => status switch
+    {
+        200 => ReservationRenewal.Renewed,
+        403 or 404 or 409 => ReservationRenewal.Lost,
+        _ => ReservationRenewal.Unreachable
+    };
 
     public async Task<bool> ReleaseReviewReservationAsync(int resultId)
         => (await SendAsync<object>(HttpMethod.Delete, $"api/review/{resultId}/reservation", null)).StatusCode == 204;
@@ -226,8 +250,8 @@ public class ApiService
     public Task<(EvaluatorReviewDetailDto? Result, int StatusCode, string? Error)> GetEvaluationDetailAsync(int resultId)
         => SendAsync<EvaluatorReviewDetailDto>(HttpMethod.Get, $"api/evaluation/{resultId}", null);
 
-    public async Task<bool> RenewEvaluationReservationAsync(int resultId)
-        => (await SendAsync<ReservationDto>(HttpMethod.Post, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 200;
+    public async Task<ReservationRenewal> RenewEvaluationReservationAsync(int resultId)
+        => ToRenewal((await SendAsync<ReservationDto>(HttpMethod.Post, $"api/evaluation/{resultId}/reservation", null)).StatusCode);
 
     public async Task<bool> ReleaseEvaluationReservationAsync(int resultId)
         => (await SendAsync<object>(HttpMethod.Delete, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 204;
@@ -278,7 +302,7 @@ public class ApiService
         catch (Exception ex)
         {
             _logger.LogError(ex, "POST api/review/{Id} failed", resultId);
-            return (null, 0, ex.Message);
+            return (null, 0, NetworkError);
         }
     }
 
@@ -345,7 +369,7 @@ public class ApiService
         catch (Exception ex)
         {
             _logger.LogError(ex, "{Method} {Url} failed", method, url);
-            return (default, 0, ex.Message);
+            return (default, 0, NetworkError);
         }
     }
 

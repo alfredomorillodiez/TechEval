@@ -64,6 +64,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="los usuarios" OnRetry="LoadAsync" />
+    }
     else if (_users.Count == 0)
     {
         <div class="text-center text-muted py-5">No hay usuarios con esos filtros.</div>
@@ -254,7 +258,7 @@
         string Title, string Message, string Button, string ButtonClass, Func<Task> Action);
 
     private List<UserDto> _users = new();
-    private bool _loading = true, _busy;
+    private bool _loading = true, _busy, _loadFailed;
 
     private string _filterRole = string.Empty, _filterActive = string.Empty, _search = string.Empty;
 
@@ -282,7 +286,9 @@
         _loading = true;
         UserRole? role = Enum.TryParse<UserRole>(_filterRole, out var r) ? r : null;
         bool? active = bool.TryParse(_filterActive, out var a) ? a : null;
-        _users = await Api.GetUsersAsync(role, active, _search) ?? new();
+        var users = await Api.GetUsersAsync(role, active, _search);
+        _loadFailed = users is null;
+        if (users is not null) _users = users;
         _loading = false;
     }
 

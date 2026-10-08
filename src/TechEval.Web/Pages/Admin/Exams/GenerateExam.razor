@@ -60,6 +60,11 @@
                             <span class="text-muted fw-normal small ms-1">(todas)</span>
                         }
                     </label>
+                    @if (_categoriesFailed)
+                    {
+                        @* Sin categorías el filtro parecería no tener ninguna que elegir. *@
+                        <LoadError What="las categorías" OnRetry="LoadCategoriesAsync" />
+                    }
                     <div class="border rounded p-3" style="max-height:180px;overflow-y:auto;background:#fafafa;">
                         @foreach (var c in _categories)
                         {
@@ -162,7 +167,7 @@
     private int _questionCount = 10, _timeLimitMinutes = 60, _passingScore = 70;
     private HashSet<int> _selectedCategoryIds = new();
     private List<CategoryDto> _categories = new();
-    private bool _loading;
+    private bool _loading, _categoriesFailed;
 
     // "" = todos los niveles; un DifficultyLevel = nivel único; "reparto" = reparto por nivel.
     private string _mode = string.Empty;
@@ -195,8 +200,15 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
-        _categories = await Api.GetCategoriesAsync() ?? new();
+        await LoadCategoriesAsync();
         await LoadAvailabilityAsync();
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        var categories = await Api.GetCategoriesAsync();
+        _categoriesFailed = categories is null;
+        if (categories is not null) _categories = categories;
     }
 
     private async Task LoadAvailabilityAsync()

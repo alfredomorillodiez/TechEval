@@ -23,6 +23,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="las pruebas" OnRetry="LoadAsync" />
+    }
     else
     {
         <div class="row g-4">
@@ -314,7 +318,7 @@
 
 @code {
     private List<ExamSummaryDto> _exams = new();
-    private bool _loading = true;
+    private bool _loading = true, _loadFailed;
 
     // Estado individual
     private int? _sendingExamId;
@@ -337,7 +341,15 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
-        _exams = await Api.GetExamsAsync() ?? new();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var exams = await Api.GetExamsAsync();
+        _loadFailed = exams is null;
+        if (exams is not null) _exams = exams;
         _loading = false;
     }
 

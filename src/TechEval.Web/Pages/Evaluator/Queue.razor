@@ -21,6 +21,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="tus correcciones pendientes" OnRetry="LoadAsync" />
+    }
     else if (_queue.Count == 0)
     {
         <div class="card border-0 shadow-sm">
@@ -95,7 +99,7 @@
 </div>
 
 @code {
-    private bool _loading = true;
+    private bool _loading = true, _loadFailed;
     private List<EvaluatorQueueItemDto> _queue = new();
 
     protected override async Task OnInitializedAsync()
@@ -107,7 +111,17 @@
             return;
         }
 
-        _queue = await Api.GetEvaluationQueueAsync() ?? new();
+        await LoadAsync();
+    }
+
+    // Una cola que no carga no está vacía: sin esta distinción, la API caída le decía al
+    // evaluador que no tenía correcciones.
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var queue = await Api.GetEvaluationQueueAsync();
+        _loadFailed = queue is null;
+        if (queue is not null) _queue = queue;
         _loading = false;
     }
 

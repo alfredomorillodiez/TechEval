@@ -2,31 +2,60 @@
 
 @* Renueva la reserva de un resultado mientras la pantalla de corrección sigue abierta. No la
    libera al salir: el navegador no garantiza esa última petición, y la reserva caduca sola a
-   los 30 minutos. Liberarla es cosa del botón «Cancelar». *@
+   los 30 minutos. Liberarla es cosa del botón «Cancelar».
+
+   Distingue una reserva PERDIDA (otra persona la tiene, o el resultado ya no está) de una
+   renovación que no LLEGÓ (red, 429, 5xx). Solo la primera cierra el formulario. Con la
+   segunda, el formulario conserva todo lo escrito, se avisa y se reintenta con frecuencia: la
+   reserva dura 30 minutos y se renueva a los 10, así que queda margen para recuperarse. *@
 
 @code {
-    /// <summary>Renueva la reserva. False si ya no es de quien corrige.</summary>
-    [Parameter, EditorRequired] public Func<Task<bool>> Renew { get; set; } = default!;
+    /// <summary>Renueva la reserva y dice si se renovó, se perdió o no se pudo saber.</summary>
+    [Parameter, EditorRequired] public Func<Task<ReservationRenewal>> Renew { get; set; } = default!;
 
-    /// <summary>La renovación falló: otra persona tomó el resultado o ya no está disponible.</summary>
+    /// <summary>La reserva se perdió: otra persona tomó el resultado o ya no está disponible.</summary>
     [Parameter] public EventCallback OnLost { get; set; }
 
+    /// <summary>
+    /// La renovación no llegó (false) o volvió a funcionar (true). La página muestra un aviso,
+    /// pero no toca el formulario.
+    /// </summary>
+    [Parameter] public EventCallback<bool> OnReachable { get; set; }
+
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(30);
     private readonly CancellationTokenSource _cts = new();
 
     protected override void OnInitialized() => _ = LoopAsync();
 
     private async Task LoopAsync()
     {
-        using var timer = new PeriodicTimer(Interval);
+        var wait = Interval;
+        var unreachable = false;
+
         try
         {
-            while (await timer.WaitForNextTickAsync(_cts.Token))
+            while (true)
             {
-                if (!await Renew())
+                await Task.Delay(wait, _cts.Token);
+
+                switch (await Renew())
                 {
-                    await OnLost.InvokeAsync();
-                    return;
+                    case ReservationRenewal.Lost:
+                        await OnLost.InvokeAsync();
+                        return;
+
+                    case ReservationRenewal.Unreachable:
+                        if (!unreachable) await OnReachable.InvokeAsync(false);
+                        unreachable = true;
+                        wait = RetryInterval;
+                        break;
+
+                    default:
+                        if (unreachable) await OnReachable.InvokeAsync(true);
+                        unreachable = false;
+                        wait = Interval;
+                        break;
                 }
             }
         }

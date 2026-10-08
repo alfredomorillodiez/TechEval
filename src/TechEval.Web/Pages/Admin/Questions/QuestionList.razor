@@ -49,6 +49,17 @@
         </div>
     </div>
 
+    @if (_categoriesFailed)
+    {
+        <LoadError What="las categorías del filtro" OnRetry="LoadCategoriesAsync" />
+    }
+    @if (!string.IsNullOrEmpty(_deleteError))
+    {
+        <div class="alert alert-danger alert-dismissible mb-4" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_deleteError
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => _deleteError = string.Empty"></button>
+        </div>
+    }
     @if (!string.IsNullOrEmpty(_error))
     {
         <div class="alert alert-warning d-flex align-items-center gap-2 mb-4">
@@ -173,8 +184,9 @@
 @code {
     private List<QuestionSummaryDto> _questions = new();
     private List<CategoryDto> _categories = new();
-    private bool _loading = true;
+    private bool _loading = true, _categoriesFailed;
     private string _error = string.Empty;
+    private string _deleteError = string.Empty;
     private int? _categoryId;
     private DifficultyLevel? _difficulty;
     private QuestionType? _type;
@@ -201,8 +213,15 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
-        _categories = await Api.GetCategoriesAsync() ?? new();
+        await LoadCategoriesAsync();
         await LoadQuestionsAsync();
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        var categories = await Api.GetCategoriesAsync();
+        _categoriesFailed = categories is null;
+        if (categories is not null) _categories = categories;
     }
 
     private async Task LoadQuestionsAsync()
@@ -239,8 +258,11 @@
 
     private async Task DeleteAsync(int id)
     {
+        _deleteError = string.Empty;
         if (await Api.DeleteQuestionAsync(id))
             _questions.RemoveAll(q => q.Id == id);
+        else
+            _deleteError = "No se pudo dar de baja la pregunta. Comprueba la conexión e inténtalo de nuevo.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

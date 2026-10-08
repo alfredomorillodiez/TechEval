@@ -22,6 +22,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="las correcciones pendientes" OnRetry="LoadAsync" />
+    }
     else if (_pending.Count == 0)
     {
         <div class="card border-0 shadow-sm">
@@ -111,7 +115,7 @@
 </div>
 
 @code {
-    private bool _loading = true;
+    private bool _loading = true, _loadFailed;
     private List<PendingReviewSummaryDto> _pending = new();
     private int? _confirmRelease;
 
@@ -121,7 +125,18 @@
     {
         _confirmRelease = null;
         await Api.ReleaseReviewReservationAsync(resultId);
-        _pending = await Api.GetPendingReviewsAsync() ?? new();
+        await LoadAsync();
+    }
+
+    // Una cola que no carga no está vacía: con la API caída, esta pantalla decía que todas
+    // las pruebas con abiertas estaban corregidas.
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var pending = await Api.GetPendingReviewsAsync();
+        _loadFailed = pending is null;
+        if (pending is not null) _pending = pending;
+        _loading = false;
     }
 
     protected override async Task OnInitializedAsync()
@@ -133,8 +148,7 @@
             return;
         }
 
-        _pending = await Api.GetPendingReviewsAsync() ?? new();
-        _loading = false;
+        await LoadAsync();
     }
 
     private static string WaitClass(int days) => days switch

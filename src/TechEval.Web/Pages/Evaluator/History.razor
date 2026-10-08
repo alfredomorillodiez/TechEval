@@ -14,6 +14,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="tu historial de correcciones" OnRetry="LoadAsync" />
+    }
     else if (_history.Count == 0)
     {
         <div class="text-center text-muted py-5">Todavía no has corregido ninguna prueba.</div>
@@ -57,7 +61,7 @@
 </div>
 
 @code {
-    private bool _loading = true;
+    private bool _loading = true, _loadFailed;
     private List<EvaluatorHistoryItemDto> _history = new();
 
     protected override async Task OnInitializedAsync()
@@ -65,7 +69,15 @@
         await Auth.InitializeAsync();
         if (!Auth.IsEvaluador) { Nav.NavigateTo(Auth.Home); return; }
 
-        _history = await Api.GetEvaluationHistoryAsync() ?? new();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var history = await Api.GetEvaluationHistoryAsync();
+        _loadFailed = history is null;
+        if (history is not null) _history = history;
         _loading = false;
     }
 }

@@ -1,0 +1,136 @@
+@page "/admin/results/{Id:int}/review"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Corregir prueba — TechEval</PageTitle>
+
+<div class="container-lg py-4">
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <a href="/admin/results/pending" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h1 class="h3 mb-0 flex-grow-1">Corregir preguntas abiertas</h1>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_conflict is not null)
+    {
+        @* 409: ya corregido, o reservado por otra persona. El mensaje de la API dice cuál y,
+           si es una reserva, quién la tiene y hasta cuándo. *@
+        <div class="alert alert-warning d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>@_conflict</strong>
+            </div>
+            <a href="/admin/results/pending" class="btn btn-warning btn-sm">Volver a la cola</a>
+        </div>
+    }
+    else if (_detail is null)
+    {
+        <div class="alert alert-warning">No se encontró el resultado.</div>
+    }
+    else
+    {
+        <ReservationKeeper Renew="() => Api.RenewReviewReservationAsync(Id)" OnLost="OnReservationLost" />
+
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <div class="row g-3 align-items-center">
+                    <div class="col-md-4">
+                        <p class="text-muted small mb-1">Candidato</p>
+                        <p class="fw-semibold mb-0">@_detail.CandidateName</p>
+                        <p class="text-muted small mb-0">@_detail.CandidateEmail</p>
+                    </div>
+                    <div class="col-md-4">
+                        <p class="text-muted small mb-1">Prueba</p>
+                        <p class="fw-semibold mb-0">@_detail.ExamTitle</p>
+                    </div>
+                    <div class="col-md-2">
+                        <p class="text-muted small mb-1">Tipo test</p>
+                        <p class="fw-semibold mb-0">@_detail.AutoScoredPoints pts</p>
+                    </div>
+                    <div class="col-md-2">
+                        <p class="text-muted small mb-1">Total de la prueba</p>
+                        <p class="fw-semibold mb-0">@_detail.TotalPoints pts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <IntegrityPanel Report="_integrity" />
+
+        <ReviewForm Answers="_detail.Answers"
+                    AutoScoredPoints="_detail.AutoScoredPoints"
+                    TotalPoints="_detail.TotalPoints"
+                    Integrity="_integrity"
+                    Saving="_saving"
+                    Error="@_error"
+                    OnSubmit="SubmitAsync"
+                    OnCancel="CancelAsync" />
+    }
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true, _saving;
+    private string? _error, _conflict;
+    private PendingReviewDetailDto? _detail;
+    private IntegrityReportDto? _integrity;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsAdmin)
+        {
+            Nav.NavigateTo(Auth.Home);
+            return;
+        }
+
+        var detail = Api.GetReviewDetailAsync(Id);
+        var integrity = Api.GetIntegrityReportAsync(Id);
+        var (result, status, error) = await detail;
+        _integrity = await integrity;
+
+        if (status == 409) _conflict = error ?? "Este resultado no está disponible para corregir.";
+        else _detail = result;
+        _loading = false;
+    }
+
+    private void OnReservationLost()
+        => _conflict = "La reserva de este resultado se perdió: otra persona lo está corrigiendo.";
+
+    private async Task CancelAsync()
+    {
+        await Api.ReleaseReviewReservationAsync(Id);
+        Nav.NavigateTo("/admin/results/pending");
+    }
+
+    private async Task SubmitAsync(SubmitReviewDto payload)
+    {
+        _saving = true;
+        _error = null;
+
+        var (result, status, error) = await Api.SubmitReviewAsync(Id, payload);
+        _saving = false;
+
+        if (status == 409)
+        {
+            _conflict = error ?? "Este resultado ya no está disponible para corregir.";
+            return;
+        }
+
+        if (result is null)
+        {
+            _error = error ?? "No se pudo guardar la corrección. Inténtalo de nuevo.";
+            return;
+        }
+
+        Nav.NavigateTo($"/admin/results/{Id}");
+    }
+}

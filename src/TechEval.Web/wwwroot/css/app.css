@@ -63,3 +63,22 @@ nav .nav-link.active {
 nav .nav-link.active i {
     color: #0d6efd;
 }
+
+/* Marca de agua del examen: nombre y correo del candidato sobre las preguntas.
+   Por encima del contenido y de la cabecera fija (1020), por debajo de los modales (1050).
+   No recibe clics ni se selecciona: todo lo que hay debajo sigue funcionando. */
+.exam-watermark {
+    position: fixed;
+    inset: 0;
+    z-index: 1025;
+    pointer-events: none;
+    user-select: none;
+    background-repeat: repeat;
+}
+
+@media print {
+    .exam-watermark {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}

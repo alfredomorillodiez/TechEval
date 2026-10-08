@@ -5,6 +5,15 @@ using TechEval.Domain.Interfaces.Repositories;
 
 namespace TechEval.Application.Services;
 
+/// <summary>
+/// Se lanza al intentar eliminar una opción que algún candidato ya eligió: la API la
+/// traduce a 409. Sin ella, el intento llegaba a la base de datos y volvía como un 500.
+/// </summary>
+public class AnswerInUseException : ConflictException
+{
+    public AnswerInUseException(string message) : base(message) { }
+}
+
 public interface IQuestionService
 {
     Task<IReadOnlyList<QuestionSummaryDto>> GetAllAsync(int? categoryId, DifficultyLevel? difficulty, QuestionType? type, CancellationToken ct = default);
@@ -12,6 +21,9 @@ public interface IQuestionService
     Task<QuestionDto> CreateAsync(CreateQuestionDto dto, CancellationToken ct = default);
     Task<QuestionDto?> UpdateAsync(int id, UpdateQuestionDto dto, CancellationToken ct = default);
     Task<bool> DeleteAsync(int id, CancellationToken ct = default);
+
+    /// <summary>Preguntas activas de cada nivel en esas categorías, para la vista previa del reparto.</summary>
+    Task<IReadOnlyList<LevelCountDto>> GetAvailabilityAsync(List<int>? categoryIds, CancellationToken ct = default);
 }
 
 public class QuestionService : IQuestionService
@@ -19,6 +31,13 @@ public class QuestionService : IQuestionService
     private readonly IQuestionRepository _repo;
 
     public QuestionService(IQuestionRepository repo) => _repo = repo;
+
+    public async Task<IReadOnlyList<LevelCountDto>> GetAvailabilityAsync(
+        List<int>? categoryIds, CancellationToken ct = default)
+        => (await _repo.CountByDifficultyAsync(categoryIds, ct))
+            .OrderBy(c => c.Key)
+            .Select(c => new LevelCountDto(c.Key, c.Value))
+            .ToList();
 
     public async Task<IReadOnlyList<QuestionSummaryDto>> GetAllAsync(
         int? categoryId, DifficultyLevel? difficulty, QuestionType? type, CancellationToken ct = default)
@@ -64,7 +83,20 @@ public class QuestionService : IQuestionService
         var question = await _repo.GetWithAnswersAsync(id, ct);
         if (question is null) return null;
 
-        ValidateAnswers(dto.Type, dto.Answers);
+        ValidateAnswers(dto.Type, dto.Answers.Select(a => new CreateAnswerDto(a.Text, a.IsCorrect, a.Order)).ToList());
+
+        // Se comprueba todo antes de tocar la entidad: un rechazo no puede dejar la pregunta
+        // a medio editar. Hasta ahora el fallo llegaba de la base de datos, después de haber
+        // cambiado el enunciado en memoria.
+        var referenciadas = await _repo.GetReferencedAnswerIdsAsync(question.Id, ct);
+        var recibidas = dto.Answers.Where(a => a.Id is not null).Select(a => a.Id!.Value).ToHashSet();
+
+        var aBorrar = question.Answers.Where(a => !recibidas.Contains(a.Id)).ToList();
+        var bloqueadas = aBorrar.Where(a => referenciadas.Contains(a.Id)).ToList();
+        if (bloqueadas.Count > 0)
+            throw new AnswerInUseException(
+                $"No se pueden eliminar {bloqueadas.Count} opción(es) de esta pregunta: algún candidato ya las eligió. " +
+                "Si la pregunta necesita otra estructura, da esta de baja y crea una nueva.");
 
         question.Text = dto.Text;
         question.Type = dto.Type;
@@ -74,14 +106,30 @@ public class QuestionService : IQuestionService
         question.IsActive = dto.IsActive;
         question.SampleAnswer = dto.SampleAnswer;
         question.UpdatedAt = DateTime.UtcNow;
-        question.Answers.Clear();
+
+        foreach (var sobra in aBorrar)
+            question.Answers.Remove(sobra);
+
+        // Actualización en su sitio: la opción conserva su Id, y con él la referencia desde
+        // las respuestas ya registradas.
+        var existentes = question.Answers.ToDictionary(a => a.Id);
         foreach (var (a, i) in dto.Answers.Select((a, i) => (a, i)))
         {
+            var order = a.Order > 0 ? a.Order : i + 1;
+
+            if (a.Id is int answerId && existentes.TryGetValue(answerId, out var existente))
+            {
+                existente.Text = a.Text;
+                existente.IsCorrect = a.IsCorrect;
+                existente.Order = order;
+                continue;
+            }
+
             question.Answers.Add(new Answer
             {
                 Text = a.Text,
                 IsCorrect = a.IsCorrect,
-                Order = a.Order > 0 ? a.Order : i + 1,
+                Order = order,
                 QuestionId = question.Id
             });
         }
@@ -105,9 +153,9 @@ public class QuestionService : IQuestionService
         if (type == QuestionType.MultipleChoice)
         {
             if (answers.Count != 4)
-                throw new InvalidOperationException("Las preguntas tipo test deben tener exactamente 4 respuestas.");
+                throw new ValidationException("Las preguntas tipo test deben tener exactamente 4 respuestas.");
             if (answers.Count(a => a.IsCorrect) != 1)
-                throw new InvalidOperationException("Las preguntas tipo test deben tener exactamente 1 respuesta correcta.");
+                throw new ValidationException("Las preguntas tipo test deben tener exactamente 1 respuesta correcta.");
         }
     }
 

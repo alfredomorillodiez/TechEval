@@ -9,7 +9,13 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? "http://localhost:5000/";
 
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBaseUrl) });
+// Singleton: el manejador y el layout tienen que compartir la misma instancia.
+builder.Services.AddSingleton<SessionEvents>();
+builder.Services.AddScoped(sp => new HttpClient(
+    new SessionExpiryHandler(sp.GetRequiredService<SessionEvents>()) { InnerHandler = new HttpClientHandler() })
+{
+    BaseAddress = new Uri(apiBaseUrl)
+});
 builder.Services.AddScoped<ApiService>();
 builder.Services.AddScoped<AuthStateService>();
 

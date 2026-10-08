@@ -1,0 +1,199 @@
+@using TechEval.Application.DTOs
+
+@* El formulario de corrección, el mismo para el administrador y para el evaluador: las
+   respuestas abiertas con su referencia, la puntuación provisional, la validación de rango y
+   el envío de todas las respuestas a la vez. La página decide qué hacer con la corrección. *@
+
+<div class="alert alert-info d-flex justify-content-between align-items-center">
+    <div>
+        <i class="bi bi-info-circle me-2"></i>
+        Puntuación provisional:
+        <strong>@ProvisionalPoints / @TotalPoints pts</strong>
+        (@ProvisionalPercentage%)
+    </div>
+    <span class="small">Se confirmará al guardar la corrección.</span>
+</div>
+
+@foreach (var (answer, index) in Answers.Select((a, i) => (a, i + 1)))
+{
+    var input = _inputs[answer.UserAnswerId];
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <div class="d-flex gap-3">
+                <span class="badge bg-secondary rounded-pill px-2 py-1 mt-1" style="min-width:2rem;text-align:center;">@index</span>
+                <div class="flex-grow-1">
+                    <p class="fw-semibold mb-3">@answer.QuestionText</p>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <p class="text-muted small mb-1">Respuesta del candidato</p>
+                            <div class="px-3 py-2 rounded border bg-light" style="min-height:6rem;white-space:pre-wrap;">
+                                @if (string.IsNullOrWhiteSpace(answer.OpenAnswer))
+                                {
+                                    <span class="text-muted fst-italic">Sin respuesta</span>
+                                }
+                                else
+                                {
+                                    @answer.OpenAnswer
+                                }
+                            </div>
+                            @if (PastesOf(answer.QuestionId) is { } pastes)
+                            {
+                                @* Junto a la respuesta, que es donde el dato sirve para decidir. *@
+                                <p class="small text-warning-emphasis mt-1 mb-0">
+                                    <i class="bi bi-clipboard me-1"></i>
+                                    Pegó texto @(pastes.Count == 1 ? "1 vez" : $"{pastes.Count} veces"),
+                                    @pastes.TotalChars caracteres en total.
+                                </p>
+                            }
+                        </div>
+                        <div class="col-md-6">
+                            <p class="text-muted small mb-1">
+                                <i class="bi bi-lightbulb me-1"></i> Respuesta de referencia
+                            </p>
+                            <div class="px-3 py-2 rounded border bg-white" style="min-height:6rem;white-space:pre-wrap;">
+                                @if (string.IsNullOrWhiteSpace(answer.SampleAnswer))
+                                {
+                                    <span class="text-muted fst-italic">Esta pregunta no tiene respuesta de referencia.</span>
+                                }
+                                else
+                                {
+                                    @answer.SampleAnswer
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold mb-1">
+                                Puntos (0 – @answer.MaxPoints)
+                            </label>
+                            <input type="number" class="form-control @(IsValid(answer) ? "" : "is-invalid")"
+                                   min="0" max="@answer.MaxPoints"
+                                   @bind="input.AwardedPoints" @bind:event="oninput" />
+                            @if (!IsValid(answer))
+                            {
+                                <div class="invalid-feedback d-block">
+                                    Debe estar entre 0 y @answer.MaxPoints.
+                                </div>
+                            }
+                        </div>
+                        <div class="col-md-9">
+                            <label class="form-label small fw-semibold mb-1">
+                                Comentario para el candidato (opcional)
+                            </label>
+                            <input type="text" class="form-control" maxlength="2000"
+                                   placeholder="Por qué esta puntuación..."
+                                   @bind="input.ReviewerComment" @bind:event="oninput" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (Error is not null)
+{
+    <div class="alert alert-danger">@Error</div>
+}
+
+<div class="d-flex justify-content-between align-items-center">
+    <div class="text-muted small">
+        @if (!AllValid)
+        {
+            <span class="text-danger">
+                <i class="bi bi-exclamation-circle me-1"></i>
+                Corrige las puntuaciones fuera de rango antes de guardar.
+            </span>
+        }
+        else if (Answers.Count == 1)
+        {
+            <span>Se corregirá la respuesta y se cerrará el resultado.</span>
+        }
+        else
+        {
+            <span>Se corregirán las @Answers.Count respuestas de una sola vez.</span>
+        }
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" disabled="@Saving" @onclick="OnCancel">Cancelar</button>
+        <button class="btn btn-success" disabled="@(!AllValid || Saving)" @onclick="SubmitAsync">
+            @if (Saving)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+            }
+            <i class="bi bi-check-lg me-1"></i> Guardar corrección y notificar
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<ReviewableAnswerDto> Answers { get; set; } = new();
+    [Parameter] public int AutoScoredPoints { get; set; }
+    [Parameter] public int TotalPoints { get; set; }
+    [Parameter] public IntegrityReportDto? Integrity { get; set; }
+    [Parameter] public bool Saving { get; set; }
+    [Parameter] public string? Error { get; set; }
+
+    /// <summary>La corrección completa, ya validada. Solo se lanza con todas las puntuaciones en rango.</summary>
+    [Parameter] public EventCallback<SubmitReviewDto> OnSubmit { get; set; }
+
+    /// <summary>«Cancelar»: la página libera la reserva y vuelve a la cola.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private readonly Dictionary<int, AnswerInput> _inputs = new();
+
+    private class AnswerInput
+    {
+        public int AwardedPoints { get; set; }
+        public string? ReviewerComment { get; set; }
+    }
+
+    protected override void OnParametersSet()
+    {
+        foreach (var a in Answers.Where(a => !_inputs.ContainsKey(a.UserAnswerId)))
+        {
+            // Las respuestas en blanco llegan pre-puntuadas a 0: el corrector solo confirma.
+            _inputs[a.UserAnswerId] = new AnswerInput
+            {
+                AwardedPoints = a.AwardedPoints ?? 0,
+                ReviewerComment = a.ReviewerComment
+            };
+        }
+    }
+
+    private PastesByQuestionDto? PastesOf(int questionId)
+        => Integrity?.PastesByQuestion.FirstOrDefault(p => p.QuestionId == questionId);
+
+    private bool IsValid(ReviewableAnswerDto a)
+    {
+        var v = _inputs[a.UserAnswerId].AwardedPoints;
+        return v >= 0 && v <= a.MaxPoints;
+    }
+
+    private bool AllValid => Answers.All(IsValid);
+
+    private int ProvisionalPoints => AutoScoredPoints + _inputs.Values.Sum(i => i.AwardedPoints);
+
+    private decimal ProvisionalPercentage
+        => TotalPoints > 0 ? Math.Round((decimal)ProvisionalPoints / TotalPoints * 100, 2) : 0;
+
+    private async Task SubmitAsync()
+    {
+        if (!AllValid) return;
+
+        var payload = new SubmitReviewDto(
+            Answers
+                .Select(a => new ReviewAnswerInputDto(
+                    a.UserAnswerId,
+                    _inputs[a.UserAnswerId].AwardedPoints,
+                    string.IsNullOrWhiteSpace(_inputs[a.UserAnswerId].ReviewerComment)
+                        ? null
+                        : _inputs[a.UserAnswerId].ReviewerComment))
+                .ToList());
+
+        await OnSubmit.InvokeAsync(payload);
+    }
+}

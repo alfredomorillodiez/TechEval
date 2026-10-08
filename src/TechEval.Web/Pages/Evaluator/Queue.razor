@@ -1,0 +1,120 @@
+@page "/evaluacion"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Correcciones — TechEval</PageTitle>
+
+@* A ciegas: la API no envía el nombre ni el email del candidato, y aquí no hay dónde
+   mostrarlos. El candidato es su alias; la fecha va sin hora. *@
+<div class="container-lg py-4">
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <h1 class="h3 mb-0 flex-grow-1">Correcciones pendientes</h1>
+        @if (_queue.Count > 0)
+        {
+            <span class="badge bg-warning text-dark fs-6">@_queue.Count en cola</span>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_queue.Count == 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-inbox text-primary" style="font-size:2.5rem;"></i>
+                <h5 class="mt-3">No tienes correcciones pendientes</h5>
+                <p class="text-muted mb-0">
+                    Aquí aparecerán los resultados de las pruebas que un administrador te asigne.
+                </p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <p class="text-muted small mb-3">
+            Ordenadas por antigüedad: arriba las que llevan más tiempo esperando.
+        </p>
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">Candidato</th>
+                                <th>Prueba</th>
+                                <th>Enviada</th>
+                                <th>Esperando</th>
+                                <th>Por corregir</th>
+                                <th class="text-end pe-3"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var q in _queue)
+                            {
+                                <tr>
+                                    <td class="ps-3 fw-semibold">@q.CandidateAlias</td>
+                                    <td>@q.ExamTitle</td>
+                                    <td class="text-muted small text-nowrap">@q.CompletedOn.ToString("dd/MM/yyyy")</td>
+                                    <td>
+                                        <span class="badge @WaitClass(q.DaysWaiting)">
+                                            @(q.DaysWaiting == 0 ? "Hoy" : q.DaysWaiting == 1 ? "1 día" : $"{q.DaysWaiting} días")
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">
+                                            @q.OpenAnswerCount @(q.OpenAnswerCount == 1 ? "respuesta" : "respuestas")
+                                        </span>
+                                    </td>
+                                    <td class="text-end pe-3 text-nowrap">
+                                        @if (q.ReservedByOther)
+                                        {
+                                            <span class="badge bg-light text-dark border">
+                                                <i class="bi bi-lock me-1"></i>
+                                                En corrección hasta las @q.ReservedUntil?.ToLocalTime().ToString("HH:mm")
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <a href="/evaluacion/@q.ResultId" class="btn btn-sm btn-primary">
+                                                <i class="bi bi-pencil-square me-1"></i> Corregir
+                                            </a>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private List<EvaluatorQueueItemDto> _queue = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsEvaluador)
+        {
+            Nav.NavigateTo(Auth.Home);
+            return;
+        }
+
+        _queue = await Api.GetEvaluationQueueAsync() ?? new();
+        _loading = false;
+    }
+
+    private static string WaitClass(int days) => days switch
+    {
+        >= 7 => "bg-danger",
+        >= 3 => "bg-warning text-dark",
+        _ => "bg-light text-dark border"
+    };
+}

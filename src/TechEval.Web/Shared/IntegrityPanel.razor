@@ -1,0 +1,130 @@
+@using TechEval.Application.DTOs
+@using TechEval.Domain.Enums
+
+@* Actividad del candidato durante la prueba. Informa al corrector; no decide nada. *@
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-0 pt-3 d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-shield-check me-1"></i> Actividad durante la prueba</h5>
+        @if (Report is { Availability: IntegrityAvailability.Recorded, Events.Count: > 0 })
+        {
+            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _showTimeline = !_showTimeline">
+                <i class="bi @(_showTimeline ? "bi-chevron-up" : "bi-chevron-down") me-1"></i>
+                @(_showTimeline ? "Ocultar cronología" : "Ver cronología")
+            </button>
+        }
+    </div>
+    <div class="card-body">
+        @if (Report is null)
+        {
+            <p class="text-muted mb-0">No se pudo cargar el registro de actividad.</p>
+        }
+        else if (Report.Availability == IntegrityAvailability.NotRecorded)
+        {
+            <p class="text-muted mb-0">
+                Esta prueba es anterior al registro de actividad. No hay datos, ni a favor ni en contra.
+            </p>
+        }
+        else
+        {
+            @if (Report.LimitReached)
+            {
+                <div class="alert alert-warning py-2 small">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    La sesión llegó al tope de señales. Las siguientes no se guardaron, así que las cifras son un mínimo.
+                </div>
+            }
+
+            <div class="row g-3 mb-3">
+                <div class="col-6 col-md-3">
+                    <p class="text-muted small mb-1">Salidas de la página</p>
+                    <p class="fs-5 fw-semibold mb-0">@Report.PageLeftCount</p>
+                </div>
+                <div class="col-6 col-md-3">
+                    <p class="text-muted small mb-1">Tiempo fuera</p>
+                    <p class="fs-5 fw-semibold mb-0">@FormatDuration(Report.TotalAwaySeconds)</p>
+                </div>
+                <div class="col-6 col-md-3">
+                    <p class="text-muted small mb-1">Pegados en abiertas</p>
+                    <p class="fs-5 fw-semibold mb-0">@Report.PasteCount</p>
+                </div>
+                <div class="col-6 col-md-3">
+                    <p class="text-muted small mb-1">Caracteres pegados</p>
+                    <p class="fs-5 fw-semibold mb-0">@Report.TotalPastedChars</p>
+                </div>
+            </div>
+
+            @if (Report.Events.Count == 0)
+            {
+                <p class="text-muted mb-2">No se registró ninguna salida de la página ni ningún pegado.</p>
+            }
+
+            <p class="text-muted small mb-0">
+                El tiempo fuera lo mide el navegador del candidato. Salir de la página tiene causas
+                legítimas, como una notificación o un segundo monitor: este registro informa, no decide.
+            </p>
+
+            @if (_showTimeline)
+            {
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr class="small text-muted">
+                                <th>@(Report.Events.Any(e => e.OccurredAt is null) ? "Desde el inicio" : "Hora")</th>
+                                <th>Señal</th>
+                                <th>Pregunta <span class="fw-normal">(orden de la prueba)</span></th>
+                                <th>Dato</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var e in Report.Events)
+                            {
+                                <tr>
+                                    <td class="small">@TimeOf(e)</td>
+                                    <td>@LabelOf(e.Type)</td>
+                                    <td>@(e.QuestionNumber?.ToString() ?? "—")</td>
+                                    <td class="small">@DetailOf(e)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    // El evaluador recibe la señal sin hora del reloj (la hora ayuda a saber quién hizo la
+    // prueba): entonces se muestra el tiempo desde el inicio de la sesión.
+    private static string TimeOf(IntegrityEventDto e) => e.OccurredAt is DateTime at
+        ? at.ToLocalTime().ToString("HH:mm:ss")
+        : $"{e.ElapsedSeconds / 60:00}:{e.ElapsedSeconds % 60:00}";
+
+    /// <summary>Informe ya cargado por la página, o null si no se pudo cargar.</summary>
+    [Parameter] public IntegrityReportDto? Report { get; set; }
+
+    private bool _showTimeline;
+
+    private static string LabelOf(IntegrityEventType type) => type switch
+    {
+        IntegrityEventType.PageLeft => "Salida de la página",
+        IntegrityEventType.PageReturned => "Vuelta a la página",
+        IntegrityEventType.Paste => "Pegado",
+        _ => type.ToString()
+    };
+
+    private static string DetailOf(IntegrityEventDto e) => e.Type switch
+    {
+        IntegrityEventType.PageReturned => $"{FormatDuration(e.AwaySeconds ?? 0)} fuera",
+        IntegrityEventType.Paste => $"{e.PastedChars ?? 0} caracteres",
+        _ => string.Empty
+    };
+
+    public static string FormatDuration(int seconds)
+    {
+        var t = TimeSpan.FromSeconds(seconds);
+        if (t.TotalHours >= 1) return $"{(int)t.TotalHours} h {t.Minutes} min";
+        if (t.TotalMinutes >= 1) return $"{t.Minutes} min {t.Seconds} s";
+        return $"{t.Seconds} s";
+    }
+}

@@ -1,5 +1,6 @@
 using TechEval.Application.DTOs;
 using TechEval.Domain.Entities;
+using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 
 namespace TechEval.Application.Services;
@@ -31,18 +32,18 @@ public class ResultService : IResultService
     public async Task<IReadOnlyList<ExamResultSummaryDto>> GetAllAsync(CancellationToken ct = default)
     {
         var results = await _resultRepo.GetAllWithDetailsAsync(ct);
-        return results.Select(r => new ExamResultSummaryDto(
-            r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
-            r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.CompletedAt)).ToList();
+        return results.Select(MapToSummary).ToList();
     }
 
     public async Task<IReadOnlyList<ExamResultSummaryDto>> GetByExamAsync(int examId, CancellationToken ct = default)
     {
         var results = await _resultRepo.GetByExamAsync(examId, ct);
-        return results.Select(r => new ExamResultSummaryDto(
-            r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
-            r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.CompletedAt)).ToList();
+        return results.Select(MapToSummary).ToList();
     }
+
+    private static ExamResultSummaryDto MapToSummary(ExamResult r) => new(
+        r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
+        r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.Status, r.CompletedAt);
 
     public async Task<ExamResultDto?> GetDetailAsync(int id, CancellationToken ct = default)
     {
@@ -54,56 +55,100 @@ public class ResultService : IResultService
             .Select(g => g.OrderByDescending(ua => ua.IsCorrect.HasValue).ThenByDescending(ua => ua.Id).First())
             .ToList() ?? new List<UserAnswer>();
 
-        var answerReviews = deduped.Select(ua =>
+        var answerReviews = SessionOrder.ByExamOrder(deduped, result.Exam).Select(ua =>
         {
             var correct = ua.Question?.Answers.FirstOrDefault(a => a.IsCorrect);
+            // Lo que se le preguntó al candidato, no lo que la pregunta dice hoy. Se
+            // recurre al banco solo para las respuestas anteriores a la copia, que el
+            // guion de esquema rellena con el texto de hoy de todas formas.
             return new AnswerReviewDto(
-                ua.Question?.Text ?? "",
-                ua.SelectedAnswer?.Text,
+                ua.QuestionTextSnapshot ?? ua.Question?.Text ?? "",
+                ua.SelectedAnswerTextSnapshot ?? ua.SelectedAnswer?.Text,
                 ua.OpenAnswer,
-                correct?.Text,
+                ua.CorrectAnswerTextSnapshot ?? correct?.Text,
                 ua.IsCorrect,
-                ua.Question?.Points ?? 0);
+                ua.QuestionPointsSnapshot ?? ua.Question?.Points ?? 0,
+                ua.AwardedPoints,
+                ua.ReviewerComment,
+                OptionsAsAsked(ua, correct));
         }).ToList();
 
         return new ExamResultDto(
             result.Id, result.CandidateName, result.CandidateEmail,
             result.Exam?.Title ?? "",
             result.TotalPoints, result.ObtainedPoints,
-            result.ScorePercentage, result.Passed,
-            result.CompletedAt, answerReviews);
+            result.ScorePercentage, result.Passed, result.Status,
+            result.CompletedAt, answerReviews,
+            // Solo cuando hubo corrección manual: un resultado de solo test no tiene corrector.
+            result.ReviewedByUserId is null ? null : result.ReviewedByUser?.Name,
+            result.ReviewedByUserId is null ? null : result.ReviewedAt);
+    }
+
+    /// <summary>
+    /// Las opciones de una pregunta de test, en el orden del examen, con la marcada y la
+    /// correcta señaladas.
+    /// </summary>
+    /// <remarks>
+    /// Salen del banco: al enviar solo se copian la opción marcada y la correcta. Si alguna
+    /// de esas dos copias ya no coincide con el banco, la pregunta se editó después del
+    /// examen, y las opciones de hoy no son las que vio el candidato. Entonces se devuelve
+    /// null y la ficha muestra solo las copias. El cambio de texto de las otras dos opciones
+    /// no se puede detectar, porque no tienen copia.
+    /// </remarks>
+    private static List<ResultOptionDto>? OptionsAsAsked(UserAnswer ua, Answer? correct)
+    {
+        var question = ua.Question;
+        if (question is null || question.Type != QuestionType.MultipleChoice || question.Answers.Count == 0)
+            return null;
+
+        var selected = question.Answers.FirstOrDefault(a => a.Id == ua.SelectedAnswerId);
+        var edited =
+            (ua.QuestionTextSnapshot is not null && ua.QuestionTextSnapshot != question.Text)
+            || (ua.SelectedAnswerTextSnapshot is not null && ua.SelectedAnswerTextSnapshot != selected?.Text)
+            || (ua.CorrectAnswerTextSnapshot is not null && ua.CorrectAnswerTextSnapshot != correct?.Text);
+        if (edited) return null;
+
+        return question.Answers
+            .OrderBy(a => a.Order)
+            .Select(a => new ResultOptionDto(a.Text, a.Id == ua.SelectedAnswerId, a.IsCorrect))
+            .ToList();
     }
 
     public async Task<DashboardStatsDto> GetDashboardStatsAsync(CancellationToken ct = default)
     {
-        var allResults = await _resultRepo.GetAllWithDetailsAsync(ct);
-        var allExams = await _examRepo.GetWithStatsAsync(ct);
+        // El rango del mes se calcula una vez, aquí. Antes el filtro comparaba año y mes
+        // contra el reloj dentro de la consulta, y eso no puede usar el índice de
+        // CompletedAt. Un rango sí.
+        var ahora = DateTime.UtcNow;
+        var desde = new DateTime(ahora.Year, ahora.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var hasta = desde.AddMonths(1);
+
+        // Cuatro consultas agregadas en lugar de traerse el histórico entero y el árbol
+        // completo de exámenes para contarlo en memoria.
+        var mes = await _resultRepo.GetPeriodStatsAsync(desde, hasta, ct);
+        var activeExams = await _examRepo.CountActiveAsync(ct);
         var totalQuestions = await _questionRepo.CountAsync(q => q.IsActive, ct);
+        var pendingReviewCount = await _resultRepo.CountPendingReviewAsync(ct);
+        var recent = await _resultRepo.GetRecentAsync(10, ct);
+        var withoutEvaluator = await _examRepo.GetActiveWithoutEvaluatorAsync(ct) ?? Array.Empty<Exam>();
 
-        var thisMonth = allResults.Where(r =>
-            r.CompletedAt.Year == DateTime.UtcNow.Year &&
-            r.CompletedAt.Month == DateTime.UtcNow.Month).ToList();
-
-        var avgScore = thisMonth.Any()
-            ? Math.Round(thisMonth.Average(r => r.ScorePercentage), 1)
+        // Media y tasa de aprobación solo sobre lo ya corregido: un resultado pendiente
+        // lleva una puntuación parcial que hundiría la media e inflaría los suspensos.
+        var avgScore = mes.Scored > 0
+            ? Math.Round(mes.ScoreSum / mes.Scored, 1)
             : 0;
-        var passRate = thisMonth.Any()
-            ? (int)Math.Round((double)thisMonth.Count(r => r.Passed) / thisMonth.Count * 100)
+        var passRate = mes.Scored > 0
+            ? (int)Math.Round((double)mes.Passed / mes.Scored * 100)
             : 0;
-
-        var recent = allResults
-            .OrderByDescending(r => r.CompletedAt).Take(10)
-            .Select(r => new ExamResultSummaryDto(
-                r.Id, r.ExamId, r.CandidateName, r.CandidateEmail,
-                r.Exam?.Title ?? "", r.ScorePercentage, r.Passed, r.CompletedAt))
-            .ToList();
 
         return new DashboardStatsDto(
-            allExams.Count(e => e.IsActive),
+            activeExams,
             totalQuestions,
-            thisMonth.Count,
+            mes.Total,
             avgScore,
             passRate,
-            recent);
+            pendingReviewCount,
+            recent.Select(MapToSummary).ToList(),
+            withoutEvaluator.Select(e => new ExamRefDto(e.Id, e.Title)).ToList());
     }
 }

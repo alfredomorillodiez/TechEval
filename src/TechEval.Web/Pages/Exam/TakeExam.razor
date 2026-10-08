@@ -2,9 +2,11 @@
 @implements IDisposable
 @using TechEval.Application.DTOs
 @using TechEval.Domain.Enums
+@using Microsoft.JSInterop
 @inject ApiService Api
 @inject AuthStateService Auth
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>Prueba técnica — TechEval</PageTitle>
 
@@ -52,6 +54,19 @@ else if (_state == ExamState.Welcome)
                     <span>Una vez iniciada no puedes pausar la prueba.</span>
                 </li>
             </ul>
+            @* El registro de actividad es un tratamiento de datos del candidato: se informa
+               antes de empezar, no después. *@
+            <div class="alert alert-secondary small mb-4" role="note">
+                <p class="fw-semibold mb-2">
+                    <i class="bi bi-shield-check me-1"></i> Durante la prueba se registra:
+                </p>
+                <ul class="mb-2 ps-3">
+                    <li>Cada vez que sales de esta página, y cuánto tiempo estás fuera.</li>
+                    <li>Cada vez que pegas texto en una respuesta abierta, con el número de caracteres. El texto pegado no se guarda.</li>
+                </ul>
+                <p class="mb-2">Las preguntas muestran una marca de agua con tu nombre y tu correo.</p>
+                <p class="mb-0">El equipo evaluador ve este registro. El registro no cambia la nota de forma automática.</p>
+            </div>
             <button class="btn btn-primary btn-lg w-100" @onclick="StartExam">
                 Comenzar prueba <i class="bi bi-arrow-right ms-1"></i>
             </button>
@@ -60,6 +75,10 @@ else if (_state == ExamState.Welcome)
 }
 else if (_state == ExamState.InProgress)
 {
+    @* Marca de agua: no impide la captura, pero la captura identifica a su autor. No recibe
+       clics, no se selecciona y el lector de pantalla no la anuncia. *@
+    <div class="exam-watermark" aria-hidden="true" style="background-image:url('@WatermarkUrl()')"></div>
+
     <div class="min-vh-100 bg-light">
         <!-- Header con temporizador -->
         <div class="bg-white shadow-sm sticky-top">
@@ -116,6 +135,7 @@ else if (_state == ExamState.InProgress)
                     else
                     {
                         <textarea class="form-control" rows="6"
+                                  data-question-id="@q.QuestionId"
                                   placeholder="Escribe tu respuesta aquí..."
                                   value="@draft?.OpenAnswer"
                                   @oninput="e => UpdateOpenAnswer(q.QuestionId, e.Value?.ToString())"
@@ -200,20 +220,44 @@ else if (_state == ExamState.Completed)
 {
     <div class="d-flex justify-content-center align-items-center min-vh-100 bg-light">
         <div class="card border-0 shadow-lg p-4 text-center" style="max-width:500px;width:100%;">
-            <div class="display-1 mb-3">@(_result!.Passed ? "🎉" : "😔")</div>
-            <h2 class="h4 mb-1">@(_result.Passed ? "¡Aprobado!" : "No aprobado")</h2>
-            <p class="text-muted mb-4">@_result.ExamTitle</p>
+            @if (_result!.Status == ExamResultStatus.PendingReview)
+            {
+                @* Sin puntuación, veredicto ni indicadores de éxito o fracaso: la prueba
+                   contiene abiertas que nadie ha corregido todavía. *@
+                <div class="display-1 mb-3">📨</div>
+                <h2 class="h4 mb-1">Prueba recibida</h2>
+                <p class="text-muted mb-4">@_result.ExamTitle</p>
 
-            <div class="p-4 rounded-3 mb-4 @(_result.Passed ? "bg-success bg-opacity-10" : "bg-danger bg-opacity-10")">
-                <div class="display-4 fw-bold @(_result.Passed ? "text-success" : "text-danger")">
-                    @_result.ScorePercentage%
+                <div class="p-4 rounded-3 mb-4 bg-primary bg-opacity-10 text-start">
+                    <p class="mb-0">
+                        Esta prueba incluye preguntas de respuesta abierta que requieren
+                        <strong>corrección manual</strong> por parte del equipo evaluador.
+                    </p>
                 </div>
-                <div class="text-muted">@_result.ObtainedPoints / @_result.TotalPoints puntos</div>
-            </div>
 
-            <p class="text-muted small">
-                Recibirás un email con los resultados. Gracias por participar.
-            </p>
+                <p class="text-muted small">
+                    Te enviaremos el resultado por email en cuanto la corrección esté finalizada.
+                    Gracias por participar.
+                </p>
+            }
+            else
+            {
+                var passed = _result.Passed == true;
+                <div class="display-1 mb-3">@(passed ? "🎉" : "😔")</div>
+                <h2 class="h4 mb-1">@(passed ? "¡Aprobado!" : "No aprobado")</h2>
+                <p class="text-muted mb-4">@_result.ExamTitle</p>
+
+                <div class="p-4 rounded-3 mb-4 @(passed ? "bg-success bg-opacity-10" : "bg-danger bg-opacity-10")">
+                    <div class="display-4 fw-bold @(passed ? "text-success" : "text-danger")">
+                        @_result.ScorePercentage%
+                    </div>
+                    <div class="text-muted">@_result.ObtainedPoints / @_result.TotalPoints puntos</div>
+                </div>
+
+                <p class="text-muted small">
+                    Recibirás un email con los resultados. Gracias por participar.
+                </p>
+            }
             <a class="btn btn-outline-primary" href="/portal">
                 <i class="bi bi-list-check me-1"></i> Ver mis pruebas
             </a>
@@ -228,14 +272,36 @@ else if (_state == ExamState.Completed)
     private ExamState _state = ExamState.Validating;
 
     private ExamSessionInfoDto? _sessionInfo;
-    private ExamResultDto? _result;
+    private ExamSubmissionReceiptDto? _result;
     private string _errorMessage = string.Empty;
     private int _currentQuestion = 0;
     private bool _showConfirm, _submitting;
 
     private List<DraftAnswer> _drafts = new();
     private System.Timers.Timer? _timer;
+
+    // Un retardo por pregunta: el candidato puede saltar entre dos abiertas, y el de una
+    // no debe cancelar el de la otra.
+    private static readonly TimeSpan AutoSaveDelay = TimeSpan.FromSeconds(2);
+    private readonly Dictionary<int, CancellationTokenSource> _autoSaveDelays = new();
     private int _remainingSeconds;
+
+    // El examen mide el tiempo con dos relojes y se queda con el que más ha avanzado.
+    // Al cronómetro no le afecta un cambio de hora del sistema. La hora UTC sigue
+    // corriendo aunque el equipo se suspenda. Ninguno de los dos puede regalar tiempo.
+    private System.Diagnostics.Stopwatch? _clock;
+    private DateTime _startedAtUtc;
+    private int _secondsAtStart;
+    private DotNetObjectReference<TakeExam>? _selfRef;
+
+    // Señales de integridad que no llegaron al servidor. Se reintentan antes de cada señal
+    // nueva. Con tope, para que una caída larga de la red no acumule memoria sin límite.
+    private const int MaxPendingSignals = 50;
+    private readonly Queue<IntegrityEventInputDto> _pendingSignals = new();
+    private bool _flushingSignals;
+    // Una vuelta solo tiene sentido después de una salida registrada. Sin esto, salir en la
+    // bienvenida y volver ya dentro de la prueba enviaría una vuelta sin salida.
+    private bool _awaySignalled;
 
     protected override async Task OnInitializedAsync()
     {
@@ -248,32 +314,183 @@ else if (_state == ExamState.Completed)
         }
 
         if (!string.IsNullOrEmpty(validation.AuthToken))
-            await Auth.LoginAsync(validation.AuthToken, validation.CandidateName ?? string.Empty, isAdmin: false);
+            await Auth.LoginAsync(validation.AuthToken, validation.CandidateName ?? string.Empty, UserRole.Alumno);
+
+        // El backend devuelve SessionId cuando la prueba ya estaba empezada. En ese caso no
+        // hay bienvenida que mostrar: el candidato vuelve de una recarga y espera continuar.
+        var resuming = validation.SessionId is not null;
 
         var session = await Api.StartSessionAsync(Token);
         if (session is null) { _state = ExamState.Invalid; _errorMessage = "Error al iniciar sesión."; return; }
 
         _sessionInfo = session;
-        _remainingSeconds = session.TimeLimitMinutes * 60;
+        // El tiempo lo mide el servidor. Inicializarlo con TimeLimitMinutes daría una prueba
+        // nueva completa en cada recarga.
+        _remainingSeconds = session.RemainingSeconds;
+        // Los relojes locales arrancan en el mismo instante que cuenta el servidor.
+        _secondsAtStart = _remainingSeconds;
+        _clock = System.Diagnostics.Stopwatch.StartNew();
+        _startedAtUtc = DateTime.UtcNow;
         _drafts = session.Questions.Select(q => new DraftAnswer { QuestionId = q.QuestionId }).ToList();
-        _state = ExamState.Welcome;
+        RestoreSavedAnswers(session);
+
+        if (!resuming) { _state = ExamState.Welcome; return; }
+
+        if (_remainingSeconds <= 0)
+        {
+            // Volvió fuera de plazo: se cierra con lo que tenga guardado, sin preguntar.
+            _state = ExamState.InProgress;
+            await SubmitExamAsync();
+            return;
+        }
+
+        StartExam();
+    }
+
+    /// <summary>
+    /// Vuelca en los borradores lo que el candidato ya tenía guardado. Sin esto, el envío
+    /// posterior mandaría respuestas vacías y borraría su trabajo.
+    /// </summary>
+    private void RestoreSavedAnswers(ExamSessionInfoDto session)
+    {
+        foreach (var saved in session.SavedAnswers)
+        {
+            var draft = GetDraft(saved.QuestionId);
+            if (draft is null) continue;
+            draft.SelectedAnswerId = saved.SelectedAnswerId;
+            draft.OpenAnswer = saved.OpenAnswer;
+        }
     }
 
     private void StartExam()
     {
         _state = ExamState.InProgress;
+
+        // Este temporizador solo refresca la pantalla. El tiempo restante sale de los
+        // relojes. El navegador frena o para el temporizador si la ventana está oculta,
+        // así que descontar un segundo por aviso regalaría tiempo al candidato.
         _timer = new System.Timers.Timer(1000);
-        _timer.Elapsed += async (_, _) =>
-        {
-            _remainingSeconds--;
-            if (_remainingSeconds <= 0)
-            {
-                _timer?.Stop();
-                await SubmitExamAsync();
-            }
-            await InvokeAsync(StateHasChanged);
-        };
+        _timer.Elapsed += async (_, _) => await OnTimerTickAsync();
         _timer.Start();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _selfRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("examTimer.register", _selfRef);
+        await JS.InvokeVoidAsync("examIntegrity.register", _selfRef);
+    }
+
+    // ---------- Señales de integridad ----------
+    //
+    // Las captura exam-integrity.js y se envían desde aquí, porque el JWT lo gestiona
+    // ApiService. Ninguna interrumpe la prueba ni muestra nada al candidato.
+
+    [JSInvokable]
+    public Task OnPageLeft()
+    {
+        if (_state != ExamState.InProgress || _awaySignalled) return Task.CompletedTask;
+        _awaySignalled = true;
+        return RecordSignalAsync(new IntegrityEventInputDto(
+            IntegrityEventType.PageLeft, CurrentQuestionId(), null, null));
+    }
+
+    [JSInvokable]
+    public Task OnPageReturned(int awaySeconds)
+    {
+        if (_state != ExamState.InProgress || !_awaySignalled) return Task.CompletedTask;
+        _awaySignalled = false;
+        return RecordSignalAsync(new IntegrityEventInputDto(
+            IntegrityEventType.PageReturned, CurrentQuestionId(), awaySeconds, null));
+    }
+
+    [JSInvokable]
+    public Task OnPaste(int questionId, int pastedChars)
+    {
+        if (_state != ExamState.InProgress) return Task.CompletedTask;
+        return RecordSignalAsync(new IntegrityEventInputDto(
+            IntegrityEventType.Paste, questionId, null, pastedChars));
+    }
+
+    private int? CurrentQuestionId()
+        => _sessionInfo is { } s && _currentQuestion < s.Questions.Count
+            ? s.Questions[_currentQuestion].QuestionId
+            : null;
+
+    private async Task RecordSignalAsync(IntegrityEventInputDto signal)
+    {
+        _pendingSignals.Enqueue(signal);
+        while (_pendingSignals.Count > MaxPendingSignals) _pendingSignals.Dequeue();
+
+        // Un solo envío a la vez, en orden: una salida pendiente tiene que llegar antes que
+        // su vuelta. La señal que llega mientras otro envío está en vuelo espera en la cola.
+        if (_flushingSignals) return;
+        _flushingSignals = true;
+        try
+        {
+            while (_pendingSignals.TryPeek(out var next))
+            {
+                if (!await Api.RecordIntegrityEventAsync(_sessionInfo!.SessionId, next)) break;
+                _pendingSignals.Dequeue();
+            }
+        }
+        finally
+        {
+            _flushingSignals = false;
+        }
+    }
+
+    /// <summary>
+    /// Fondo de la marca de agua: un SVG con el nombre y el correo, girado y repetido.
+    /// El texto se escapa para XML y la URL se codifica entera, así que un nombre con
+    /// comillas o signos no rompe el SVG ni el atributo style.
+    /// </summary>
+    private string WatermarkUrl()
+    {
+        var name = System.Security.SecurityElement.Escape(_sessionInfo?.CandidateName ?? string.Empty);
+        var email = System.Security.SecurityElement.Escape(_sessionInfo?.CandidateEmail ?? string.Empty);
+        var svg =
+            "<svg xmlns='http://www.w3.org/2000/svg' width='360' height='220'>" +
+            "<g transform='rotate(-30 180 110)' font-family='sans-serif' font-size='15' " +
+            "fill='rgba(0,0,0,0.09)' text-anchor='middle'>" +
+            $"<text x='180' y='104'>{name}</text>" +
+            $"<text x='180' y='126'>{email}</text>" +
+            "</g></svg>";
+        return "data:image/svg+xml," + Uri.EscapeDataString(svg);
+    }
+
+    /// <summary>
+    /// Lo llama el navegador cuando la ventana vuelve a estar a la vista. Recalcula el
+    /// tiempo sin esperar al temporizador, que el navegador pudo dejar parado.
+    /// </summary>
+    [JSInvokable]
+    public async Task RefreshTimer()
+    {
+        if (_state != ExamState.InProgress) return;
+        await OnTimerTickAsync();
+    }
+
+    private int ElapsedSeconds()
+    {
+        var byStopwatch = _clock?.Elapsed.TotalSeconds ?? 0;
+        var byWallClock = (DateTime.UtcNow - _startedAtUtc).TotalSeconds;
+        return (int)Math.Round(Math.Max(byStopwatch, byWallClock));
+    }
+
+    private async Task OnTimerTickAsync()
+    {
+        _remainingSeconds = Math.Max(0, _secondsAtStart - ElapsedSeconds());
+
+        if (_remainingSeconds == 0)
+        {
+            _timer?.Stop();
+            await SubmitExamAsync();
+            return;
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private void NextQuestion() { if (_currentQuestion < _sessionInfo!.Questions.Count - 1) _currentQuestion++; }
@@ -290,22 +507,72 @@ else if (_state == ExamState.Completed)
     private void UpdateOpenAnswer(int questionId, string? text)
     {
         var draft = GetDraft(questionId);
-        if (draft is not null) draft.OpenAnswer = text;
+        if (draft is null) return;
+        draft.OpenAnswer = text;
+        ScheduleAutoSave(questionId);
+    }
+
+    // Antes solo se guardaba al perder el foco: cerrar el navegador mientras se escribía,
+    // sin salir del campo, perdía la respuesta entera. Guardar en cada pulsación sería una
+    // llamada por carácter, así que el envío espera a que el candidato pare de teclear.
+    // El `@onblur` se conserva: cubre a quien escribe y salta de campo antes del retardo.
+    private void ScheduleAutoSave(int questionId)
+    {
+        CancelPendingAutoSave(questionId);
+
+        var cts = new CancellationTokenSource();
+        _autoSaveDelays[questionId] = cts;
+        _ = DelayThenAutoSaveAsync(questionId, cts.Token);
+    }
+
+    private async Task DelayThenAutoSaveAsync(int questionId, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(AutoSaveDelay, ct);
+            await AutoSave(questionId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Llegó otra pulsación antes de vencer el retardo. Guarda ella.
+        }
+    }
+
+    private void CancelPendingAutoSave(int questionId)
+    {
+        if (!_autoSaveDelays.Remove(questionId, out var pending)) return;
+        pending.Cancel();
+        pending.Dispose();
     }
 
     private async Task AutoSave(int questionId)
     {
+        CancelPendingAutoSave(questionId);
+
         var draft = GetDraft(questionId);
         if (draft is null) return;
+
+        // Un rechazo por plazo vencido no se trata aquí a propósito. `SaveAnswerAsync` no
+        // lanza ante un 409, y el borrador sigue en pantalla: el envío final puntúa con lo
+        // último que entró en plazo. Borrar el texto castigaría al candidato dos veces.
         await Api.SaveAnswerAsync(_sessionInfo!.SessionId, new SubmitAnswerDto(
             questionId, draft.SelectedAnswerId, draft.OpenAnswer));
     }
 
     private async Task SubmitExamAsync()
     {
+        // El temporizador puede llegar a cero con el envío manual todavía en vuelo. El
+        // servidor ya tolera el duplicado, pero la petición que no sale es mejor que la
+        // que se descarta.
+        if (_submitting) return;
+
         _showConfirm = false;
         _submitting = true;
         _timer?.Stop();
+
+        // Un retardo pendiente escribiría en una sesión ya cerrada. El cuerpo del envío
+        // lleva los borradores completos, así que no se pierde nada al cancelarlos.
+        foreach (var id in _autoSaveDelays.Keys.ToList()) CancelPendingAutoSave(id);
 
         var answers = _drafts.Select(d => new SubmitAnswerDto(
             d.QuestionId, d.SelectedAnswerId, d.OpenAnswer)).ToList();
@@ -331,7 +598,26 @@ else if (_state == ExamState.Completed)
         return "bg-primary";
     }
 
-    public void Dispose() { _timer?.Dispose(); }
+    public void Dispose()
+    {
+        _timer?.Stop();
+        _timer?.Dispose();
+        _clock?.Stop();
+
+        // No esperamos a que termine: Dispose no admite await.
+        _ = JS.InvokeVoidAsync("examTimer.unregister");
+        _ = JS.InvokeVoidAsync("examIntegrity.unregister");
+        _selfRef?.Dispose();
+
+        // Sin esto, salir de la página con un retardo en vuelo dejaría una llamada que
+        // escribe en una sesión que el candidato ya abandonó.
+        foreach (var pending in _autoSaveDelays.Values)
+        {
+            pending.Cancel();
+            pending.Dispose();
+        }
+        _autoSaveDelays.Clear();
+    }
 
     private class DraftAnswer
     {

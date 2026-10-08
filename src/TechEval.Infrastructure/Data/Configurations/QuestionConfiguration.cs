@@ -14,9 +14,6 @@ public class QuestionConfiguration : IEntityTypeConfiguration<Question>
         builder.Property(q => q.Type).IsRequired();
         builder.Property(q => q.Difficulty).IsRequired();
         builder.Property(q => q.Points).HasDefaultValue(1);
-        builder.Property(q => q.QuestionReviewStatus)
-            .IsRequired()
-            .HasDefaultValue(TechEval.Domain.Enums.QuestionReviewStatus.Approved);
 
         builder.HasOne(q => q.Category)
             .WithMany(c => c.Questions)
@@ -31,7 +28,6 @@ public class QuestionConfiguration : IEntityTypeConfiguration<Question>
         builder.HasIndex(q => q.CategoryId);
         builder.HasIndex(q => q.Difficulty);
         builder.HasIndex(q => q.IsActive);
-        builder.HasIndex(q => q.QuestionReviewStatus);
     }
 }
 
@@ -64,8 +60,28 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Username).HasMaxLength(200);
         builder.Property(u => u.Name).IsRequired().HasMaxLength(200);
         builder.Property(u => u.PasswordHash).IsRequired();
+        builder.Property(u => u.Role).IsRequired();
+        builder.Property(u => u.SecurityStamp).IsRequired();
         builder.HasIndex(u => u.Email).IsUnique();
         builder.HasIndex(u => u.Username).IsUnique().HasFilter("[Username] IS NOT NULL");
+        builder.ToTable(t => t.HasCheckConstraint("CK_Users_Role", "[Role] IN (1, 2, 3)"));
+    }
+}
+
+public class PasswordSetupTokenConfiguration : IEntityTypeConfiguration<PasswordSetupToken>
+{
+    public void Configure(EntityTypeBuilder<PasswordSetupToken> builder)
+    {
+        builder.ToTable("PasswordSetupTokens");
+        builder.HasKey(t => t.Id);
+        builder.Property(t => t.TokenHash).IsRequired().HasMaxLength(64).IsFixedLength();
+        builder.HasIndex(t => t.TokenHash).IsUnique();
+        builder.HasIndex(t => t.UserId);
+
+        builder.HasOne(t => t.User)
+            .WithMany()
+            .HasForeignKey(t => t.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -114,7 +130,7 @@ public class ExamTokenConfiguration : IEntityTypeConfiguration<ExamToken>
         builder.Property(t => t.CandidateEmail).IsRequired().HasMaxLength(200);
         builder.HasIndex(t => t.Token).IsUnique();
         builder.Ignore(t => t.IsExpired);
-        builder.Ignore(t => t.IsValid);
+        builder.Ignore(t => t.CanStart);
 
         builder.HasOne(t => t.Exam)
             .WithMany(e => e.ExamTokens)
@@ -150,6 +166,22 @@ public class ExamSessionConfiguration : IEntityTypeConfiguration<ExamSession>
             .WithOne(r => r.ExamSession)
             .HasForeignKey<ExamResult>(r => r.ExamSessionId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(s => s.IntegrityEvents)
+            .WithOne(e => e.ExamSession)
+            .HasForeignKey(e => e.ExamSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class ExamIntegrityEventConfiguration : IEntityTypeConfiguration<ExamIntegrityEvent>
+{
+    public void Configure(EntityTypeBuilder<ExamIntegrityEvent> builder)
+    {
+        builder.ToTable("ExamIntegrityEvents");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Type).IsRequired();
+        builder.HasIndex(e => e.ExamSessionId);
     }
 }
 
@@ -159,6 +191,12 @@ public class UserAnswerConfiguration : IEntityTypeConfiguration<UserAnswer>
     {
         builder.HasKey(a => a.Id);
         builder.Property(a => a.OpenAnswer).HasMaxLength(4000);
+        builder.Property(a => a.ReviewerComment).HasMaxLength(2000);
+
+        // Mismas longitudes que sus originales: Question.Text y Answer.Text.
+        builder.Property(a => a.QuestionTextSnapshot).HasMaxLength(2000);
+        builder.Property(a => a.SelectedAnswerTextSnapshot).HasMaxLength(1000);
+        builder.Property(a => a.CorrectAnswerTextSnapshot).HasMaxLength(1000);
 
         builder.HasOne(a => a.Question)
             .WithMany()
@@ -181,6 +219,9 @@ public class ExamResultConfiguration : IEntityTypeConfiguration<ExamResult>
         builder.Property(r => r.CandidateName).IsRequired().HasMaxLength(200);
         builder.Property(r => r.CandidateEmail).IsRequired().HasMaxLength(200);
         builder.Property(r => r.ScorePercentage).HasPrecision(5, 2);
+        builder.Property(r => r.Status)
+            .IsRequired()
+            .HasDefaultValue(TechEval.Domain.Enums.ExamResultStatus.Reviewed);
 
         builder.HasOne(r => r.Exam)
             .WithMany()
@@ -193,56 +234,51 @@ public class ExamResultConfiguration : IEntityTypeConfiguration<ExamResult>
             .OnDelete(DeleteBehavior.SetNull)
             .IsRequired(false);
 
+        builder.HasOne(r => r.ReviewedByUser)
+            .WithMany()
+            .HasForeignKey(r => r.ReviewedByUserId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
         builder.HasIndex(r => r.CandidateEmail);
         builder.HasIndex(r => r.ExamId);
         builder.HasIndex(r => r.CompletedAt);
         builder.HasIndex(r => r.UserId);
+        builder.HasIndex(r => r.ReviewedByUserId);
+        builder.HasIndex(r => r.Status);
+
+        builder.HasOne(r => r.ReservedByUser)
+            .WithMany()
+            .HasForeignKey(r => r.ReservedByUserId)
+            .OnDelete(DeleteBehavior.NoAction)
+            .IsRequired(false);
+        builder.HasIndex(r => r.ReservedByUserId);
     }
 }
 
-public class QuestionGenerationJobConfiguration : IEntityTypeConfiguration<QuestionGenerationJob>
+public class ExamEvaluatorConfiguration : IEntityTypeConfiguration<ExamEvaluator>
 {
-    public void Configure(EntityTypeBuilder<QuestionGenerationJob> builder)
+    public void Configure(EntityTypeBuilder<ExamEvaluator> builder)
     {
-        builder.HasKey(j => j.Id);
-        builder.Property(j => j.Topic).IsRequired().HasMaxLength(500);
-        builder.Property(j => j.Difficulty).IsRequired();
-        builder.Property(j => j.Type).IsRequired();
-        builder.Property(j => j.Status).IsRequired();
+        builder.ToTable("ExamEvaluators");
+        builder.HasKey(e => new { e.ExamId, e.UserId });
+        builder.HasIndex(e => e.UserId);
 
-        builder.HasOne(j => j.Category)
+        // Cascada solo desde la prueba. Los usuarios no se borran, se desactivan; y dos
+        // caminos de cascada hasta la misma tabla son algo que SQL Server rechaza.
+        builder.HasOne(e => e.Exam)
             .WithMany()
-            .HasForeignKey(j => j.CategoryId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasOne(j => j.CreatedByUser)
-            .WithMany()
-            .HasForeignKey(j => j.CreatedByUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasIndex(j => j.Status);
-    }
-}
-
-public class QuestionGenerationJobItemConfiguration : IEntityTypeConfiguration<QuestionGenerationJobItem>
-{
-    public void Configure(EntityTypeBuilder<QuestionGenerationJobItem> builder)
-    {
-        builder.HasKey(i => i.Id);
-        builder.Property(i => i.Status).IsRequired();
-        builder.Property(i => i.ErrorMessage).HasMaxLength(2000);
-
-        builder.HasOne(i => i.Job)
-            .WithMany(j => j.Items)
-            .HasForeignKey(i => i.JobId)
+            .HasForeignKey(e => e.ExamId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasOne(i => i.Question)
+        builder.HasOne(e => e.User)
             .WithMany()
-            .HasForeignKey(i => i.QuestionId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .HasForeignKey(e => e.UserId)
+            .OnDelete(DeleteBehavior.NoAction);
 
-        builder.HasIndex(i => i.Status);
-        builder.HasIndex(i => i.JobId);
+        builder.HasOne<User>()
+            .WithMany()
+            .HasForeignKey(e => e.AssignedByUserId)
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }

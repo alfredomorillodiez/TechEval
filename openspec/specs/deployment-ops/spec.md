@@ -2,9 +2,13 @@
 
 ## Purpose
 TBD - created by archiving change deployment-ops. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Levantamiento del stack completo con Docker Compose
 El sistema SHALL permitir levantar la plataforma completa (base de datos, API y frontend) con un único comando de Docker Compose, garantizando que cada servicio solo arranque cuando sus dependencias estén realmente disponibles.
+
+La comprobación de salud de la base de datos SHALL invocar una herramienta que exista en la imagen que se usa. Una comprobación que invoque una ruta inexistente falla siempre, y con `condition: service_healthy` eso no retrasa el arranque de la API: lo impide para siempre.
 
 #### Scenario: Arranque en modo producción
 - **GIVEN** el fichero `docker-compose.yml` del repositorio
@@ -16,6 +20,12 @@ El sistema SHALL permitir levantar la plataforma completa (base de datos, API y 
 - **GIVEN** el servicio `sqlserver` con un `healthcheck` basado en `sqlcmd -Q 'SELECT 1'`
 - **WHEN** se levanta el stack con `docker-compose up`
 - **THEN** el servicio `api` SHALL permanecer sin arrancar hasta que la condición `service_healthy` de `sqlserver` se cumpla
+
+#### Scenario: La comprobación de salud llega a pasar
+- **GIVEN** la imagen de SQL Server que declara `docker-compose.yml`
+- **WHEN** el contenedor termina de arrancar
+- **THEN** la comprobación de salud SHALL pasar a `healthy`, de forma que `api` arranque
+- **AND** la comprobación SHALL invocar la ruta de `sqlcmd` que existe en esa imagen
 
 ### Requirement: Perfil de desarrollo incluye MailHog para captura local de correos
 El sistema SHALL ofrecer un perfil `dev` de Docker Compose que añade un servidor SMTP de pruebas, de forma que los correos que envía la API (invitaciones a examen, notificaciones) puedan revisarse sin depender de un proveedor externo como SendGrid.
@@ -85,3 +95,176 @@ El sistema SHALL ofrecer `scripts/seed_questions_examen.sql` para poblar `TechEv
 - **WHEN** se ejecuta `scripts/seed_questions_examen.sql`
 - **THEN** el sistema SHALL añadir los `DEFAULT CONSTRAINT` faltantes en `Categories.CreatedAt`, `Categories.IsActive`, `Questions.CreatedAt` y `Questions.IsActive` únicamente si no existen ya, sin fallar ni duplicar restricciones
 
+### Requirement: Script SQL aditivo añade las columnas de corrección manual sin pérdida de datos
+El sistema SHALL ofrecer `scripts/add_review_columns.sql` para actualizar el esquema de una base de datos `TechEvalDb` ya existente con las columnas necesarias para la corrección manual (`ExamResults.Status`, `ExamResults.ReviewedAt`, `ExamResults.ReviewedByUserId`, `UserAnswers.AwardedPoints`, `UserAnswers.ReviewerComment`), siguiendo el patrón idempotente y no destructivo ya establecido en `scripts/add_user_link_columns.sql`. El script SHALL poder ejecutarse varias veces sin error y SHALL preservar todos los datos existentes.
+
+#### Scenario: Ejecución sobre una base de datos con datos previos
+- **GIVEN** una base de datos `TechEvalDb` con exámenes, preguntas y resultados ya registrados
+- **WHEN** se ejecuta `scripts/add_review_columns.sql`
+- **THEN** el sistema SHALL añadir las columnas nuevas comprobando antes su existencia con `COL_LENGTH`, sin eliminar ni modificar ninguna fila existente
+
+#### Scenario: Reejecución idempotente del script
+- **GIVEN** una base de datos en la que el script ya se ejecutó con éxito
+- **WHEN** se vuelve a ejecutar `scripts/add_review_columns.sql`
+- **THEN** el sistema SHALL detectar que las columnas, la clave foránea y los índices ya existen y SHALL terminar sin error ni duplicados
+
+#### Scenario: Retrocompatibilidad de los resultados históricos
+- **GIVEN** resultados creados antes de este cambio, con la corrección ya cerrada de hecho
+- **WHEN** se ejecuta el script de actualización
+- **THEN** el sistema SHALL asignarles `Status = Reviewed` como valor por defecto, de modo que no aparezcan en la cola de correcciones pendientes ni alteren las métricas del dashboard
+
+#### Scenario: Clave foránea del corrector
+- **WHEN** el script añade la columna `ExamResults.ReviewedByUserId`
+- **THEN** el sistema SHALL crearla como `INT NULL` con una clave foránea hacia `dbo.Users(Id)` y un índice asociado, comprobando antes que no existan ya, en coherencia con el tratamiento de `ExamResults.UserId`
+
+### Requirement: Los secretos llegan por configuración, no por el repositorio
+El repositorio NEVER SHALL contener el valor de un secreto de producción: contraseñas de base de datos, claves de firma, contraseñas de cuenta ni credenciales de servicios externos. Los ficheros versionados SHALL declarar el **nombre** de cada secreto y dejar su valor vacío o expresado como una variable de entorno sin valor por defecto.
+
+El sistema MUST negarse a arrancar fuera del entorno de desarrollo si falta cualquier secreto obligatorio, o si alguno conserva el valor documentado para desarrollo. Un despliegue mal configurado SHALL parar en seco con un mensaje que nombre lo que falta, y NEVER SHALL arrancar con un valor por defecto conocido.
+
+Los valores de desarrollo MAY estar versionados en el fichero de configuración de desarrollo, porque son públicos por definición y el arranque en producción los rechaza explícitamente.
+
+#### Scenario: Arranque en producción sin la clave de firma
+- **GIVEN** un despliegue con el entorno distinto de desarrollo y sin valor para la clave JWT
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST detener el arranque con un error que nombre la clave que falta
+- **AND** el sistema SHALL NOT generar ni asumir ninguna clave
+
+#### Scenario: Arranque en producción con el valor de desarrollo
+- **GIVEN** un despliegue con el entorno distinto de desarrollo y una clave JWT igual a la documentada para desarrollo
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST detener el arranque, porque un valor público no sirve como secreto
+
+#### Scenario: Arranque en producción sin contraseña de administrador
+- **GIVEN** un despliegue con el entorno distinto de desarrollo y sin valor para la contraseña del administrador
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST detener el arranque
+- **AND** el sistema SHALL NOT sembrar el administrador con ninguna contraseña por defecto
+
+#### Scenario: Arranque en desarrollo
+- **GIVEN** el entorno de desarrollo y los valores documentados en su fichero de configuración
+- **WHEN** la aplicación arranca
+- **THEN** el sistema MUST arrancar con normalidad, sin exigir variables de entorno adicionales
+
+#### Scenario: Arranque del stack con variables sin definir
+- **GIVEN** una máquina sin las variables de entorno que declara `docker-compose.yml`
+- **WHEN** se levanta el stack
+- **THEN** Compose MUST fallar nombrando la variable que falta, en lugar de sustituirla por una cadena vacía
+
+#### Scenario: El fichero de configuración local no viaja en el repositorio
+- **WHEN** se inspecciona el contenido versionado del repositorio
+- **THEN** el fichero de configuración local del desarrollador SHALL NOT estar entre los ficheros seguidos por git
+
+### Requirement: Herramienta de rotación de secretos
+El repositorio SHALL incluir un guion que genere valores nuevos para los secretos del despliegue y los escriba en el fichero de entorno local.
+
+El guion SHALL generarlos en la máquina de quien lo ejecuta. NEVER SHALL enviarlos a ningún servicio, NEVER SHALL escribirlos en la salida estándar y NEVER SHALL dejarlos en un fichero versionado.
+
+El guion SHALL NOT rotar por sí solo: cambiar la contraseña de la base de datos en el servidor, revocar la credencial del proveedor de correo y reasignar la del administrador son pasos que exigen acceso a esos sistemas. El repositorio SHALL documentarlos como lista de comprobación.
+
+#### Scenario: Generación de valores nuevos
+- **WHEN** una persona ejecuta el guion de rotación
+- **THEN** el guion SHALL escribir un fichero de entorno con valores generados al azar
+- **AND** SHALL NOT mostrar ninguno de esos valores por pantalla
+
+#### Scenario: No se sobrescribe lo que ya existe sin avisar
+- **GIVEN** un fichero de entorno ya presente
+- **WHEN** se ejecuta el guion
+- **THEN** el guion SHALL detenerse o guardar una copia del anterior, en lugar de perder valores que pueden estar en uso
+
+#### Scenario: Lo que el guion no puede hacer queda escrito
+- **WHEN** alguien consulta la documentación de la rotación
+- **THEN** SHALL encontrar la lista de pasos manuales, con el aviso de que rotar la clave de firma cierra todas las sesiones abiertas, incluidos los exámenes en curso
+
+### Requirement: El guion de creación completa refleja el modelo
+El sistema SHALL mantener `scripts/create_database.sql` alineado con el modelo de datos: toda entidad del modelo SHALL tener su tabla en el guion, y toda propiedad persistida SHALL tener su columna. Una base creada desde cero con ese guion y otra actualizada con los guiones aditivos SHALL converger en el mismo esquema.
+
+El proyecto SHALL incluir una prueba que compare el modelo con el guion y falle cuando dejen de coincidir. La prueba SHALL entenderse como una red contra el olvido, no como una validación del esquema: comprueba nombres, no tipos ni longitudes ni claves foráneas.
+
+#### Scenario: Creación desde cero sin necesidad de guiones aditivos
+- **WHEN** se ejecuta `scripts/create_database.sql` sobre un servidor sin la base de datos
+- **THEN** todas las tablas SHALL crearse ya con todas las columnas que el modelo persiste, sin necesidad de ejecutar después ningún guion aditivo
+
+#### Scenario: Una columna nueva sin llevar al guion rompe la prueba
+- **GIVEN** una propiedad persistida añadida al modelo
+- **WHEN** no se añade la columna correspondiente a `scripts/create_database.sql`
+- **THEN** la prueba de alineación SHALL fallar nombrando la columna que falta
+
+#### Scenario: Una entidad nueva sin llevar al guion rompe la prueba
+- **GIVEN** una entidad añadida al modelo
+- **WHEN** no se añade su `CREATE TABLE` a `scripts/create_database.sql`
+- **THEN** la prueba de alineación SHALL fallar nombrando la tabla que falta
+
+### Requirement: El esquema lo crean los guiones, no la aplicación
+La aplicación SHALL NOT crear el esquema al arrancar. `scripts/create_database.sql` SHALL ser la única forma de crearlo, y los guiones aditivos la única forma de actualizarlo.
+
+Si al arrancar el esquema no existe, el sistema SHALL detenerse con un mensaje que nombre el guion que hay que ejecutar, en lugar de crearlo por su cuenta o de fallar con un error de base de datos que no explique nada.
+
+La documentación SHALL NOT proponer `dotnet ef database update` como alternativa: crear el esquema desde el modelo impide que las migraciones de EF funcionen después, porque su tabla de historial no llega a existir.
+
+#### Scenario: Arranque contra una base sin esquema
+- **GIVEN** una base de datos alcanzable pero sin las tablas de la aplicación
+- **WHEN** la API arranca
+- **THEN** el sistema MUST detener el arranque con un mensaje que nombre `scripts/create_database.sql`
+- **AND** el sistema SHALL NOT crear ninguna tabla
+
+#### Scenario: Arranque contra una base con esquema
+- **GIVEN** una base de datos creada con el guion
+- **WHEN** la API arranca
+- **THEN** el sistema SHALL continuar con normalidad y sembrar lo que corresponda
+
+### Requirement: El contenido de ejemplo solo se siembra en desarrollo
+El sistema SHALL sembrar el usuario administrador en cualquier entorno, porque sin él no hay forma de entrar. El contenido de ejemplo —categorías y preguntas de muestra— SHALL sembrarse únicamente en desarrollo.
+
+#### Scenario: Primer arranque de un despliegue de cliente
+- **GIVEN** un despliegue con el entorno distinto de desarrollo y una base de datos vacía de contenido
+- **WHEN** la API arranca
+- **THEN** el sistema SHALL crear el administrador
+- **AND** el sistema SHALL NOT crear categorías ni preguntas de ejemplo, de forma que el banco de preguntas del cliente empiece vacío
+
+#### Scenario: Primer arranque en desarrollo
+- **GIVEN** el entorno de desarrollo y una base de datos vacía de contenido
+- **WHEN** la API arranca
+- **THEN** el sistema SHALL crear el administrador, las categorías y las preguntas de ejemplo, para que la aplicación sea utilizable sin preparar datos a mano
+
+### Requirement: Guion aditivo de roles de usuario
+El sistema SHALL ofrecer `scripts/add_user_roles.sql` para actualizar una base `TechEvalDb` ya existente con el rol de usuario, el sello de seguridad y la tabla de enlaces para fijar la contraseña. El guion SHALL rellenar el rol de cada usuario existente a partir de `IsAdmin`: `Admin` si valía `1` y `Alumno` si valía `0`. Después de rellenar el rol, el guion SHALL quitar la columna `IsAdmin`, para que el rol tenga una sola fuente. El guion SHALL ser idempotente y SHALL conservar todas las filas existentes.
+
+#### Scenario: Ejecución sobre una base con usuarios previos
+- **GIVEN** una base con un administrador (`IsAdmin = 1`) y tres alumnos (`IsAdmin = 0`)
+- **WHEN** se ejecuta `scripts/add_user_roles.sql`
+- **THEN** el administrador queda con el rol `Admin`, los tres alumnos quedan con el rol `Alumno`, cada usuario tiene un sello de seguridad propio y la columna `IsAdmin` ya no existe
+- **AND** ninguna fila de `Users` ni de otra tabla se pierde
+
+#### Scenario: Reejecución idempotente
+- **GIVEN** una base en la que el guion ya se ejecutó con éxito
+- **WHEN** se vuelve a ejecutar `scripts/add_user_roles.sql`
+- **THEN** el guion termina sin error, sin duplicar objetos y sin cambiar ningún rol
+
+#### Scenario: Convergencia con la creación completa
+- **WHEN** se compara una base actualizada con este guion y otra creada desde cero con `scripts/create_database.sql`
+- **THEN** las dos tienen las mismas columnas en `Users` y la misma tabla de enlaces para fijar la contraseña
+
+### Requirement: El despliegue del rol no deja pruebas a medias
+La documentación de despliegue SHALL advertir que, tras desplegar este cambio, los tokens emitidos por la versión anterior dejan de valer. Un candidato con una prueba abierta perdería el guardado de sus respuestas hasta volver a abrir su enlace. La documentación SHALL indicar cómo comprobar, antes de desplegar, que no hay sesiones de examen en curso.
+
+#### Scenario: Comprobación previa al despliegue
+- **WHEN** un operador prepara el despliegue de este cambio
+- **THEN** la documentación le da una consulta que cuenta las sesiones de examen en curso y le indica que despliegue cuando el recuento es cero
+
+### Requirement: Guion aditivo de evaluadores y reservas
+El sistema SHALL ofrecer `scripts/add_evaluator_columns.sql` para actualizar una base `TechEvalDb` ya existente con la tabla de asignaciones de evaluadores y las columnas de la reserva de un resultado. El guion SHALL ser idempotente, SHALL conservar todas las filas existentes y SHALL dejar todos los resultados existentes sin reserva. A diferencia de `add_user_roles.sql`, este guion no retira ninguna columna, así que el binario anterior sigue funcionando contra la base actualizada.
+
+#### Scenario: Ejecución sobre una base con resultados previos
+- **GIVEN** una base con resultados pendientes y corregidos
+- **WHEN** se ejecuta `scripts/add_evaluator_columns.sql`
+- **THEN** la base tiene la tabla de asignaciones vacía y las columnas de la reserva a nulo en todos los resultados, sin perder ninguna fila
+
+#### Scenario: Reejecución idempotente
+- **GIVEN** una base en la que el guion ya se ejecutó
+- **WHEN** se vuelve a ejecutar
+- **THEN** el guion termina sin error y sin duplicar objetos
+
+#### Scenario: Convergencia con la creación completa
+- **WHEN** se compara una base actualizada con este guion y otra creada con `scripts/create_database.sql`
+- **THEN** las dos tienen la misma tabla de asignaciones y las mismas columnas en `ExamResults`

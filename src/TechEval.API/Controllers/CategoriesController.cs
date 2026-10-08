@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
@@ -7,7 +8,7 @@ namespace TechEval.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Admin")]
+[Authorize(Policy = Policies.Gestion)]
 public class CategoriesController : ControllerBase
 {
     private readonly ICategoryService _service;

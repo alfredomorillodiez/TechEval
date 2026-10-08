@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.Services;
 
@@ -8,7 +9,7 @@ namespace TechEval.API.Controllers;
 /// <summary>Portal del alumno: sus propias pruebas pendientes y realizadas</summary>
 [ApiController]
 [Route("api/student")]
-[Authorize(Roles = "Alumno")]
+[Authorize(Policy = Policies.Alumno)]
 public class StudentPortalController : ControllerBase
 {
     private readonly IStudentPortalService _service;

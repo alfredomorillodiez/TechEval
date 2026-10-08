@@ -2,17 +2,25 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
-using TechEval.API.BackgroundServices;
+using TechEval.API;
+using TechEval.API.Authorization;
 using TechEval.API.Middleware;
 using TechEval.Application.Services;
 using TechEval.Infrastructure;
 using TechEval.Infrastructure.Data;
+using TechEval.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
+// Antes que nada: un despliegue sin secretos para aquí, en vez de arrancar con los valores
+// de desarrollo, que están publicados en el repositorio.
+if (!builder.Environment.IsDevelopment())
+    StartupSecrets.Validate(builder.Configuration);
 
 // Serilog
 Log.Logger = new LoggerConfiguration()
@@ -37,8 +45,13 @@ builder.Services.AddScoped<IExamService, ExamService>();
 builder.Services.AddScoped<IExamTokenService, ExamTokenService>();
 builder.Services.AddScoped<IResultService, ResultService>();
 builder.Services.AddScoped<IStudentPortalService, StudentPortalService>();
-builder.Services.AddScoped<IQuestionGenerationService, QuestionGenerationService>();
-builder.Services.AddHostedService<QuestionGenerationWorker>();
+builder.Services.AddScoped<IOpenQuestionReviewService, OpenQuestionReviewService>();
+builder.Services.AddScoped<IExamIntegrityService, ExamIntegrityService>();
+builder.Services.AddScoped<PasswordSetupService>();
+builder.Services.AddScoped<IPasswordSetupService>(sp => sp.GetRequiredService<PasswordSetupService>());
+builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+builder.Services.AddScoped<IExamEvaluatorService, ExamEvaluatorService>();
+builder.Services.AddScoped<IEvaluationService, EvaluationService>();
 
 // JWT Auth
 var jwtKey = builder.Configuration["Jwt:SecretKey"]!;
@@ -56,9 +69,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero
         };
+
+        // La firma y la caducidad no bastan: un token de una cuenta desactivada o con el rol
+        // cambiado seguiría valiendo hasta caducar. El sello lo revoca en la siguiente petición.
+        o.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var validator = context.HttpContext.RequestServices
+                    .GetRequiredService<SecurityStampValidator>();
+                if (!await validator.IsValidAsync(context.Principal!, context.HttpContext.RequestAborted))
+                    context.Fail("El token ya no corresponde al estado de la cuenta.");
+            }
+        };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddTechEvalAuthorization();
 
 // CORS para Blazor
 builder.Services.AddCors(o => o.AddPolicy("BlazorPolicy", p =>
@@ -74,6 +100,20 @@ builder.Services.AddCors(o => o.AddPolicy("BlazorPolicy", p =>
 }));
 
 // Swagger
+builder.Services.AddTechEvalRateLimiting();
+
+// Detrás de un proxy inverso, todas las peticiones llegan con la dirección del proxy y el
+// cupo se comparte entre todos los candidatos. Con la lista de proxies de confianza vacía
+// —el valor por defecto— la cabecera se ignora, que es lo correcto sin proxy delante:
+// confiar en `X-Forwarded-For` de cualquiera permite inventarse el origen y saltarse el
+// límite. Ver el apartado del README sobre el despliegue detrás de un proxy.
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownProxies.Clear();
+    o.KnownNetworks.Clear();
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -118,8 +158,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "TechEval API v1"));
 }
 
+app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 app.UseCors("BlazorPolicy");
+
+// Antes de la autenticación: el rechazo por ritmo no debe costar ni una verificación de
+// contraseña, que es justo el gasto del que protege.
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
@@ -128,10 +174,18 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var adminHash = Convert.ToHexString(
-        SHA256.HashData(Encoding.UTF8.GetBytes(
-            builder.Configuration["AdminPassword"] ?? "Admin@123!"))).ToLower();
-    await DbSeeder.SeedAsync(context, adminHash);
+    // Sin valor por defecto: fuera de desarrollo, StartupSecrets ya paró el arranque si
+    // falta. En desarrollo lo trae appsettings.Development.json.
+    var adminPassword = builder.Configuration["AdminPassword"]
+        ?? throw new InvalidOperationException(
+            "Falta `AdminPassword`. Sin ella no se puede sembrar el administrador.");
+
+    // El contenido de ejemplo solo en desarrollo: en un despliegue de cliente esas cinco
+    // categorías y tres preguntas entran en su banco real y cuesta distinguirlas.
+    await DbSeeder.SeedAsync(
+        context,
+        PasswordHasher.Hash(adminPassword),
+        seedSampleContent: app.Environment.IsDevelopment());
 }
 
 app.Run();

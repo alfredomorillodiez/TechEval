@@ -1,4 +1,5 @@
 @page "/admin/results/{Id:int}"
+@using TechEval.Domain.Enums
 @using TechEval.Application.DTOs
 @inject ApiService Api
 @inject NavigationManager Nav
@@ -38,17 +39,33 @@
                     </div>
                     <div class="col-md-2">
                         <p class="text-muted small mb-1">Puntuación</p>
-                        <p class="fw-semibold mb-0">@_result.ObtainedPoints / @_result.TotalPoints pts</p>
-                        <div class="progress mt-1" style="height:5px;">
-                            <div class="progress-bar @(_result.Passed ? "bg-success" : "bg-danger")"
-                                 style="width:@_result.ScorePercentage%"></div>
-                        </div>
-                        <p class="small mt-1 mb-0">@_result.ScorePercentage%</p>
+                        @if (_result.Status == ExamResultStatus.PendingReview)
+                        {
+                            <p class="fw-semibold mb-0 text-muted">Sin corregir</p>
+                        }
+                        else
+                        {
+                            <p class="fw-semibold mb-0">@_result.ObtainedPoints / @_result.TotalPoints pts</p>
+                            <div class="progress mt-1" style="height:5px;">
+                                <div class="progress-bar @(_result.Passed == true ? "bg-success" : "bg-danger")"
+                                     style="width:@_result.ScorePercentage%"></div>
+                            </div>
+                            <p class="small mt-1 mb-0">@_result.ScorePercentage%</p>
+                        }
                     </div>
                     <div class="col-md-2 text-center">
-                        <span class="badge @(_result.Passed ? "bg-success" : "bg-danger") fs-6 px-3 py-2">
-                            @(_result.Passed ? "Aprobado" : "Reprobado")
-                        </span>
+                        @if (_result.Status == ExamResultStatus.PendingReview)
+                        {
+                            <a href="/admin/results/pending" class="badge bg-secondary fs-6 px-3 py-2 text-decoration-none">
+                                <i class="bi bi-hourglass-split me-1"></i> Pendiente de corrección
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="badge @(_result.Passed == true ? "bg-success" : "bg-danger") fs-6 px-3 py-2">
+                                @(_result.Passed == true ? "Aprobado" : "Reprobado")
+                            </span>
+                        }
                     </div>
                     <div class="col-md-1 text-end">
                         <p class="text-muted small mb-1">Fecha</p>
@@ -56,8 +73,21 @@
                         <p class="small mb-0">@_result.CompletedAt.ToLocalTime().ToString("HH:mm")</p>
                     </div>
                 </div>
+                @if (_result.ReviewedByName is not null)
+                {
+                    <p class="small text-muted mt-3 mb-0">
+                        <i class="bi bi-person-check me-1"></i>
+                        Corregido por <strong>@_result.ReviewedByName</strong>
+                        @if (_result.ReviewedAt is DateTime at)
+                        {
+                            @: el @at.ToLocalTime().ToString("dd/MM/yyyy 'a las' HH:mm")
+                        }
+                    </p>
+                }
             </div>
         </div>
+
+        <IntegrityPanel Report="_integrity" />
 
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-0 pt-3">
@@ -73,7 +103,16 @@
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <p class="fw-semibold mb-0 flex-grow-1 me-3">@answer.QuestionText</p>
                                     <div class="d-flex align-items-center gap-2 flex-shrink-0">
-                                        <span class="badge bg-primary">@answer.Points pt@(answer.Points != 1 ? "s" : "")</span>
+                                        @if (answer.AwardedPoints.HasValue)
+                                        {
+                                            <span class="badge bg-primary">
+                                                @answer.AwardedPoints / @answer.Points pt@(answer.Points != 1 ? "s" : "")
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-primary">@answer.Points pt@(answer.Points != 1 ? "s" : "")</span>
+                                        }
                                         @if (answer.IsCorrect.HasValue)
                                         {
                                             <span class="badge @(answer.IsCorrect.Value ? "bg-success" : "bg-danger")">
@@ -83,40 +122,85 @@
                                         }
                                         else
                                         {
-                                            <span class="badge bg-secondary">Revisión manual</span>
+                                            <span class="badge bg-secondary">Pendiente de corrección</span>
                                         }
                                     </div>
                                 </div>
 
-                                <div class="row g-2 mt-1">
-                                    <div class="col-md-6">
-                                        <p class="text-muted small mb-1">Respuesta del candidato</p>
-                                        <div class="px-3 py-2 rounded border @(answer.IsCorrect == true ? "border-success bg-white" : answer.IsCorrect == false ? "border-danger bg-white" : "bg-light")">
-                                            @if (!string.IsNullOrEmpty(answer.SelectedAnswerText))
-                                            {
-                                                <span>@answer.SelectedAnswerText</span>
-                                            }
-                                            else if (!string.IsNullOrEmpty(answer.OpenAnswer))
-                                            {
-                                                <span class="fst-italic">@answer.OpenAnswer</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="text-muted fst-italic">Sin respuesta</span>
-                                            }
-                                        </div>
-                                    </div>
-                                    @if (!string.IsNullOrEmpty(answer.CorrectAnswerText))
+                                @if (answer.Options is not null)
+                                {
+                                    @if (!answer.Options.Any(o => o.IsSelected))
                                     {
-                                        <div class="col-md-6">
-                                            <p class="text-muted small mb-1">Respuesta correcta</p>
-                                            <div class="px-3 py-2 rounded border border-success bg-success bg-opacity-10">
-                                                <i class="bi bi-check-circle-fill text-success me-1"></i>
-                                                @answer.CorrectAnswerText
-                                            </div>
-                                        </div>
+                                        <p class="text-muted small fst-italic mb-2">Sin respuesta</p>
                                     }
-                                </div>
+                                    <div class="d-flex flex-column gap-2 mt-1">
+                                        @foreach (var option in answer.Options)
+                                        {
+                                            <div class="d-flex align-items-center gap-2 px-3 py-2 rounded border @OptionClass(option)">
+                                                <i class="bi @OptionIcon(option) flex-shrink-0"></i>
+                                                <span class="flex-grow-1">@option.Text</span>
+                                                @if (option.IsSelected)
+                                                {
+                                                    <span class="badge @(option.IsCorrect ? "bg-success" : "bg-danger")">Marcada</span>
+                                                }
+                                                @if (option.IsCorrect)
+                                                {
+                                                    <span class="badge bg-success">Correcta</span>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    @if (answer.CorrectAnswerText is not null)
+                                    {
+                                        <p class="text-muted small mb-2">
+                                            <i class="bi bi-info-circle me-1"></i>
+                                            La pregunta se editó después del examen. Se muestra solo lo que consta del envío.
+                                        </p>
+                                    }
+                                    <div class="row g-2 mt-1">
+                                        <div class="col-md-6">
+                                            <p class="text-muted small mb-1">Respuesta del candidato</p>
+                                            <div class="px-3 py-2 rounded border @(answer.IsCorrect == true ? "border-success bg-white" : answer.IsCorrect == false ? "border-danger bg-white" : "bg-light")">
+                                                @if (!string.IsNullOrEmpty(answer.SelectedAnswerText))
+                                                {
+                                                    <span>@answer.SelectedAnswerText</span>
+                                                }
+                                                else if (!string.IsNullOrEmpty(answer.OpenAnswer))
+                                                {
+                                                    <span class="fst-italic">@answer.OpenAnswer</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted fst-italic">Sin respuesta</span>
+                                                }
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(answer.ReviewerComment))
+                                            {
+                                                <div class="mt-2">
+                                                    <p class="text-muted small mb-1">
+                                                        <i class="bi bi-chat-left-text me-1"></i> Comentario del corrector
+                                                    </p>
+                                                    <div class="px-3 py-2 rounded border bg-white small">
+                                                        @answer.ReviewerComment
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(answer.CorrectAnswerText))
+                                        {
+                                            <div class="col-md-6">
+                                                <p class="text-muted small mb-1">Respuesta correcta</p>
+                                                <div class="px-3 py-2 rounded border border-success bg-success bg-opacity-10">
+                                                    <i class="bi bi-check-circle-fill text-success me-1"></i>
+                                                    @answer.CorrectAnswerText
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
                             </div>
                         </div>
                     </div>
@@ -130,13 +214,31 @@
     [Parameter] public int Id { get; set; }
 
     private ExamResultDto? _result;
+    private IntegrityReportDto? _integrity;
     private bool _loading = true;
 
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
-        _result = await Api.GetResultDetailAsync(Id);
+        if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
+        var result = Api.GetResultDetailAsync(Id);
+        var integrity = Api.GetIntegrityReportAsync(Id);
+        _result = await result;
+        _integrity = await integrity;
         _loading = false;
     }
+
+    private static string OptionClass(ResultOptionDto option) => option switch
+    {
+        { IsCorrect: true } => "border-success bg-success bg-opacity-10",
+        { IsSelected: true } => "border-danger bg-danger bg-opacity-10",
+        _ => "bg-white"
+    };
+
+    private static string OptionIcon(ResultOptionDto option) => option switch
+    {
+        { IsCorrect: true } => "bi-check-circle-fill text-success",
+        { IsSelected: true } => "bi-x-circle-fill text-danger",
+        _ => "bi-circle text-muted"
+    };
 }

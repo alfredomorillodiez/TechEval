@@ -72,28 +72,6 @@ public class ApiService
     public Task<bool> DeleteQuestionAsync(int id)
         => DeleteAsync($"api/questions/{id}");
 
-    // Question generation (IA)
-    public Task<QuestionGenerationJobDto?> GenerateQuestionsAsync(CreateQuestionGenerationJobDto dto)
-        => PostAsync<CreateQuestionGenerationJobDto, QuestionGenerationJobDto>("api/question-generation/jobs", dto);
-
-    public Task<List<QuestionGenerationJobItemDto>?> GetPendingReviewItemsAsync()
-        => GetAsync<List<QuestionGenerationJobItemDto>>("api/question-generation/pending-items");
-
-    public Task<List<QuestionGenerationJobProgressDto>?> GetActiveGenerationProgressAsync()
-        => GetAsync<List<QuestionGenerationJobProgressDto>>("api/question-generation/jobs/progress");
-
-    public async Task<bool> ApproveQuestionAsync(int itemId)
-    {
-        var response = await _http.PostAsync($"api/question-generation/items/{itemId}/approve", null);
-        return response.IsSuccessStatusCode;
-    }
-
-    public async Task<bool> RejectQuestionAsync(int itemId)
-    {
-        var response = await _http.PostAsync($"api/question-generation/items/{itemId}/reject", null);
-        return response.IsSuccessStatusCode;
-    }
-
     // Exams
     public Task<List<ExamSummaryDto>?> GetExamsAsync()
         => GetAsync<List<ExamSummaryDto>>("api/exams");
@@ -104,8 +82,16 @@ public class ApiService
     public Task<ExamDto?> CreateExamAsync(CreateExamDto dto)
         => PostAsync<CreateExamDto, ExamDto>("api/exams", dto);
 
-    public Task<ExamDto?> GenerateExamAsync(GenerateExamDto dto)
-        => PostAsync<GenerateExamDto, ExamDto>("api/exams/generate", dto);
+    /// <summary>Con el código y el mensaje: un reparto rechazado dice qué nivel no alcanza.</summary>
+    public Task<(ExamDto? Result, int StatusCode, string? Error)> GenerateExamAsync(GenerateExamDto dto)
+        => SendAsync<ExamDto>(HttpMethod.Post, "api/exams/generate", dto);
+
+    public Task<List<LevelCountDto>?> GetQuestionAvailabilityAsync(IEnumerable<int>? categoryIds)
+    {
+        var ids = categoryIds?.ToList() ?? new();
+        var qs = ids.Count > 0 ? "?" + string.Join("&", ids.Select(id => $"categoryIds={id}")) : "";
+        return GetAsync<List<LevelCountDto>>($"api/questions/availability{qs}");
+    }
 
     public Task<ExamDto?> UpdateExamAsync(int id, UpdateExamDto dto)
         => PutAsync<UpdateExamDto, ExamDto>($"api/exams/{id}", dto);
@@ -160,8 +146,197 @@ public class ApiService
         await _http.PostAsJsonAsync($"api/exam/answer/{sessionId}", dto, JsonOptions);
     }
 
-    public Task<ExamResultDto?> SubmitExamAsync(SubmitExamDto dto)
-        => PostAsync<SubmitExamDto, ExamResultDto>("api/exam/submit", dto);
+    /// <summary>
+    /// Envía una señal de integridad. Devuelve true cuando no hay que reintentarla: llegó, o
+    /// el servidor la rechazó por una razón que un reintento no cambia (400, 403, 409).
+    /// Devuelve false ante un fallo de red, un 429 o un error del servidor. Nunca lanza:
+    /// una señal perdida no debe interrumpir la prueba.
+    /// </summary>
+    public async Task<bool> RecordIntegrityEventAsync(int sessionId, IntegrityEventInputDto dto)
+    {
+        try
+        {
+            var response = await _http.PostAsJsonAsync($"api/exam/integrity/{sessionId}", dto, JsonOptions);
+            return response.IsSuccessStatusCode
+                || response.StatusCode is System.Net.HttpStatusCode.BadRequest
+                    or System.Net.HttpStatusCode.Forbidden
+                    or System.Net.HttpStatusCode.Conflict;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "No se pudo enviar una señal de integridad; se reintentará.");
+            return false;
+        }
+    }
+
+    public Task<IntegrityReportDto?> GetIntegrityReportAsync(int resultId)
+        => GetAsync<IntegrityReportDto>($"api/results/{resultId}/integrity");
+
+    public Task<ExamSubmissionReceiptDto?> SubmitExamAsync(SubmitExamDto dto)
+        => PostAsync<SubmitExamDto, ExamSubmissionReceiptDto>("api/exam/submit", dto);
+
+    // Corrección manual de preguntas abiertas
+    public Task<List<PendingReviewSummaryDto>?> GetPendingReviewsAsync()
+        => GetAsync<List<PendingReviewSummaryDto>>("api/review/pending");
+
+    /// <summary>
+    /// Abrir el detalle reserva el resultado. Con el código, la pantalla distingue un 409
+    /// (ya corregido, o reservado por otra persona) de un 404.
+    /// </summary>
+    public Task<(PendingReviewDetailDto? Result, int StatusCode, string? Error)> GetReviewDetailAsync(int resultId)
+        => SendAsync<PendingReviewDetailDto>(HttpMethod.Get, $"api/review/{resultId}", null);
+
+    public async Task<bool> RenewReviewReservationAsync(int resultId)
+        => (await SendAsync<object>(HttpMethod.Post, $"api/review/{resultId}/reservation", null)).StatusCode == 200;
+
+    public async Task<bool> ReleaseReviewReservationAsync(int resultId)
+        => (await SendAsync<object>(HttpMethod.Delete, $"api/review/{resultId}/reservation", null)).StatusCode == 204;
+
+    // Evaluación a ciegas (rol Evaluador)
+    public Task<List<EvaluatorQueueItemDto>?> GetEvaluationQueueAsync()
+        => GetAsync<List<EvaluatorQueueItemDto>>("api/evaluation/queue");
+
+    public Task<(EvaluatorReviewDetailDto? Result, int StatusCode, string? Error)> GetEvaluationDetailAsync(int resultId)
+        => SendAsync<EvaluatorReviewDetailDto>(HttpMethod.Get, $"api/evaluation/{resultId}", null);
+
+    public async Task<bool> RenewEvaluationReservationAsync(int resultId)
+        => (await SendAsync<ReservationDto>(HttpMethod.Post, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 200;
+
+    public async Task<bool> ReleaseEvaluationReservationAsync(int resultId)
+        => (await SendAsync<object>(HttpMethod.Delete, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 204;
+
+    public Task<(EvaluatorReviewOutcomeDto? Result, int StatusCode, string? Error)> SubmitEvaluationAsync(
+        int resultId, SubmitReviewDto dto)
+        => SendAsync<EvaluatorReviewOutcomeDto>(HttpMethod.Post, $"api/evaluation/{resultId}", dto);
+
+    public Task<IntegrityReportDto?> GetEvaluationIntegrityAsync(int resultId)
+        => GetAsync<IntegrityReportDto>($"api/evaluation/{resultId}/integrity");
+
+    public Task<List<EvaluatorHistoryItemDto>?> GetEvaluationHistoryAsync()
+        => GetAsync<List<EvaluatorHistoryItemDto>>("api/evaluation/history");
+
+    public Task<EvaluatorHistoryDetailDto?> GetEvaluationHistoryDetailAsync(int resultId)
+        => GetAsync<EvaluatorHistoryDetailDto>($"api/evaluation/history/{resultId}");
+
+    // Evaluadores de una prueba
+    public Task<List<ExamEvaluatorDto>?> GetExamEvaluatorsAsync(int examId)
+        => GetAsync<List<ExamEvaluatorDto>>($"api/exams/{examId}/evaluators");
+
+    public Task<(List<ExamEvaluatorDto>? Result, int StatusCode, string? Error)> AssignEvaluatorAsync(int examId, int userId)
+        => SendAsync<List<ExamEvaluatorDto>>(HttpMethod.Post, $"api/exams/{examId}/evaluators/{userId}", null);
+
+    public Task<(List<ExamEvaluatorDto>? Result, int StatusCode, string? Error)> UnassignEvaluatorAsync(int examId, int userId)
+        => SendAsync<List<ExamEvaluatorDto>>(HttpMethod.Delete, $"api/exams/{examId}/evaluators/{userId}", null);
+
+    /// <summary>
+    /// Devuelve el resultado corregido, o el código de estado cuando falla: la pantalla
+    /// necesita distinguir un 409 (ya corregido por otro admin) de un error cualquiera.
+    /// </summary>
+    public async Task<(ExamResultDto? Result, int StatusCode, string? Error)> SubmitReviewAsync(
+        int resultId, SubmitReviewDto dto)
+    {
+        try
+        {
+            var response = await _http.PostAsJsonAsync($"api/review/{resultId}", dto, JsonOptions);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError("POST api/review/{Id} → HTTP {Status}: {Body}",
+                    resultId, (int)response.StatusCode, body);
+                return (null, (int)response.StatusCode, ExtractError(body));
+            }
+            var result = await response.Content.ReadFromJsonAsync<ExamResultDto>(JsonOptions);
+            return (result, 200, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "POST api/review/{Id} failed", resultId);
+            return (null, 0, ex.Message);
+        }
+    }
+
+    // Users
+    public Task<List<UserDto>?> GetUsersAsync(UserRole? role = null, bool? active = null, string? search = null)
+    {
+        var q = new List<string>();
+        if (role.HasValue) q.Add($"role={role}");
+        if (active.HasValue) q.Add($"active={active.Value.ToString().ToLowerInvariant()}");
+        if (!string.IsNullOrWhiteSpace(search)) q.Add($"q={Uri.EscapeDataString(search.Trim())}");
+        var qs = q.Any() ? "?" + string.Join("&", q) : "";
+        return GetAsync<List<UserDto>>($"api/users{qs}");
+    }
+
+    public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> CreateUserAsync(CreateUserDto dto)
+        => SendAsync<UserActionResultDto>(HttpMethod.Post, "api/users", dto);
+
+    public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> ChangeUserRoleAsync(int id, UserRole role)
+        => SendAsync<UserActionResultDto>(HttpMethod.Put, $"api/users/{id}/role", new ChangeRoleDto(role));
+
+    public Task<(UserDto? Result, int StatusCode, string? Error)> DeactivateUserAsync(int id)
+        => SendAsync<UserDto>(HttpMethod.Post, $"api/users/{id}/deactivate", null);
+
+    public Task<(UserDto? Result, int StatusCode, string? Error)> ActivateUserAsync(int id)
+        => SendAsync<UserDto>(HttpMethod.Post, $"api/users/{id}/activate", null);
+
+    public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> ResetUserAccessAsync(int id)
+        => SendAsync<UserActionResultDto>(HttpMethod.Post, $"api/users/{id}/reset-access", null);
+
+    // Enlace para fijar la contraseña (público)
+    public Task<PasswordSetupInfoDto?> CheckPasswordSetupAsync(string token)
+        => GetAsync<PasswordSetupInfoDto>($"api/auth/password-setup/{Uri.EscapeDataString(token)}");
+
+    public async Task<(int StatusCode, string? Error)> SetPasswordAsync(SetPasswordDto dto)
+    {
+        var (_, status, error) = await SendAsync<object>(HttpMethod.Post, "api/auth/password-setup", dto);
+        return (status, error);
+    }
+
+    /// <summary>
+    /// Petición que devuelve el código y el mensaje de error de la API, para las pantallas
+    /// que tienen que distinguir un 409 o un 400 de un fallo cualquiera. Un 204 da Result nulo.
+    /// </summary>
+    private async Task<(T? Result, int StatusCode, string? Error)> SendAsync<T>(
+        HttpMethod method, string url, object? body)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(method, url);
+            if (body is not null) request.Content = JsonContent.Create(body, options: JsonOptions);
+
+            var response = await _http.SendAsync(request);
+            var status = (int)response.StatusCode;
+            if (!response.IsSuccessStatusCode)
+            {
+                var text = await response.Content.ReadAsStringAsync();
+                _logger.LogError("{Method} {Url} → HTTP {Status}: {Body}", method, url, status, text);
+                return (default, status, ExtractError(text));
+            }
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent) return (default, status, null);
+            return (await response.Content.ReadFromJsonAsync<T>(JsonOptions), status, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Method} {Url} failed", method, url);
+            return (default, 0, ex.Message);
+        }
+    }
+
+    // Lee `error` (respuestas propias de los controladores) o `detail` (ProblemDetails de
+    // ErrorHandlingMiddleware), que es donde llega el mensaje de las excepciones de negocio.
+    private static string? ExtractError(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var e)) return e.GetString();
+            return doc.RootElement.TryGetProperty("detail", out var d) ? d.GetString() : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     // HTTP helpers
     private async Task<TResponse?> GetAsync<TResponse>(string url)

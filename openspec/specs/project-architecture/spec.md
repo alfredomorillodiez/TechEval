@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change scaffolding-clean-architecture. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Separación en capas de la solución
 La solución SHALL organizarse en proyectos independientes por capa (`TechEval.Domain`, `TechEval.Application`, `TechEval.Infrastructure`, `TechEval.API`, `TechEval.Web`), cada uno con una única responsabilidad, referenciados desde `TechEval.sln`.
 
@@ -68,3 +70,76 @@ La API SHALL exponer documentación OpenAPI/Swagger generada automáticamente, i
 - **WHEN** la aplicación se ejecuta en un entorno distinto de `Development`
 - **THEN** los endpoints de Swagger no se registran en el pipeline
 
+### Requirement: Los errores se traducen a HTTP en un solo sitio
+El sistema SHALL traducir excepciones a códigos de estado HTTP en un único punto del pipeline. Un controlador NEVER SHALL elegir el código de estado de una excepción de negocio por su cuenta, porque el mismo error acabaría mapeado de dos formas según por dónde saliera.
+
+La traducción SHALL apoyarse en una jerarquía de excepciones de aplicación que exprese **intención** —validación, recurso no encontrado, conflicto de estado, operación prohibida— y NEVER SHALL apoyarse en tipos de excepción genéricos de la plataforma o de sus bibliotecas.
+
+Toda excepción ajena a esa jerarquía SHALL producir `500 Internal Server Error` con un mensaje genérico. Su detalle SHALL quedar en el registro del servidor y NEVER SHALL viajar al cliente: el mensaje de una excepción de infraestructura puede contener nombres de entidad, fragmentos de consulta o rutas internas.
+
+Las respuestas de error SHALL usar el formato `ProblemDetails`.
+
+#### Scenario: Error de validación de negocio
+- **GIVEN** una operación que incumple una regla de negocio, como pedir más preguntas de las que hay disponibles
+- **WHEN** el cliente la solicita
+- **THEN** el sistema responde `400 Bad Request` con el mensaje de la regla incumplida
+
+#### Scenario: Recurso inexistente
+- **GIVEN** una operación que referencia un examen, una sesión o un resultado que no existe
+- **WHEN** el cliente la solicita
+- **THEN** el sistema responde `404 Not Found`
+
+#### Scenario: Conflicto con el estado actual
+- **GIVEN** una operación que el estado del sistema no permite, como corregir un resultado ya corregido o eliminar una opción que un candidato eligió
+- **WHEN** el cliente la solicita
+- **THEN** el sistema responde `409 Conflict` con el motivo
+
+#### Scenario: Operación prohibida
+- **GIVEN** una operación sobre un recurso que no pertenece a quien la solicita
+- **WHEN** el cliente la solicita
+- **THEN** el sistema responde `403 Forbidden`
+
+#### Scenario: Fallo de infraestructura no llega al cliente
+- **GIVEN** un fallo ajeno al negocio, como una excepción de EF Core al perderse la conexión
+- **WHEN** ocurre durante una petición
+- **THEN** el sistema responde `500 Internal Server Error` con un mensaje genérico
+- **AND** el mensaje de la excepción original SHALL NOT aparecer en la respuesta
+- **AND** el detalle SHALL quedar registrado en el servidor
+
+#### Scenario: Un tipo genérico ya no se confunde con un error de negocio
+- **GIVEN** una `InvalidOperationException` lanzada por una biblioteca, no por el código de negocio
+- **WHEN** llega al pipeline de errores
+- **THEN** el sistema responde `500`, y NEVER SHALL responder `400` con su mensaje
+
+### Requirement: El código se compila y se prueba en cada subida
+El repositorio SHALL incluir un flujo de trabajo de integración continua que, en cada subida a una rama del repositorio y en cada solicitud de incorporación, restaure las dependencias, compile la solución completa y ejecute la batería de pruebas.
+
+El flujo SHALL fallar cuando la compilación falle o cuando alguna prueba falle, de forma que un cambio que rompa algo se detecte antes de fusionarlo y no al usarlo.
+
+#### Scenario: Subida con la batería en verde
+- **WHEN** alguien sube un cambio que compila y cuyas pruebas pasan
+- **THEN** el flujo SHALL terminar correctamente
+
+#### Scenario: Subida que rompe una prueba
+- **GIVEN** un cambio que hace fallar una prueba de la batería
+- **WHEN** se sube o se abre una solicitud de incorporación
+- **THEN** el flujo SHALL fallar señalando la prueba que no pasa
+
+#### Scenario: Subida que no compila
+- **WHEN** se sube un cambio que no compila
+- **THEN** el flujo SHALL fallar en el paso de compilación, sin llegar a ejecutar las pruebas
+
+### Requirement: La restauración de paquetes no depende de un feed privado
+El repositorio SHALL declarar sus orígenes de paquetes en un `NuGet.config` propio que descarte los heredados de la máquina y deje únicamente los públicos que el proyecto necesita.
+
+Sin esa declaración, la restauración hereda los feeds configurados en el equipo de quien compila. En esta organización eso incluye feeds privados que exigen credenciales, y la restauración falla con `401` aunque todos los paquetes del proyecto sean públicos.
+
+#### Scenario: Restauración en una máquina sin credenciales
+- **GIVEN** una máquina sin credenciales para los feeds privados de la organización
+- **WHEN** se ejecuta la restauración de paquetes del repositorio
+- **THEN** la restauración SHALL completarse, porque el repositorio declara sus propios orígenes
+
+#### Scenario: Restauración en la integración continua
+- **GIVEN** un ejecutor de integración continua, que nunca tiene esas credenciales
+- **WHEN** el flujo restaura las dependencias
+- **THEN** la restauración SHALL completarse sin configuración adicional

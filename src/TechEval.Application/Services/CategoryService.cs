@@ -16,22 +16,32 @@ public interface ICategoryService
 public class CategoryService : ICategoryService
 {
     private readonly IRepository<Category> _repo;
+    private readonly IQuestionRepository _questionRepo;
 
-    public CategoryService(IRepository<Category> repo) => _repo = repo;
+    public CategoryService(IRepository<Category> repo, IQuestionRepository questionRepo)
+    {
+        _repo = repo;
+        _questionRepo = questionRepo;
+    }
 
     public async Task<IReadOnlyList<CategoryDto>> GetAllAsync(CancellationToken ct = default)
     {
         var categories = await _repo.GetAllAsync(ct);
-        return categories.Select(c => new CategoryDto(
-            c.Id, c.Name, c.Description,
-            c.Questions.Count(q => q.IsActive))).ToList();
+        var result = new List<CategoryDto>(categories.Count);
+        foreach (var c in categories)
+        {
+            var questionCount = await _questionRepo.CountAsync(q => q.CategoryId == c.Id && q.IsActive, ct);
+            result.Add(new CategoryDto(c.Id, c.Name, c.Description, questionCount));
+        }
+        return result;
     }
 
     public async Task<CategoryDto?> GetByIdAsync(int id, CancellationToken ct = default)
     {
         var c = await _repo.GetByIdAsync(id, ct);
-        return c is null ? null : new CategoryDto(c.Id, c.Name, c.Description,
-            c.Questions.Count(q => q.IsActive));
+        if (c is null) return null;
+        var questionCount = await _questionRepo.CountAsync(q => q.CategoryId == c.Id && q.IsActive, ct);
+        return new CategoryDto(c.Id, c.Name, c.Description, questionCount);
     }
 
     public async Task<CategoryDto> CreateAsync(CreateCategoryDto dto, CancellationToken ct = default)
@@ -49,8 +59,8 @@ public class CategoryService : ICategoryService
         entity.Description = dto.Description;
         entity.UpdatedAt = DateTime.UtcNow;
         await _repo.UpdateAsync(entity, ct);
-        return new CategoryDto(entity.Id, entity.Name, entity.Description,
-            entity.Questions.Count(q => q.IsActive));
+        var questionCount = await _questionRepo.CountAsync(q => q.CategoryId == entity.Id && q.IsActive, ct);
+        return new CategoryDto(entity.Id, entity.Name, entity.Description, questionCount);
     }
 
     public async Task<bool> DeleteAsync(int id, CancellationToken ct = default)

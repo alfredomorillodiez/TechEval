@@ -4,6 +4,9 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- La ruta de /fijar-contrasena/{token} lleva el token del enlace: que no salga en la
+         cabecera Referer de ninguna petición a otro origen. -->
+    <meta name="referrer" content="no-referrer" />
     <title>TechEval Platform</title>
     <base href="/" />
 
@@ -39,9 +42,20 @@
     </div>
 
     <!-- Bootstrap JS -->
+    <!-- El `integrity` anterior estaba corrompido y el navegador bloqueaba el paquete en
+         cada carga, así que la aplicación corría sin el JavaScript de Bootstrap. No era un
+         cambio del CDN: el resumen declarado y el real compartían los 22 primeros
+         caracteres, y dos contenidos distintos difieren desde el primero. El CSS, con su
+         propio `integrity`, sí cargaba. -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-            integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmB5R7fU2OBkFoP3VSe2aBfPJHop"
+            integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
             crossorigin="anonymous"></script>
+
+    <!-- Reloj del examen: recalcula el tiempo cuando la ventana vuelve a la vista -->
+    <script src="js/exam-timer.js"></script>
+
+    <!-- Señales de integridad del examen: salidas de la página y pegados -->
+    <script src="js/exam-integrity.js"></script>
 
     <!-- Blazor WebAssembly runtime -->
     <script src="_framework/blazor.webassembly.js"></script>

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TechEval.Domain.Entities;
+using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
 using TechEval.Infrastructure.Data;
 
@@ -28,5 +29,17 @@ public class ExamRepository : BaseRepository<Exam>, IExamRepository
                 .ThenInclude(t => t.ExamSession)
                     .ThenInclude(s => s!.ExamResult)
             .OrderByDescending(e => e.CreatedAt)
+            .ToListAsync(ct);
+
+    public async Task<int> CountActiveAsync(CancellationToken ct = default)
+        => await Context.Exams.CountAsync(e => e.IsActive, ct);
+
+    public async Task<IReadOnlyList<Exam>> GetActiveWithoutEvaluatorAsync(CancellationToken ct = default)
+        => await Context.Exams
+            .Where(e => e.IsActive
+                && e.ExamQuestions.Any(eq => eq.Question.Type == QuestionType.OpenEnded)
+                && !Context.ExamEvaluators.Any(a => a.ExamId == e.Id))
+            .OrderBy(e => e.Title)
+            .Select(e => new Exam { Id = e.Id, Title = e.Title })
             .ToListAsync(ct);
 }

@@ -8,13 +8,15 @@
 5. [Estructura del proyecto](#5-estructura-del-proyecto)
 6. [API Reference](#6-api-reference)
 7. [Flujo completo del sistema](#7-flujo-completo-del-sistema)
-8. [Configuración y puesta en marcha](#8-configuración-y-puesta-en-marcha)
-9. [Script SQL de creación de base de datos](#9-script-sql-de-creación-de-base-de-datos)
-10. [Script SQL de preguntas del examen](#10-script-sql-de-preguntas-del-examen)
-11. [Docker](#11-docker)
-12. [Tests](#12-tests)
-13. [Seguridad](#13-seguridad)
-14. [Decisiones técnicas](#14-decisiones-técnicas)
+8. [Cuentas de usuario y portal del alumno](#8-cuentas-de-usuario-y-portal-del-alumno)
+9. [Configuración y puesta en marcha](#9-configuración-y-puesta-en-marcha)
+10. [Scripts SQL](#10-scripts-sql)
+11. [Script SQL de preguntas de la prueba](#11-script-sql-de-preguntas-de-la-prueba)
+12. [Docker](#12-docker)
+13. [Tests](#13-tests)
+14. [Seguridad](#14-seguridad)
+15. [Especificaciones (OpenSpec)](#15-especificaciones-openspec)
+16. [Decisiones técnicas](#16-decisiones-técnicas)
 
 
 ---
@@ -25,9 +27,22 @@ TechEval es una plataforma de evaluación técnica que permite:
 
 - **Gestionar un banco de preguntas** con categorías, niveles de dificultad y tipos (test / respuesta abierta).
 - **Generar exámenes** manualmente o de forma automática y aleatoria.
-- **Enviar exámenes por email** con un enlace de un solo uso y tiempo de expiración configurable.
+- **Enviar exámenes por email** con un enlace de un solo uso y tiempo de expiración configurable, de forma individual o masiva.
 - **Realizar exámenes** con temporizador, auto-guardado y UI responsive.
 - **Consultar resultados** con corrección automática (tipo test) y dashboard con estadísticas.
+- **Ofrecer un portal al alumno** donde consulta sus pruebas pendientes y su historial de notas, con cuenta creada automáticamente al abrir su primera invitación.
+
+### Roles del sistema
+
+| Rol | Claim JWT | Alcance |
+|-----|-----------|---------|
+| `Admin` | `Role = "Admin"` | Consola completa: categorías, preguntas, pruebas, envíos, resultados de todos los candidatos y gestión de usuarios |
+| `Evaluador` | `Role = "Evaluador"` | Corrige a ciegas los resultados pendientes de las pruebas que tiene asignadas, y consulta su historial. No ve el nombre ni el email del candidato |
+| `Alumno` | `Role = "Alumno"` | Portal propio: sus pruebas pendientes y sus resultados. No accede a nada de otro alumno |
+
+Cada usuario tiene **un solo rol**, guardado en `Users.Role`. La matriz de permisos vive en `src/TechEval.API/Authorization/Policies.cs`: los controladores nombran una política (`Gestion`, `Evaluacion`, `Alumno`) y no una lista de roles. El administrador no pasa la política `Evaluacion`: corrige por sus endpoints, que le muestran la identidad.
+
+El JWT lleva además el claim `stamp`, con el `SecurityStamp` del usuario. En cada petición autenticada, `SecurityStampValidator` comprueba que el usuario existe, está activo, conserva el rol del token y conserva el sello. Si algo falla, la API responde `401`. El sello cambia al cambiar el rol, al desactivar la cuenta, al restablecer el acceso y al fijar una contraseña: así esos cambios revocan los tokens en el acto, sin esperar a que caduquen.
 
 ---
 
@@ -40,10 +55,11 @@ TechEval es una plataforma de evaluación técnica que permite:
 | Frontend | Blazor WebAssembly | 9.0.0 |
 | ORM | Entity Framework Core | 9.0.0 |
 | Base de datos | SQL Server | 2022 |
-| Autenticación | JWT Bearer | 9.0.0 |
+| Autenticación | JWT Bearer (roles `Admin` / `Evaluador` / `Alumno`, sello de seguridad) | 9.0.0 |
 | Documentación API | Swashbuckle (Swagger) | 7.2.0 |
-| Logging | Serilog | 9.0.0 |
-| Email | SMTP (`System.Net.Mail`) | — |
+| Logging | Serilog (consola + fichero diario) | 9.0.0 |
+| Email | Microsoft Graph (MSAL) | 4.90.1 |
+| Trabajos en segundo plano | `BackgroundService` + `System.Threading.Channels` | — |
 | Contenedores | Docker / Docker Compose | — |
 
 ---
@@ -53,30 +69,31 @@ TechEval es una plataforma de evaluación técnica que permite:
 Se aplica **Clean Architecture** con separación estricta de responsabilidades en 4 capas:
 
 ```
-┌─────────────────────────────────────────────┐
-│              TechEval.Web (Blazor WASM)      │  ← Capa de presentación
-│         Llama a la API via HttpClient        │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│              TechEval.Web (Blazor WASM)             │  ← Capa de presentación
+│   Consola de administración + portal del alumno     │
+└─────────────────────────────────────────────────────┘
                       │ HTTP / REST
-┌─────────────────────────────────────────────┐
-│              TechEval.API                   │  ← Capa de entrada
-│    Controllers · Middleware · Swagger · JWT │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                  TechEval.API                       │  ← Capa de entrada
+│  Controllers · Middleware · Swagger · JWT           │
+│  BackgroundServices (QuestionGenerationWorker)      │
+└─────────────────────────────────────────────────────┘
                       │
-┌─────────────────────────────────────────────┐
-│           TechEval.Application              │  ← Lógica de negocio
-│      Services · DTOs · Validaciones         │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│               TechEval.Application                  │  ← Lógica de negocio
+│         Services · DTOs · Validaciones              │
+└─────────────────────────────────────────────────────┘
                       │
-┌─────────────────────────────────────────────┐
-│           TechEval.Domain                   │  ← Núcleo del dominio
-│   Entities · Interfaces · Enums             │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                 TechEval.Domain                     │  ← Núcleo del dominio
+│           Entities · Interfaces · Enums             │
+└─────────────────────────────────────────────────────┘
                       │
-┌─────────────────────────────────────────────┐
-│         TechEval.Infrastructure             │  ← Persistencia y servicios externos
-│  EF Core · Repositorios · SMTP · JWT Token  │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│              TechEval.Infrastructure                │  ← Persistencia y servicios externos
+│  EF Core · Repositorios · Microsoft Graph · JWT     │
+└─────────────────────────────────────────────────────┘
                       │
                  SQL Server
 ```
@@ -85,9 +102,7 @@ Se aplica **Clean Architecture** con separación estricta de responsabilidades e
 - **Dependency Inversion**: La Application solo conoce interfaces del Domain.
 - **Repository Pattern**: Abstracción de EF Core detrás de interfaces.
 - **Single Responsibility**: Cada servicio gestiona un único agregado.
-- **Open/Closed**: Nuevos tipos de pregunta o proveedores de email se añaden sin modificar código existente.
-
----
+- **Open/Closed**: Nuevos tipos de pregunta, proveedores de email o proveedores de IA se añaden sin modificar código existente.
 
 ## 4. Diseño de base de datos
 
@@ -97,25 +112,37 @@ Se aplica **Clean Architecture** con separación estricta de responsabilidades e
 Users
 ├── Id (PK)
 ├── Email (UNIQUE)
+├── Username (UNIQUE filtrado WHERE Username IS NOT NULL)
 ├── Name
-├── PasswordHash (SHA-256)
-├── IsAdmin
+├── PasswordHash (PBKDF2; vacío = sin contraseña utilizable)
+├── Role             -- 1 = Admin, 2 = Evaluador, 3 = Alumno (CHECK)
+├── SecurityStamp    -- viaja en el JWT; cambiarlo revoca los tokens del usuario
 └── IsActive
+
+PasswordSetupTokens  -- enlaces de un solo uso para fijar la contraseña
+├── Id (PK)
+├── UserId (FK → Users, CASCADE)
+├── TokenHash (UNIQUE)   -- SHA-256 del token; el token no se guarda
+├── CreatedAt
+├── ExpiresAt            -- emisión + 48 h
+└── UsedAt
 
 Categories
 ├── Id (PK)
 ├── Name (UNIQUE)
-└── Description
+├── Description
+├── IsActive
+└── AllowsAiGeneration   -- DEFAULT 1; en 0 la categoría queda fuera del generador por IA
 
 Questions
 ├── Id (PK)
 ├── Text
-├── Type             -- 1=MultipleChoice, 2=OpenEnded
-├── Difficulty       -- 1=Basic, 2=Intermediate, 3=Advanced
+├── Type                  -- 1=MultipleChoice, 2=OpenEnded
+├── Difficulty            -- 1=Basic, 2=Intermediate, 3=Advanced
 ├── CategoryId (FK → Categories)
 ├── Points
-├── SampleAnswer     -- NULL para tipo test
-└── IsActive
+├── SampleAnswer          -- NULL para tipo test
+├── IsActive
 
 Answers
 ├── Id (PK)
@@ -147,6 +174,7 @@ ExamTokens
 ├── ExamId (FK → Exams)
 ├── CandidateName
 ├── CandidateEmail
+├── UserId (FK → Users, SET NULL)   -- alumno propietario de la invitación  [INDEX]
 ├── CreatedAt
 ├── ExpiresAt
 ├── IsUsed
@@ -157,7 +185,18 @@ ExamSessions
 ├── ExamTokenId (FK → ExamTokens, 1:1)
 ├── StartedAt
 ├── CompletedAt
-└── Status       -- 1=InProgress, 2=Completed, 3=Expired, 4=Abandoned
+├── Status       -- 1=InProgress, 2=Completed, 3=Expired, 4=Abandoned
+├── ShuffleSeed  -- semilla del orden propio de la sesión; NULL = sesión anterior al cambio
+└── IntegrityLimitReached  -- la sesión llegó al tope de 500 señales
+
+ExamIntegrityEvents
+├── Id (PK)
+├── ExamSessionId (FK → ExamSessions, CASCADE)  [INDEX]
+├── Type         -- 1=PageLeft, 2=PageReturned, 3=Paste
+├── QuestionId   -- pregunta en pantalla; sin FK, es solo un dato
+├── OccurredAt   -- hora UTC de recepción en el servidor
+├── AwaySeconds  -- solo PageReturned; la mide el navegador
+└── PastedChars  -- solo Paste; el texto pegado no se guarda
 
 UserAnswers
 ├── Id (PK)
@@ -174,21 +213,36 @@ ExamResults
 ├── ExamId (FK → Exams)
 ├── CandidateName
 ├── CandidateEmail  [INDEX]
+├── UserId (FK → Users, SET NULL)   -- alumno propietario del resultado  [INDEX]
 ├── TotalPoints
 ├── ObtainedPoints
 ├── ScorePercentage (DECIMAL 5,2)
 ├── Passed
+├── Status · ReviewedAt · ReviewedByUserId (FK → Users)   -- quién corrigió
+├── ReservedByUserId (FK → Users) · ReservedUntil         -- reserva mientras alguien corrige
 └── CompletedAt    [INDEX]
+
+ExamEvaluators       -- evaluadores asignados a cada prueba
+├── ExamId (PK, FK → Exams, CASCADE)
+├── UserId (PK, FK → Users)
+├── AssignedAt
+└── AssignedByUserId (FK → Users)
+
 ```
 
 ### Relaciones clave
 
 | Relación | Tipo | Notas |
 |----------|------|-------|
-| Exam → ExamQuestions | 1:N | Un examen contiene varias preguntas |
+| Exam → ExamQuestions | 1:N | Una prueba contiene varias preguntas |
 | ExamToken → ExamSession | 1:1 | Cada token genera máx. 1 sesión |
 | ExamSession → UserAnswers | 1:N | Respuestas parciales (auto-guardado) |
-| ExamSession → ExamResult | 1:1 | Se crea al finalizar el examen |
+| ExamSession → ExamResult | 1:1 | Se crea al finalizar la prueba |
+| ExamSession → ExamIntegrityEvents | 1:N | Señales de actividad durante la prueba; se borran con la sesión |
+| User → ExamTokens | 1:N | Invitaciones del alumno; `SET NULL` si se borra el usuario |
+| User → ExamResults | 1:N | Historial de notas del alumno; `SET NULL` si se borra el usuario |
+
+> **Selección de preguntas para pruebas**: `QuestionRepository` filtra siempre por `IsActive = true`.
 
 ---
 
@@ -201,13 +255,18 @@ TechEval/
 ├── Dockerfile.api
 ├── Dockerfile.web
 ├── nginx.conf
+├── README.md
 ├── documentacion.md
+├── openspec/                                   -- Especificación viva del sistema
+│   ├── config.yaml
+│   ├── specs/                                  -- 12 capacidades especificadas
+│   └── changes/archive/                        -- Histórico de cambios aplicados
 │
 ├── src/
 │   ├── TechEval.Domain/
 │   │   ├── Common/
-│   │   │   └── AuditableEntity.cs          -- Base con CreatedAt/UpdatedAt
-│   │   ├── Entities/                       -- Entidades de dominio puras
+│   │   │   └── AuditableEntity.cs              -- Base con CreatedAt/UpdatedAt
+│   │   ├── Entities/                           -- Entidades de dominio puras
 │   │   │   ├── User.cs
 │   │   │   ├── Category.cs
 │   │   │   ├── Question.cs
@@ -217,88 +276,120 @@ TechEval/
 │   │   │   ├── ExamToken.cs
 │   │   │   ├── ExamSession.cs
 │   │   │   ├── UserAnswer.cs
-│   │   │   └── ExamResult.cs
+│   │   │   ├── ExamResult.cs
 │   │   ├── Enums/
 │   │   │   ├── DifficultyLevel.cs
 │   │   │   ├── QuestionType.cs
-│   │   │   └── SessionStatus.cs
+│   │   │   ├── SessionStatus.cs
 │   │   └── Interfaces/
-│   │       ├── Repositories/               -- Contratos de acceso a datos
-│   │       │   ├── IRepository.cs          -- Genérico CRUD
+│   │       ├── Repositories/                   -- Contratos de acceso a datos
+│   │       │   ├── IRepository.cs              -- Genérico CRUD
 │   │       │   ├── IQuestionRepository.cs
 │   │       │   ├── IExamRepository.cs
 │   │       │   ├── IExamTokenRepository.cs
-│   │       │   └── IExamResultRepository.cs
+│   │       │   ├── IExamResultRepository.cs
 │   │       └── Services/
 │   │           ├── IEmailService.cs
-│   │           └── ITokenService.cs
+│   │           ├── ITokenService.cs
+│   │           └── IQuestionGenerationAiService.cs
 │   │
 │   ├── TechEval.Application/
-│   │   ├── DTOs/                           -- Objetos de transferencia (records)
+│   │   ├── DTOs/                               -- Objetos de transferencia (records)
 │   │   │   ├── CategoryDto.cs
 │   │   │   ├── QuestionDto.cs
 │   │   │   ├── ExamDto.cs
 │   │   │   ├── ExamSessionDto.cs
-│   │   │   └── ResultDto.cs
-│   │   └── Services/                       -- Lógica de negocio
+│   │   │   ├── ResultDto.cs
+│   │   │   ├── QuestionGenerationDto.cs
+│   │   │   └── StudentPortalDto.cs
+│   │   └── Services/                           -- Lógica de negocio
 │   │       ├── CategoryService.cs
 │   │       ├── QuestionService.cs
 │   │       ├── ExamService.cs
-│   │       ├── ExamTokenService.cs         -- Gestión completa del ciclo de examen
-│   │       └── ResultService.cs
+│   │       ├── ExamTokenService.cs             -- Ciclo de la prueba + cuentas de alumno
+│   │       ├── ResultService.cs
+│   │       ├── QuestionGenerationService.cs    -- Jobs, revisión, aprobación/rechazo
+│   │       ├── StudentPortalService.cs         -- Pendientes y realizadas del alumno
+│   │       ├── IBackgroundTaskQueue.cs         -- Contrato de la cola de jobs
+│   │       └── PasswordHasher.cs               -- Hash SHA-256 compartido
 │   │
 │   ├── TechEval.Infrastructure/
 │   │   ├── Data/
 │   │   │   ├── AppDbContext.cs
-│   │   │   ├── DbSeeder.cs                 -- Datos iniciales (admin + categorías)
+│   │   │   ├── DbSeeder.cs                     -- Datos iniciales (admin + categorías)
 │   │   │   └── Configurations/
-│   │   │       └── QuestionConfiguration.cs -- Todas las Fluent API configs
+│   │   │       └── QuestionConfiguration.cs    -- Todas las Fluent API configs
 │   │   ├── Repositories/
-│   │   │   ├── BaseRepository.cs           -- Implementación genérica
+│   │   │   ├── BaseRepository.cs               -- Implementación genérica
 │   │   │   ├── QuestionRepository.cs
 │   │   │   ├── ExamRepository.cs
 │   │   │   ├── ExamTokenRepository.cs
-│   │   │   └── ExamResultRepository.cs
+│   │   │   ├── ExamResultRepository.cs
+│   │   ├── Ai/
+│   │   ├── BackgroundJobs/
+│   │   │   └── BackgroundTaskQueue.cs          -- Channel<int> en memoria
 │   │   ├── Email/
-│   │   │   └── SmtpEmailService.cs         -- SMTP con HTML templates
+│   │   │   ├── EmailSettings.cs                -- Buzón y aplicación de Entra ID
+│   │   │   └── GraphEmailService.cs            -- Microsoft Graph con plantillas HTML
 │   │   ├── Security/
-│   │   │   └── TokenService.cs             -- JWT + secure random tokens
-│   │   └── DependencyInjection.cs          -- Registro de servicios
+│   │   │   └── TokenService.cs                 -- JWT + secure random tokens
+│   │   └── DependencyInjection.cs              -- Registro de servicios
 │   │
 │   ├── TechEval.API/
 │   │   ├── Controllers/
-│   │   │   ├── AuthController.cs           -- POST /api/auth/login
+│   │   │   ├── AuthController.cs               -- POST /api/auth/login (admin y alumno)
 │   │   │   ├── CategoriesController.cs
 │   │   │   ├── QuestionsController.cs
-│   │   │   ├── ExamsController.cs          -- Incluye /send y /generate
-│   │   │   ├── ExamSessionController.cs    -- Público: validate/start/answer/submit
-│   │   │   └── ResultsController.cs        -- Dashboard y detalle
+│   │   │   ├── ExamsController.cs              -- Incluye /generate, /send y /send-bulk
+│   │   │   ├── ExamSessionController.cs        -- Público: validate/start/answer/submit
+│   │   │   ├── ResultsController.cs            -- Dashboard y detalle
+│   │   │   ├── QuestionGenerationController.cs -- Jobs de IA y bandeja de revisión
+│   │   │   └── StudentPortalController.cs      -- Portal del alumno
+│   │   ├── BackgroundServices/
+│   │   │   └── QuestionGenerationWorker.cs     -- Procesa los jobs de generación
 │   │   ├── Middleware/
-│   │   │   └── ErrorHandlingMiddleware.cs  -- Manejo global de errores
+│   │   │   └── ErrorHandlingMiddleware.cs      -- Manejo global de errores
 │   │   ├── Program.cs
-│   │   └── appsettings.json
+│   │   ├── appsettings.json
+│   │   └── appsettings.Development.json
 │   │
-│   └── TechEval.Web/                       -- Blazor WebAssembly
+│   └── TechEval.Web/                           -- Blazor WebAssembly
 │       ├── Pages/
-│       │   ├── Login.razor
+│       │   ├── Login.razor                     -- Acceso de admins y alumnos
 │       │   ├── Admin/
 │       │   │   ├── Dashboard.razor
 │       │   │   ├── Questions/
 │       │   │   │   ├── QuestionList.razor
-│       │   │   │   └── QuestionForm.razor
+│       │   │   │   ├── QuestionForm.razor
+│       │   │   │   └── QuestionReview.razor    -- Bandeja de revisión con progreso
 │       │   │   ├── Exams/
-│       │   │   │   ├── ExamList.razor      -- Con modal de envío integrado
+│       │   │   │   ├── ExamList.razor          -- Con modal de envío integrado
+│       │   │   │   ├── ExamNew.razor
+│       │   │   │   ├── ExamDetail.razor
 │       │   │   │   └── GenerateExam.razor
 │       │   │   └── Results/
-│       │   │       └── ResultList.razor
+│       │   │       ├── ResultList.razor
+│       │   │       ├── ResultDetail.razor
+│       │   │       └── ResultsByExam.razor
+│       │   ├── Student/
+│       │   │   └── Portal.razor                -- Pendientes y realizadas del alumno
 │       │   └── Exam/
-│       │       └── TakeExam.razor          -- UI completa del candidato
+│       │       ├── ExamLinkRedirect.razor      -- /exam/{token} → /prueba/{token}
+│       │       └── TakeExam.razor              -- UI completa del candidato
 │       ├── Layout/
-│       │   └── MainLayout.razor            -- Sidebar admin
+│       │   └── MainLayout.razor                -- Sidebar admin / barra del alumno
 │       ├── Services/
-│       │   ├── ApiService.cs               -- Wrapper tipado del HttpClient
-│       │   └── AuthStateService.cs         -- Auth con localStorage
+│       │   ├── ApiService.cs                   -- Wrapper tipado del HttpClient
+│       │   └── AuthStateService.cs             -- Auth con localStorage
 │       └── Program.cs
+│
+├── scripts/
+│   ├── create_database.sql                     -- Esquema completo (12 tablas)
+│   ├── add_user_link_columns.sql               -- Incremental: cuentas de alumno
+│   ├── add_category_ai_generation_flag.sql     -- Incremental: flag AllowsAiGeneration
+│   ├── reset_exam_history.sql                  -- Limpieza del histórico de intentos
+│   ├── seed_questions_examen.sql
+│   └── seed_questions_extra.sql
 │
 └── tests/
     └── TechEval.Tests/
@@ -311,17 +402,47 @@ TechEval/
 
 ## 6. API Reference
 
+Swagger publica la referencia interactiva en `/swagger` (solo en entorno de desarrollo). Todos los endpoints marcados como `Admin` o `Alumno` exigen `Authorization: Bearer <jwt>` con el rol correspondiente: sin token devuelven `401`, con token de otro rol devuelven `403`.
+
 ### Autenticación
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| POST | `/api/auth/login` | No | Login admin, devuelve JWT |
+| POST | `/api/auth/login` | No | Login de cualquier rol; acepta email **o** username |
+| GET | `/api/auth/password-setup/{token}` | No | Nombre y email del dueño de un enlace vigente. `404` genérico si el enlace no vale, por el motivo que sea |
+| POST | `/api/auth/password-setup` | No | `{ token, password }`. Fija la contraseña (12 a 128 caracteres), marca el enlace como usado y cambia el sello. `204`; no inicia sesión |
+
+**Body de `/api/auth/login`:**
+```json
+{ "email": "admin@techeval.com", "password": "Admin@123!" }
+```
+
+**Respuesta (`AuthResultDto`):**
+```json
+{ "token": "eyJhbGciOi…", "name": "Administrador", "email": "admin@techeval.com", "role": "Admin" }
+```
+
+### Usuarios
+
+Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mismo y las que dejarían cero administradores activos responden `409`.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/api/users?role=&active=&q=` | Listado con filtros por rol, estado y texto. Nunca expone hash, sello ni enlaces |
+| POST | `/api/users` | `{ name, email, role }`, rol `Admin` o `Evaluador`. `201` con `{ user, emailSent }`; `409` si el email existe |
+| PUT | `/api/users/{id}/role` | `{ role }`. Permitido: Admin ↔ Evaluador y Alumno → Admin/Evaluador. Nadie pasa a Alumno (`400`) |
+| POST | `/api/users/{id}/deactivate` | Desactiva y cambia el sello |
+| POST | `/api/users/{id}/activate` | Reactiva. Los tokens anteriores a la desactivación siguen sin valer |
+| POST | `/api/users/{id}/reset-access` | Vacía la contraseña, cambia el sello, invalida los enlaces anteriores y envía uno nuevo. `400` para un alumno |
+
+`emailSent` es `false` si el correo no salió (la operación queda hecha) y `null` si la operación no envía correo.
 
 ### Categorías
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/categories` | No | Listar categorías |
+| GET | `/api/categories` | Admin | Listar categorías (incluye `questionCount` y `allowsAiGeneration`) |
+| GET | `/api/categories/{id}` | Admin | Detalle |
 | POST | `/api/categories` | Admin | Crear categoría |
 | PUT | `/api/categories/{id}` | Admin | Actualizar |
 | DELETE | `/api/categories/{id}` | Admin | Desactivar (soft delete) |
@@ -331,9 +452,10 @@ TechEval/
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
 | GET | `/api/questions?categoryId=&difficulty=&type=` | Admin | Listar con filtros |
+| GET | `/api/questions/availability?categoryIds=1&categoryIds=3` | Admin | Preguntas activas de cada nivel en esas categorías (los tres niveles siempre) |
 | GET | `/api/questions/{id}` | Admin | Detalle con respuestas |
-| POST | `/api/questions` | Admin | Crear pregunta |
-| PUT | `/api/questions/{id}` | Admin | Actualizar |
+| POST | `/api/questions` | Admin | Crear pregunta (nace `Approved`) |
+| PUT | `/api/questions/{id}` | Admin | Actualizar (no altera el estado de revisión) |
 | DELETE | `/api/questions/{id}` | Admin | Desactivar |
 
 ### Exámenes
@@ -344,8 +466,10 @@ TechEval/
 | GET | `/api/exams/{id}` | Admin | Detalle con preguntas |
 | POST | `/api/exams` | Admin | Crear manual |
 | POST | `/api/exams/generate` | Admin | Generar automático |
+| PUT | `/api/exams/{id}` | Admin | Actualizar |
 | DELETE | `/api/exams/{id}` | Admin | Desactivar |
-| POST | `/api/exams/send` | Admin | Enviar por email al candidato |
+| POST | `/api/exams/send` | Admin | Enviar por email a un candidato |
+| POST | `/api/exams/send-bulk` | Admin | Enviar por email a varios candidatos |
 
 **Body de `/api/exams/generate`:**
 ```json
@@ -355,10 +479,21 @@ TechEval/
   "timeLimitMinutes": 60,
   "passingScorePercentage": 70,
   "questionCount": 10,
-  "categoryId": 1,       // opcional
-  "difficulty": "Intermediate"  // opcional
+  "categoryIds": [1, 3],        // opcional
+  "difficulty": "Intermediate"  // opcional: un nivel único
 }
 ```
+
+En lugar de `difficulty`, un reparto por nivel (porcentaje de preguntas; enteros de 0 a 100 que suman 100):
+
+```json
+  "difficultyPercentages": { "Basic": 30, "Intermediate": 50, "Advanced": 20 }
+```
+
+- **Redondeo:** método del mayor resto. Cada nivel recibe la parte entera de su cuota y las preguntas que faltan van a los niveles con mayor decimal; en el empate, al de mayor porcentaje y después al más fácil. Con 10 preguntas y 33 / 33 / 34 salen 3 / 3 / 4.
+- **Rechazo:** si un nivel necesita más preguntas de las que hay activas en esas categorías, `400` con un mensaje por nivel («nivel avanzado, se necesitan 5 y hay 2»). Nunca se completa con otro nivel ni con otra categoría.
+- **Nivel único:** sigue como antes; `difficulty` y `difficultyPercentages` a la vez dan `400`.
+- **Orden:** las preguntas de los distintos niveles salen mezcladas. El cálculo lo hace `DifficultyPlanner`, el mismo en la API y en la vista previa de la Web.
 
 **Body de `/api/exams/send`:**
 ```json
@@ -370,23 +505,80 @@ TechEval/
 }
 ```
 
-### Sesión de examen (pública, sin auth)
+**Body de `/api/exams/send-bulk`:**
+```json
+{
+  "examId": 3,
+  "candidates": [
+    { "name": "Juan García", "email": "juan@empresa.com" },
+    { "name": "Ana López",  "email": "ana@empresa.com" }
+  ],
+  "expirationHours": 72
+}
+```
+
+**Respuesta (`BulkSendResultDto`):** recuento de `sent` / `failed` y el detalle por candidato con el error concreto de cada fallo.
+
+### Sesión de la prueba (pública, con el token del enlace)
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/exam/validate/{token}` | No | Verifica si el token es válido |
+| GET | `/api/exam/validate/{token}` | No | Valida el token, aprovisiona/reutiliza la cuenta del alumno y devuelve un JWT de auto-login |
 | POST | `/api/exam/start/{token}` | No | Inicia la sesión y marca el token como usado |
 | POST | `/api/exam/answer/{sessionId}` | No | Auto-guarda una respuesta |
-| POST | `/api/exam/submit` | No | Envía el examen completo |
+| POST | `/api/exam/submit` | No | Envía la prueba completa |
+| POST | `/api/exam/integrity/{sessionId}` | Alumno | Registra una señal de integridad: salida de la página, vuelta o pegado. Solo sobre la propia sesión en curso; `409` si la prueba ya se envió |
+
+El detalle de la sesión (`ExamSessionInfoDto`) presenta las preguntas y las opciones **en el orden propio de la sesión**, y los campos `order` llevan la posición en la sesión. El orden se obtiene de `ExamSession.ShuffleSeed` con un hash SHA-256 de la semilla y los identificadores, así que es el mismo en cada reanudación. La corrección identifica la opción elegida por su identificador, nunca por su posición.
+
+**Respuesta de `/api/exam/validate/{token}` (`ExamTokenValidationDto`):**
+```json
+{
+  "isValid": true,
+  "error": null,
+  "sessionId": null,
+  "examTitle": "Evaluación SQL Junio 2024",
+  "candidateName": "Juan García",
+  "authToken": "eyJhbGciOi…"   // JWT con rol Alumno
+}
+```
+
+### Portal del alumno
+
+| Método | Ruta | Auth | Descripción |
+|--------|------|------|-------------|
+| GET | `/api/student/pending` | Alumno | Sus invitaciones no usadas y no expiradas |
+| GET | `/api/student/completed` | Alumno | Su historial de resultados (nota, aprobado, fecha) |
+
+El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro de la petición: un alumno no puede consultar los datos de otro.
 
 ### Resultados
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
 | GET | `/api/results` | Admin | Historial completo |
-| GET | `/api/results/exam/{examId}` | Admin | Por examen |
+| GET | `/api/results/exam/{examId}` | Admin | Por prueba |
 | GET | `/api/results/{id}` | Admin | Detalle con revisión de respuestas |
 | GET | `/api/results/dashboard` | Admin | Estadísticas del dashboard |
+| GET | `/api/results/{id}/integrity` | Admin | Actividad del candidato durante la prueba: resumen y cronología (`IntegrityReportDto`) |
+
+### Corrección
+
+| Método | Ruta | Auth | Descripción |
+|--------|------|------|-------------|
+| GET | `/api/review/pending` | Admin | Cola completa, con la identidad y quién tiene cada reserva |
+| GET · POST | `/api/review/{resultId}` | Admin | El `GET` reserva el resultado 30 minutos; el `POST` corrige |
+| POST · DELETE | `/api/review/{resultId}/reservation` | Admin | Renueva la propia · libera cualquiera |
+| GET · POST · DELETE | `/api/exams/{id}/evaluators[/{userId}]` | Admin | Evaluadores de la prueba. Solo se asignan evaluadores activos |
+| GET | `/api/evaluation/queue` | Evaluador | Pendientes de sus pruebas, sin los suyos como candidato |
+| GET · POST | `/api/evaluation/{resultId}` | Evaluador | A ciegas. El `GET` reserva. `404` si la prueba no está asignada |
+| POST · DELETE | `/api/evaluation/{resultId}/reservation` | Evaluador | Renueva o libera la propia |
+| GET | `/api/evaluation/{resultId}/integrity` | Evaluador | Señales con `ElapsedSeconds` y `OccurredAt` nulo |
+| GET | `/api/evaluation/history[/{resultId}]` | Evaluador | Sus correcciones, aunque ya no tenga asignada la prueba |
+
+Una reserva ajena vigente responde `409` al abrir y al enviar. La reserva se toma con un `UPDATE` condicional, así que dos aperturas simultáneas no pueden ganar las dos.
+
+El detalle de un resultado y el de corrección muestran las respuestas en el **orden de la prueba**, no en el que vio el candidato: así se comparan candidatos sobre el mismo orden.
 
 ---
 
@@ -397,10 +589,11 @@ TechEval/
 ```
 Admin crea preguntas → Categorías + Dificultad + Tipo + Respuestas
     ↓
-Admin crea examen (manual o automático)
+Admin crea la prueba (manual o automática)
+    │  La selección automática solo usa preguntas IsActive + Approved
     ↓
-Admin envía examen: POST /api/exams/send
-    ├── Se genera token seguro (64 bytes, URL-safe, único en BD)
+Admin envía la prueba: POST /api/exams/send  ·  POST /api/exams/send-bulk
+    ├── Se genera token seguro (48 bytes → 64 chars URL-safe, único en BD)
     ├── Se guarda ExamToken con fecha de expiración
     └── Se envía email HTML al candidato con enlace único
                           ↓
@@ -414,39 +607,148 @@ Candidato recibe email con enlace: https://app.com/exam/{token}
     ↓
 GET /api/exam/validate/{token}
     ├── Valida: token existe, no expirado, no usado
-    └── Devuelve: isValid, examTitle, candidateName
+    ├── Crea (o reutiliza) el User del alumno a partir de CandidateEmail
+    ├── Vincula ExamToken.UserId a ese usuario
+    └── Devuelve: isValid, examTitle, candidateName y authToken (JWT rol Alumno)
     ↓
-Blazor muestra pantalla de bienvenida con info del examen
+Blazor guarda la sesión y muestra la pantalla de bienvenida con info de la prueba
+    └── y el aviso de lo que se registra durante la prueba
     ↓
 Candidato pulsa "Comenzar"
     ↓
 POST /api/exam/start/{token}
     ├── Marca IsUsed = true, UsedAt = now (no puede repetirse)
-    └── Crea ExamSession con status=InProgress
+    └── Crea ExamSession con status=InProgress y una semilla de orden aleatoria
     ↓
 Candidato responde preguntas con temporizador visible
+    ├── Preguntas y opciones en el orden propio de su sesión
+    ├── Marca de agua con su nombre y su correo sobre las preguntas
     ├── Auto-guardado: POST /api/exam/answer/{sessionId} (cada respuesta)
+    ├── Salidas de la página y pegados en abiertas: POST /api/exam/integrity/{sessionId}
+    │       (una señal que falla se guarda en memoria y se reintenta con la siguiente)
     └── Si el tiempo se agota → auto-envío
     ↓
 Candidato pulsa "Finalizar" → POST /api/exam/submit
     ├── Corrige automáticamente preguntas tipo test
     ├── Calcula puntuación y % de éxito
-    ├── Crea ExamResult
+    ├── Crea ExamResult (con UserId del alumno)
     ├── Actualiza ExamSession.Status = Completed
     └── Envía email con resultado al candidato
     ↓
 Admin consulta resultados en el dashboard
+Alumno consulta su nota en /portal
+```
+
+### Flujo del alumno recurrente
+
+```
+Alumno entra en /login con su email (o username) y contraseña
+    ↓
+POST /api/auth/login → JWT con rol Alumno → redirección a /portal
+    ↓
+Portal del alumno
+    ├── GET /api/student/pending    → pruebas pendientes con su fecha de expiración
+    │       └── "Comenzar" → /prueba/{token} (mismo flujo que desde el email)
+    └── GET /api/student/completed  → historial de notas (%, aprobado/suspenso, fecha)
 ```
 
 ---
 
-## 8. Configuración y puesta en marcha
+## 8. Cuentas de usuario y portal del alumno
+
+### Aprovisionamiento automático
+
+No hay alta manual de alumnos. La cuenta se crea sola la primera vez que se abre una invitación:
+
+```
+GET /api/exam/validate/{token}
+    ├── ¿Existe un User con ese CandidateEmail?
+    │      Sí, alumno activo → se reutiliza (no se modifica ni el Name ni el PasswordHash)
+    │      Sí, de otro rol o desactivado → "Token no válido.", sin JWT
+    │      No → se crea:
+    │             Email        = CandidateEmail
+    │             Username     = parte local del email (antes de la @)
+    │             Name         = CandidateName de la invitación
+    │             PasswordHash = vacío (sin contraseña utilizable)
+    │             Role         = Alumno
+    │             IsActive     = true
+    ├── ExamToken.UserId ← Id del usuario
+    └── Respuesta con authToken: JWT firmado con rol Alumno (auto-login)
+```
+
+Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`. La cuenta nace **sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña inicial era esa misma parte local, así que quien conociera el email entraba en el portal del candidato.
+
+### Sesión y navegación
+
+| Situación | Comportamiento |
+|-----------|----------------|
+| Login de admin | `POST /api/auth/login` → JWT rol `Admin` → redirección a `/admin`, sidebar completo |
+| Login de evaluador | `POST /api/auth/login` → JWT rol `Evaluador` → redirección a `/evaluacion`, sidebar solo con «Inicio» |
+| Login de alumno | `POST /api/auth/login` (email o username) → JWT rol `Alumno` → redirección a `/portal`, barra superior simple |
+| Apertura del enlace de invitación | `authToken` devuelto por `validate` → sesión iniciada sin pedir credenciales |
+| Sesión previa en `localStorage` | `AuthStateService.InitializeAsync` la restaura y redirige según el rol (`auth_role`). Una sesión de la versión anterior, sin rol, se borra |
+| Página de otro rol | Cada página comprueba el rol y, si no es el suyo, lleva a la página de inicio del rol de la sesión |
+| La API responde `401` con sesión abierta | `SessionExpiryHandler` avisa a `MainLayout`, que cierra la sesión: admin y evaluador van a `/login?motivo=sesion`; el alumno, a `/sesion-no-valida`, que le pide volver a abrir su enlace |
+
+### Gestión de usuarios (`/admin/usuarios`)
+
+El administrador da de alta administradores y evaluadores, cambia el rol, desactiva, reactiva y restablece el acceso. Los alumnos no se dan de alta aquí: nacen al abrir una invitación.
+
+- **Sin contraseñas en la consola.** El alta y el restablecimiento envían un enlace a `/fijar-contrasena/{token}` que caduca a las 48 horas y vale una vez. Emitir un enlace nuevo invalida los anteriores del mismo usuario.
+- **Tres protecciones.** Nadie se cambia el rol, se desactiva ni se restablece el acceso a sí mismo. Y siempre queda un administrador activo: las operaciones que retiran un administrador toman un bloqueo de aplicación de SQL Server (`sp_getapplock`), así que dos administradores que se desactivan a la vez quedan en fila y el segundo recibe `409`.
+- **Invitaciones solo para alumnos.** Enviar una prueba al correo de un administrador o de un evaluador responde `400`; en el envío masivo, falla solo ese candidato.
+
+### Corrección a ciegas (`/evaluacion`)
+
+El administrador asigna evaluadores a cada prueba desde su detalle. El evaluador corrige los pendientes de esas pruebas en `/evaluacion`.
+
+- **Sin identidad.** Los DTO del evaluador no tienen campos de nombre ni de email. El candidato es `Candidato R-<id>`, distinto en cada resultado. Las fechas son `DateOnly`, y las señales de integridad llevan los segundos desde el inicio en lugar de la hora del reloj, porque la hora a la que alguien hizo la prueba ayuda a saber quién la hizo.
+- **Acceso en una consulta.** `GetForEvaluatorAsync` exige la asignación y excluye los resultados del propio evaluador como candidato. Inexistente, no asignado o propio dan el mismo `404`. La comprobación se repite en el envío.
+- **Reserva.** Abrir una corrección la reserva 30 minutos; la pantalla la renueva cada 10 mientras sigue abierta. «Cancelar» o el envío la liberan; si se cierra la pestaña, caduca sola.
+- **Historial.** Filtrado por `ReviewedByUserId`, no por la asignación.
+- **Cambio de rol.** Quien deja de ser evaluador pierde sus asignaciones y sus reservas. La desactivación las conserva.
+
+> **Límite de la ceguera.** Lo que el candidato escribe llega tal cual, y en una prueba que hizo una sola persona la identidad se puede deducir. La ceguera quita la identidad de la pantalla; no la hace imposible de averiguar.
+
+### Contenido del portal (`/portal`)
+
+- **Pruebas pendientes** — invitaciones con `IsUsed = false` y no expiradas, con su fecha de expiración y un botón "Comenzar" que lleva a `/prueba/{token}`, el mismo flujo que desde el email.
+- **Pruebas realizadas** — `ExamResult` del alumno ordenados de más reciente a más antiguo, con título, porcentaje obtenido y aprobado/suspenso.
+
+Ambos listados se resuelven exclusivamente por el `UserId` del JWT.
+
+### Migración de datos previos
+
+Los `ExamToken` y `ExamResult` creados antes de este modelo tienen `UserId = NULL` y, por tanto, no aparecen en ningún portal. Para partir de un estado limpio en un entorno de pruebas existe [`scripts/reset_exam_history.sql`](scripts/reset_exam_history.sql), que borra el histórico de intentos (tokens, sesiones, respuestas y resultados) **sin tocar** usuarios, categorías, preguntas ni exámenes.
+
+---
+
+## 9. Configuración y puesta en marcha
 
 ### Prerrequisitos
 
 - .NET 9 SDK
 - SQL Server (local o Docker)
-- Cuenta SMTP (SendGrid, Gmail, etc.) — o MailHog para desarrollo
+- Aplicación de Entra ID con el permiso `Mail.Send` de Microsoft Graph, y un buzón de Microsoft 365 (opcional en desarrollo: sin ellos no sale correo)
+
+### Referencia de configuración
+
+Las claves se leen de `appsettings.json`, se sobrescriben por entorno (`appsettings.Development.json`) y, en local, por `appsettings.Local.json` (opcional y fuera de git). En Docker se sobrescriben con variables de entorno usando doble guion bajo: `Jwt__SecretKey`, `AdminPassword`, etc.
+
+| Clave | Descripción | Por defecto |
+|-------|-------------|-------------|
+| `ConnectionStrings:DefaultConnection` | Cadena de conexión a SQL Server | `Server=localhost;Database=TechEvalDb;…` |
+| `Jwt:SecretKey` | Clave de firma HMAC-SHA256 — obligatoria, sin valor por defecto | vacío |
+| `Jwt:Issuer` / `Jwt:Audience` | Emisor y audiencia validados en cada petición | `TechEvalAPI` / `TechEvalClient` |
+| `Jwt:ExpirationHours` | Vigencia del token | `8` |
+| `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — obligatorio fuera de desarrollo | vacío |
+| `Email:Office365:TenantId` · `ClientId` · `ClientSecret` | Aplicación de Entra ID con permiso `Mail.Send` — obligatorios fuera de desarrollo | vacío |
+| `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
+| `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
+| `AdminPassword` | Contraseña del admin creado en el primer arranque — **obligatoria, sin valor por defecto** | vacío |
+| `Serilog:MinimumLevel` | Nivel de log por defecto y overrides | `Information` |
+
+En desarrollo, CORS permite cualquier origen; en producción se restringe a los valores de `AllowedOrigins`.
 
 ### Pasos de instalación
 
@@ -468,52 +770,44 @@ Editar `src/TechEval.API/appsettings.json`:
 }
 ```
 
-#### 3. Crear y aplicar migraciones
+#### 3. Crear el esquema
+
+**Obligatorio antes del primer arranque.** La API ya no crea el esquema; si no lo encuentra, para y dice qué ejecutar.
 
 ```bash
-cd src/TechEval.Infrastructure
-
-# Crear migración inicial
-dotnet ef migrations add InitialCreate --startup-project ../TechEval.API
-
-# Aplicar a la BD (también se hace automáticamente al arrancar la API)
-dotnet ef database update --startup-project ../TechEval.API
+sqlcmd -S localhost -i scripts/create_database.sql
 ```
+
+> **El proyecto no usa migraciones de EF Core.** Hasta el 16·09·2026 la aplicación llamaba a `EnsureCreated` al arrancar, y eso dejaba las migraciones permanentemente inservibles: `__EFMigrationsHistory` nunca llegaba a existir, así que la primera migración fallaba. Elegir ahora las migraciones obligaría a cuadrar una migración inicial contra bases ya creadas sin historial, con riesgo de pérdida de datos, a cambio de una comodidad que este equipo no estaba usando.
+
+El guion crea **solo el esquema**. El administrador lo siembra la API en su primer arranque a partir de `AdminPassword`. Las categorías y preguntas de ejemplo solo se siembran en desarrollo.
+
+Sobre una base de datos ya creada con una versión anterior, aplica los guiones incrementales de la [sección 11](#11-scripts-sql).
 
 #### 4. Configurar email
 
-**Para desarrollo (MailHog):**
-```bash
-docker run -d -p 1025:1025 -p 8025:8025 mailhog/mailhog
-```
+El correo sale por Microsoft Graph, con el mismo mecanismo que `EmailService365` de iECS. La aplicación pide un token a Entra ID con sus credenciales de cliente y publica en `POST /users/{FromEmail}/sendMail`. No hay contraseña de buzón, y el remitente es siempre el buzón que envía, así que Exchange no lo trata como suplantación.
 
-En `appsettings.Development.json`:
+En local, en `appsettings.Local.json`; en Docker, con las variables `EMAIL_FROM` y `O365_*` del `.env`:
+
 ```json
 {
   "Email": {
-    "Host": "localhost",
-    "Port": 1025,
-    "EnableSsl": false
-  }
-}
-```
-UI de MailHog: http://localhost:8025
-
-**Para producción (SendGrid):**
-```json
-{
-  "Email": {
-    "Host": "smtp.sendgrid.net",
-    "Port": 587,
-    "UserName": "apikey",
-    "Password": "SG.xxxx",
-    "FromEmail": "noreply@tudominio.com",
-    "EnableSsl": true
+    "FromEmail": "techeval@tudominio.com",
+    "Office365": {
+      "TenantId": "<id del inquilino>",
+      "ClientId": "<id de la aplicación>",
+      "ClientSecret": "<secreto de cliente>"
+    }
   }
 }
 ```
 
-#### 5. Arrancar la API
+La aplicación de Entra ID necesita el permiso de aplicación `Mail.Send` de Microsoft Graph, con consentimiento de administrador. Ese permiso deja enviar como cualquier buzón del inquilino: pide a sistemas que lo limiten al buzón de `FromEmail` con una directiva de acceso de aplicación de Exchange. El destinatario ve el nombre que el buzón tiene en Exchange.
+
+En desarrollo, sin estos datos, la API arranca igual y cada envío falla con su error en el log. Fuera de desarrollo, la API no arranca si falta uno. No hay servidor de captura local: lo que se envía llega de verdad, así que prueba con tu propia dirección.
+
+#### 6. Arrancar la API
 
 ```bash
 cd src/TechEval.API
@@ -523,10 +817,9 @@ dotnet run
 - API: http://localhost:5000
 - Swagger: http://localhost:5000/swagger
 
-**Admin por defecto:** `admin@techeval.com` / `Admin@123!`
-(configurado en `appsettings.json` → `AdminPassword`)
+**Admin:** `admin@techeval.com`. La contraseña sale de `AdminPassword`, sin valor por defecto. En desarrollo la trae `appsettings.Development.json` con el valor público `Admin@123!`. Fuera de desarrollo, la API no arranca si falta, ni si conserva ese valor de desarrollo.
 
-#### 6. Arrancar el frontend Blazor
+#### 7. Arrancar el frontend Blazor
 
 ```bash
 cd src/TechEval.Web
@@ -542,7 +835,9 @@ dotnet run
 
 ---
 
-## 9. Script SQL de creación de base de datos
+## 10. Scripts SQL
+
+### 11.1 Creación completa: `create_database.sql`
 
 El fichero [`scripts/create_database.sql`](scripts/create_database.sql) es una alternativa a las migraciones de EF Core.
 Úsalo cuando:
@@ -550,9 +845,9 @@ El fichero [`scripts/create_database.sql`](scripts/create_database.sql) es una a
 - Quieras revisar o auditar el esquema completo antes de desplegarlo.
 - Trabajes con un CI/CD que ejecute scripts SQL directamente.
 
-> **No uses ambas opciones a la vez.** Elige EF Migrations (sección 7, paso 3) o el script SQL, nunca los dos sobre la misma BD.
+> **No uses ambas opciones a la vez.** Elige EF Migrations (sección 10, paso 3) o el script SQL, nunca los dos sobre la misma BD.
 
-### Ejecución con SSMS
+#### Ejecución con SSMS
 
 Abre SSMS, conecta al servidor y ejecuta el fichero:
 
@@ -560,7 +855,7 @@ Abre SSMS, conecta al servidor y ejecuta el fichero:
 Archivo → Abrir → scripts/create_database.sql → F5
 ```
 
-### Ejecución con sqlcmd
+#### Ejecución con sqlcmd
 
 ```bash
 sqlcmd -S localhost -E -i scripts/create_database.sql
@@ -572,7 +867,7 @@ Con autenticación SQL:
 sqlcmd -S localhost -U sa -P "<contraseña>" -i scripts/create_database.sql
 ```
 
-### Ejecución con Docker (SQL Server en contenedor)
+#### Ejecución con Docker (SQL Server en contenedor)
 
 ```bash
 docker exec -i techeval-sqlserver \
@@ -580,7 +875,7 @@ docker exec -i techeval-sqlserver \
   -i /scripts/create_database.sql
 ```
 
-### Contenido del script
+#### Contenido del script
 
 El script realiza, en orden:
 
@@ -588,29 +883,35 @@ El script realiza, en orden:
 |------|-------------|
 | 1 | Crea la base de datos `TechEvalDb` si no existe |
 | 2 | Elimina las tablas si ya existían (orden inverso de FK) |
-| 3 | Crea las 10 tablas con restricciones, FK e índices |
+| 3 | Crea las 12 tablas con restricciones, FK e índices |
 | 4 | Inserta el usuario administrador por defecto |
 | 5 | Inserta 5 categorías iniciales |
 | 6 | Inserta 3 preguntas de ejemplo con sus respuestas |
 
-### Tablas creadas y dependencias
+#### Tablas creadas y dependencias
 
 ```
 Users ──────────────────────────────────────── (sin dependencias)
 Categories ─────────────────────────────────── (sin dependencias)
 Questions ──────────── FK → Categories
-Answers ────────────── FK → Questions         (CASCADE delete)
+Answers ────────────── FK → Questions                 (CASCADE delete)
 Exams ──────────────── FK → Users
-ExamQuestions ────────── FK → Exams (CASCADE), Questions
-ExamTokens ─────────── FK → Exams
-ExamSessions ───────── FK → ExamTokens        (CASCADE delete, UNIQUE)
-UserAnswers ─────────── FK → ExamSessions (CASCADE), Questions, Answers
-ExamResults ─────────── FK → ExamSessions (CASCADE, UNIQUE), Exams
+ExamQuestions ──────── FK → Exams (CASCADE), Questions
+ExamTokens ─────────── FK → Exams, Users (SET NULL)
+ExamSessions ───────── FK → ExamTokens                (CASCADE delete, UNIQUE)
+UserAnswers ────────── FK → ExamSessions (CASCADE), Questions, Answers
+ExamResults ────────── FK → ExamSessions (CASCADE, UNIQUE), Exams, Users (SET NULL)
+ExamIntegrityEvents ── FK → ExamSessions               (CASCADE delete)
+ExamEvaluators ─────── FK → Exams (CASCADE), Users
+PasswordSetupTokens ── FK → Users                      (CASCADE delete)
 ```
 
-### Contraseña de administrador
+#### Contraseña de administrador
 
-El script inserta el usuario admin con contraseña `Admin@123!` hasheada en SHA-256.  
+El script inserta el usuario admin con contraseña `Admin@123!` hasheada en SHA-256.
+
+> **Desde el 16·09·2026 el algoritmo es PBKDF2-HMAC-SHA256**, no SHA-256. El hash de SHA-256 sigue sirviendo para entrar, y se reescribe solo en el primer inicio de sesión correcto. Por eso el guion de abajo todavía vale, pero deja la cuenta con el formato antiguo hasta ese primer acceso. Lo limpio es dejar que la API cree el administrador en el primer arranque a partir de `AdminPassword`.
+
 Para usar una contraseña diferente, genera el hash con PowerShell antes de ejecutar el script:
 
 ```powershell
@@ -632,13 +933,43 @@ SET PasswordHash = '<hash_nuevo>'
 WHERE Email = 'admin@techeval.com';
 ```
 
+### 11.2 Scripts incrementales
+
+Para bases de datos **ya existentes** creadas con una versión anterior. Son aditivos e idempotentes (comprueban antes de crear) y no borran datos:
+
+| Script | Qué hace |
+|--------|----------|
+| [`add_user_link_columns.sql`](scripts/add_user_link_columns.sql) | Añade `Users.Username` con índice único filtrado, `ExamTokens.UserId` y `ExamResults.UserId` con sus FK (`ON DELETE SET NULL`) e índices |
+| [`add_integrity_columns.sql`](scripts/add_integrity_columns.sql) | Añade `ExamSessions.ShuffleSeed` e `ExamSessions.IntegrityLimitReached`, y crea `ExamIntegrityEvents` con su FK en cascada. Las sesiones existentes quedan sin semilla: conservan el orden de la prueba y constan como anteriores al registro |
+| [`add_category_ai_generation_flag.sql`](scripts/add_category_ai_generation_flag.sql) | Añade `Categories.AllowsAiGeneration` con default `1` y marca la categoría `iECS` como no apta para generación por IA |
+| [`add_user_roles.sql`](scripts/add_user_roles.sql) | Añade `Users.Role` (rellenado desde `IsAdmin`: 1 → Admin, 0 → Alumno) con su `CHECK`, `Users.SecurityStamp` con un valor propio por fila, y la tabla `PasswordSetupTokens`. Después **quita `Users.IsAdmin`**: el binario anterior ya no arranca contra la base actualizada. La cabecera trae el SQL para volver atrás |
+| [`add_evaluator_columns.sql`](scripts/add_evaluator_columns.sql) | Crea `ExamEvaluators` y añade `ExamResults.ReservedByUserId` y `ReservedUntil`. Solo añade: el binario anterior sigue funcionando contra la base actualizada |
+
+```bash
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_link_columns.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_category_ai_generation_flag.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
+```
+
+> **Antes de `add_user_roles.sql`**, comprueba que no hay pruebas en curso: los tokens de la versión anterior no llevan sello y la API los rechaza, así que un candidato a mitad de prueba perdería el guardado hasta volver a abrir su enlace. Despliega cuando `SELECT COUNT(*) FROM dbo.ExamSessions WHERE Status = 1` devuelva `0`.
+
+### 11.3 Limpieza de histórico
+
+[`reset_exam_history.sql`](scripts/reset_exam_history.sql) borra `ExamTokens` y, por cascada, `ExamSessions`, `UserAnswers` y `ExamResults`. Pensado para descartar los intentos creados bajo el modelo anterior (sin `User` asociado). **No toca** `Users`, `Categories`, `Questions`, `Answers` ni `Exams`.
+
+```bash
+sqlcmd -S localhost -d TechEvalDb -i scripts/reset_exam_history.sql
+```
+
 ---
 
-## 10. Script SQL de preguntas del examen
+## 11. Script SQL de preguntas de la prueba
 
 ### Archivo: `scripts/seed_questions_examen.sql`
 
-Inserta las **89 preguntas** del examen de competencias técnicas (Examen competencias v3.pdf) directamente en `TechEvalDb`.
+Inserta las **89 preguntas** de la prueba de competencias técnicas (Examen competencias v3.pdf) directamente en `TechEvalDb`.
 
 #### Resumen de contenido
 
@@ -648,6 +979,8 @@ Inserta las **89 preguntas** del examen de competencias técnicas (Examen compet
 | Frontend | 6 test | Frontend *(nueva)* |
 | Bases de datos | 37 test + 1 abierta | SQL |
 | iECS | 1 abierta + 3 test + 2 abiertas | iECS *(nueva)* |
+
+Existe además `scripts/seed_questions_extra.sql` con un banco de preguntas adicional.
 
 #### Cómo ejecutar
 
@@ -671,22 +1004,26 @@ El script añade automáticamente (si no existen):
 - **Frontend** — JavaScript, frameworks SPA (React/Angular/Vue), UX/UI, Blazor WASM
 - **iECS** — Plataforma iECS de Grupo Pronet: listados, ventanas, tareas programadas
 
+> `iECS` queda marcada con `AllowsAiGeneration = 0` por el script incremental: al tratarse de contenido propietario, no se envía a un modelo generativo. Sigue disponible con normalidad para la creación manual de preguntas.
+
 #### Notas sobre las preguntas abiertas
 
 Las preguntas de tipo `OpenEnded` (`Type = 2`) no tienen respuestas en la tabla `Answers`; se evalúan manualmente. El campo `SampleAnswer` de la tabla `Questions` contiene la respuesta modelo usada como guía de corrección.
 
+#### Las opciones se presentan en orden aleatorio
+
+Cada candidato ve las opciones de una pregunta de test en un orden propio de su sesión. `Answers.Order` solo fija el orden en el banco y en la administración.
+
+> **Aviso para quien escribe preguntas.** Una opción que depende de su posición, como «Todas las anteriores» o «Ninguna de las anteriores», deja de tener sentido cuando cambia de sitio. Reescríbela con su contenido explícito, por ejemplo «WHERE, HAVING y GROUP BY». Los guiones de preguntas del repositorio no tienen ninguna opción así.
+
 ---
 
-## 11. Docker
-
+## 12. Docker
 
 ### Desarrollo rápido con Docker Compose
 
 ```bash
-# Arrancar SQL Server + API + MailHog
-docker-compose --profile dev up -d
-
-# Solo producción
+# Arrancar SQL Server + API + Web
 docker-compose up -d
 ```
 
@@ -697,17 +1034,16 @@ docker-compose up -d
 | `sqlserver` | 1433 | SQL Server 2022 Developer |
 | `api` | 5000 | ASP.NET Core API |
 | `web` | 5001 | Blazor WebAssembly (Nginx) |
-| `mailhog` | 8025 | UI de email (solo perfil dev) |
 
-### Configurar API key de SendGrid en Docker
+Volumen persistente: `sqlserver_data` (datos de SQL Server).
 
-```bash
-SENDGRID_API_KEY=SG.xxx docker-compose up -d
-```
+### Configurar el correo en Docker
+
+Rellena en `.env` el buzón (`EMAIL_FROM`) y los datos de la aplicación de Entra ID (`O365_TENANT_ID`, `O365_CLIENT_ID`, `O365_CLIENT_SECRET`). Si falta uno, Compose no arranca y lo nombra.
 
 ---
 
-## 12. Tests
+## 13. Tests
 
 ### Ejecutar los tests
 
@@ -727,7 +1063,10 @@ dotnet test
 | `QuestionService.GetByIdAsync_NonExisting_ReturnsNull` | No 404 expuesto |
 | `QuestionService.DeleteAsync_ExistingQuestion_SetsInactive` | Soft delete correcto |
 | `ExamService.GenerateAsync_NotEnoughQuestions_ThrowsException` | Validación de preguntas disponibles |
-| `ExamService.CreateAsync_AllQuestionsExist_CreatesExam` | Creación manual de examen |
+| `ExamService.CreateAsync_AllQuestionsExist_CreatesExam` | Creación manual de una prueba |
+
+### Áreas sin cobertura automatizada
+
 
 ### Añadir más tests
 
@@ -741,33 +1080,60 @@ var context = new AppDbContext(options);
 
 ---
 
-## 13. Seguridad
+## 14. Seguridad
 
-### Tokens de examen
+### Tokens de acceso a la prueba
 
 - Generados con `RandomNumberGenerator.GetBytes(48)` → 64 chars Base64 URL-safe
 - **Un solo uso**: al iniciar la sesión `IsUsed = true`
 - **Expiración configurable** (72h por defecto)
 - Almacenados en BD con índice único → imposible colisión
 
-### Autenticación de administradores
+### Autenticación y roles
 
 - JWT con HS256, firmado con secreto de 44+ chars
-- Expiración: 8 horas (configurable)
-- Rol `Admin` requerido en todos los endpoints de gestión
-- Contraseña hasheada con SHA-256 en BD
+- Expiración: 8 horas (configurable con `Jwt:ExpirationHours`); `ClockSkew = 0`
+- Claims emitidos: `NameIdentifier` (id de usuario), `Email`, `Role` (`Admin` o `Alumno`) e `isAdmin`
+- Rol `Admin` requerido en categorías, preguntas, exámenes y resultados
+- Rol `Alumno` requerido en el portal del alumno; un token de admin recibe `403` en esos endpoints
+- El login filtra por `IsActive`: una cuenta desactivada recibe `401` aunque las credenciales sean correctas
+- El mensaje de error de login es genérico ("Credenciales incorrectas.") tanto si el email no existe como si la contraseña falla
+
+### Cuentas de alumno aprovisionadas automáticamente
+
+La contraseña inicial de un alumno es **la parte local de su email**, un valor predecible a partir de la propia dirección. Es aceptable para un portal de consulta de notas, pero conviene tenerlo presente:
+
+```
+✓ Forzar cambio de contraseña en el primer acceso al portal
+✓ O emitir una contraseña aleatoria y enviarla en el email de invitación
+```
+
+El aislamiento entre alumnos sí está garantizado: los endpoints del portal resuelven el `UserId` desde el claim del JWT y nunca desde un parámetro de la petición.
 
 ### Protección de la API de exámenes públicos
 
-- No requiere JWT (candidatos no autenticados)
-- Protección por token de un solo uso
-- Validación del estado del token en cada operación
+- No requiere JWT previo (el candidato llega desde el email)
+- Protección por token de un solo uso, validado en cada operación
+- `validate` devuelve un JWT de alumno, de modo que el resto de la sesión queda asociada a un usuario real
 - Rate limiting recomendado en producción (añadir `AspNetCoreRateLimit`)
+
+### Integridad de la prueba: lo que cubre y lo que no
+
+El sistema aplica tres medidas: un orden propio en cada sesión, una marca de agua con la identidad del candidato y un registro de actividad (salidas de la página y pegados en respuestas abiertas). El registro se muestra al corrector y **no decide nada**: no puntúa, no suspende y el candidato no lo ve.
+
+Lo que **no** cubre:
+
+- Una página web no puede impedir una captura de pantalla, una foto con el móvil ni una consulta desde otro dispositivo.
+- La prueba completa llega al navegador en un solo JSON al empezar, visible en las herramientas de desarrollo.
+- Un candidato con esas herramientas puede bloquear el envío de las señales o quitar la marca de agua. **La ausencia de señales no prueba nada.**
+- Salir de la página tiene causas legítimas: una notificación, un segundo monitor, una herramienta de accesibilidad.
+
+La duración de cada ausencia la mide el navegador del candidato, y la pantalla del corrector lo indica. El registro es un tratamiento de datos personales: la pantalla de bienvenida informa al candidato antes de empezar.
 
 ### CORS
 
-- Configurado explícitamente para el origen del frontend
-- No se usa `AllowAnyOrigin` en producción
+- Configurado explícitamente para el origen del frontend en producción (`AllowedOrigins`)
+- No se usa `AllowAnyOrigin` fuera de desarrollo
 
 ### SQL Injection
 
@@ -777,32 +1143,78 @@ var context = new AppDbContext(options);
 
 ```
 ✓ Cambiar Jwt:SecretKey por un valor de 32+ chars aleatorios
+✓ Migrar el hash de contraseñas de SHA-256 a BCrypt o Argon2
 ✓ Usar HTTPS (certificado SSL/TLS)
 ✓ Configurar rate limiting en /api/exam/*
-✓ Añadir reCAPTCHA al formulario de examen si es necesario
+✓ Añadir reCAPTCHA al formulario de la prueba si es necesario
 ✓ Rotar la contraseña de SQL Server
 ✓ Usar Azure Key Vault o similar para secretos
 ```
 
 ---
 
-## 14. Decisiones técnicas
+## 15. Especificaciones (OpenSpec)
+
+El directorio [`openspec/`](openspec/) mantiene la especificación viva del sistema con un flujo *spec-driven*: cada cambio funcional se propone, se implementa y se archiva fusionando sus deltas en las specs principales.
+
+### Capacidades especificadas (`openspec/specs/`)
+
+| Capacidad | Cubre |
+|-----------|-------|
+| `project-architecture` | Estructura de la solución y reglas de dependencia entre capas |
+| `authentication` | Login, roles, expiración de JWT, hash de contraseñas, aprovisionamiento de cuentas |
+| `question-bank` | Banco de preguntas, categorías, dificultades y tipos |
+| `exam-management` | Creación manual y generación automática de pruebas |
+| `exam-delivery` | Invitaciones, tokens de un solo uso y envío por email |
+| `exam-taking` | Resolución de la prueba, temporizador, auto-guardado y orden propio de cada sesión |
+| `exam-integrity` | Registro de salidas de la página y pegados, y su presentación al corrector |
+| `exam-results` | Corrección, cálculo de nota y consulta de resultados |
+| `candidate-experience` | Experiencia del candidato de principio a fin |
+| `student-portal` | Pruebas pendientes y realizadas del alumno autenticado |
+| `admin-console` | Pantallas y comportamiento de la consola de administración |
+| `deployment-ops` | Docker, configuración y puesta en marcha |
+
+### Histórico de cambios (`openspec/changes/archive/`)
+
+| Fecha | Cambio |
+|-------|--------|
+| 2026-08-13 | 10 capacidades iniciales (`scaffolding-clean-architecture`, `authentication`, `question-bank`, `exam-management`, `exam-delivery`, `exam-taking`, `exam-results`, `candidate-experience`, `admin-console`, `deployment-ops`) |
+| 2026-08-14 | `ai-question-generation` — generación de preguntas por IA con revisión obligatoria |
+| 2026-08-14 | `rename-exam-to-prueba-terminology` — unificación de terminología en la interfaz |
+| 2026-08-17 | `question-review-progress-and-timestamps` — progreso en vivo de la bandeja de revisión |
+| 2026-08-17 | `student-user-accounts` — cuentas de alumno, auto-login y portal |
+| 2026-08-18 | `ai-question-quality` — parámetros de muestreo y calidad de las preguntas generadas |
+| 2026-08-24 | `ai-generation-model-and-scope` — cambio de modelo y flag `AllowsAiGeneration` por categoría |
+
+Cada carpeta archivada conserva su `proposal.md`, `design.md` (cuando aplica), los deltas de spec y el `tasks.md` con el desglose de implementación.
+
+---
+
+## 16. Decisiones técnicas
 
 ### ¿Por qué Clean Architecture en lugar de solo capas?
 
-Clean Architecture invierte las dependencias: Infrastructure depende de Domain, no al revés. Esto permite cambiar EF Core por Dapper o SQL Server por PostgreSQL tocando solo Infrastructure, sin tocar Application ni Domain. En un proyecto de evaluación técnica que puede crecer, esta flexibilidad tiene valor real.
+Clean Architecture invierte las dependencias: Infrastructure depende de Domain, no al revés. Esto permite cambiar EF Core por Dapper, SQL Server por PostgreSQL o el proveedor de correo tocando solo Infrastructure, sin tocar Application ni Domain. En un proyecto de evaluación técnica que puede crecer, esta flexibilidad tiene valor real.
 
 ### ¿Por qué Blazor WebAssembly en lugar de Blazor Server?
 
-Blazor WASM se ejecuta en el cliente → sin estado en servidor → escala trivialmente. El examen del candidato funciona aunque la conexión sea inestable (las respuestas se guardan localmente hasta el envío). Blazor Server requeriría SignalR y conexión persistente, lo que es un riesgo para candidatos con mala conexión.
+Blazor WASM se ejecuta en el cliente → sin estado en servidor → escala trivialmente. La prueba del candidato funciona aunque la conexión sea inestable (las respuestas se guardan localmente hasta el envío). Blazor Server requeriría SignalR y conexión persistente, lo que es un riesgo para candidatos con mala conexión.
 
-### ¿Por qué SHA-256 para contraseñas y no BCrypt?
+### ¿Por qué crear la cuenta del alumno al abrir la invitación y no antes?
 
-En un MVP está bien, pero **para producción se debe migrar a BCrypt o Argon2**. El seeder crea el hash; para cambiarlo basta actualizar el hash en BD. El AuthController ya verifica de forma constante para evitar timing attacks básicos.
+Evita un alta manual y un email adicional: el candidato hace su prueba exactamente igual que antes, y como efecto colateral queda con una cuenta que le permite volver a consultar su nota. Vincular `ExamToken` y `ExamResult` a un `UserId` también da al historial una identidad estable, en lugar de depender de la coincidencia de cadenas de email.
+
+### ¿Por qué PBKDF2 y no BCrypt o Argon2?
+
+Hasta el 16·09·2026 el hash era SHA-256 sin sal, que es rápido a propósito y por eso mal candidato para contraseñas. Hoy es PBKDF2-HMAC-SHA256 con sal de 16 bytes y 600 000 iteraciones.
+
+Se eligió PBKDF2 porque `Rfc2898DeriveBytes` viene con la plataforma. BCrypt y Argon2 son mejores frente a ataques con hardware dedicado, pero exigen un paquete externo, y para este perfil de amenaza la diferencia no compensa esa dependencia.
+
+El hash guarda algoritmo, coste y sal, así que subir las iteraciones más adelante no invalida lo existente. Los hashes SHA-256 antiguos siguen verificando y se reescriben en el primer inicio de sesión correcto: convertirlos con un guion es imposible, porque haría falta la contraseña en claro.
 
 ### ¿Por qué soft delete y no hard delete?
 
-Las preguntas y exámenes tienen historial de resultados. Si se eliminaran físicamente, los resultados huérfanos perderían contexto. El soft delete (IsActive = false) preserva el historial completo.
+Las preguntas y exámenes tienen historial de resultados. Si se eliminaran físicamente, los resultados huérfanos perderían contexto. El soft delete (IsActive = false) preserva el historial completo. Por el mismo motivo, una pregunta rechazada se marca `Rejected` en lugar de borrarse: se conserva la trazabilidad de qué generó el modelo y qué se descartó.
 
 ### ¿Por qué records para DTOs?
 
@@ -812,9 +1224,15 @@ Los `record` de C# son inmutables por defecto, tienen igualdad por valor y sinta
 
 AutoMapper añade magia implícita difícil de depurar. Los mapeos manuales en los servicios son explícitos, fáciles de testear y no introducen dependencia adicional. Para proyectos muy grandes con decenas de entidades, sí tiene sentido considerarlo.
 
-### ¿Por qué SMTP directo y no SendGrid SDK?
+### ¿Por qué Microsoft Graph y no SMTP?
 
-El `IEmailService` desacopla la implementación. La `SmtpEmailService` funciona con cualquier servidor SMTP (SendGrid, Gmail, Mailtrap, MailHog). Para cambiar a SendGrid SDK basta crear `SendGridEmailService : IEmailService` y registrarlo en DI.
+Hasta el 02·10·2026 el correo salía por SMTP. La cuenta de prueba se autenticaba con un buzón y ponía en el `From` otro buzón de otro dominio, y sistemas recibía alertas de suplantación. Además, la contraseña del buzón viajaba sin cifrar.
+
+Con Graph eso no puede pasar: el remitente es el buzón en cuyo nombre se publica, y no hay contraseña de buzón. Es también lo que usan las demás aplicaciones de iECS (`EmailService365`), así que sistemas ya sabe administrarlo.
+
+El precio es que ya no hay servidor de captura local como MailHog: en desarrollo, lo que se envía llega de verdad.
+
+El `IEmailService` sigue desacoplando la implementación. Para otro proveedor basta otra implementación y cambiar su registro en `DependencyInjection`.
 
 ---
 
@@ -823,3 +1241,12 @@ El `IEmailService` desacopla la implementación. La `SmtpEmailService` funciona 
 | Versión | Fecha | Cambios |
 |---------|-------|---------|
 | 1.0.0 | 2024-06 | Versión inicial completa |
+| 1.1.0 | 2026-08-14 | Generación de preguntas con IA (Ollama), procesamiento en segundo plano y bandeja de revisión |
+| 1.2.0 | 2026-08-17 | Progreso en vivo de la revisión; cuentas de alumno, auto-login desde la invitación y portal del alumno |
+| 1.3.0 | 2026-08-18 | Parámetros de calidad del modelo (temperatura, penalización de repetición, contexto) |
+| 1.4.0 | 2026-08-27 | Modelo de generación `qwen2.5-coder:14b` y flag `AllowsAiGeneration` por categoría |
+| 1.5.0 | 2026-09-09 | **Retirada de la generación con IA local.** Fuera el modelo, su cola, su bandeja de revisión y sus tablas |
+| 1.6.0 | 2026-09-16 | Reanudación de la prueba, envío idempotente, edición de preguntas ya respondidas y escritura transaccional |
+| 1.7.0 | 2026-09-16 | Propiedad de la sesión, plazo validado en servidor, cuentas de alumno sin contraseña adivinable y hash PBKDF2 |
+| 1.8.0 | 2026-09-16 | Secretos fuera del repositorio, errores traducidos a HTTP en un solo sitio y límite de ritmo en el login |
+| 1.9.0 | 2026-09-16 | La respuesta guarda lo que se le preguntó al candidato; hora en UTC; autoguardado mientras se escribe |

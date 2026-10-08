@@ -17,6 +17,11 @@
             <p class="text-muted small">Inicia sesión para continuar</p>
         </div>
 
+        @if (Motivo == "sesion" && string.IsNullOrEmpty(_error))
+        {
+            <div class="alert alert-warning py-2">Tu sesión ya no es válida. Inicia sesión de nuevo.</div>
+        }
+
         @if (!string.IsNullOrEmpty(_error))
         {
             <div class="alert alert-danger py-2">@_error</div>
@@ -42,6 +47,8 @@
 </div>
 
 @code {
+    [SupplyParameterFromQuery(Name = "motivo")] public string? Motivo { get; set; }
+
     private string _email = string.Empty, _password = string.Empty, _error = string.Empty;
     private bool _loading;
 
@@ -50,7 +57,7 @@
         if (firstRender)
         {
             await Auth.InitializeAsync();
-            if (Auth.IsAuthenticated) Nav.NavigateTo(Auth.IsAdmin ? "/admin" : "/portal");
+            if (Auth.IsAuthenticated) Nav.NavigateTo(Auth.Home);
         }
     }
 
@@ -66,8 +73,8 @@
 
         if (result is null) { _error = "Credenciales incorrectas."; return; }
 
-        await Auth.LoginAsync(result.Token, result.Name, result.IsAdmin);
-        Nav.NavigateTo(result.IsAdmin ? "/admin" : "/portal");
+        await Auth.LoginAsync(result.Token, result.Name, result.Role, result.Email);
+        Nav.NavigateTo(Auth.Home);
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)

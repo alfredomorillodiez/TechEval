@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using TechEval.Domain.Entities;
 using TechEval.Domain.Interfaces.Services;
 
 namespace TechEval.Infrastructure.Security;
@@ -14,6 +15,13 @@ public class JwtSettings
     public string Issuer { get; set; } = "TechEvalAPI";
     public string Audience { get; set; } = "TechEvalClient";
     public int ExpirationHours { get; set; } = 8;
+}
+
+/// <summary>Claims propios de TechEval, además de los estándar.</summary>
+public static class TechEvalClaims
+{
+    /// <summary>Sello de seguridad del usuario en el momento de emitir el token.</summary>
+    public const string SecurityStamp = "stamp";
 }
 
 public class TokenService : ITokenService
@@ -29,17 +37,17 @@ public class TokenService : ITokenService
             .Replace("+", "-").Replace("/", "_").Replace("=", "");
     }
 
-    public string GenerateJwtToken(int userId, string email, bool isAdmin)
+    public string GenerateJwtToken(User user)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-            new Claim(ClaimTypes.Email, email),
-            new Claim(ClaimTypes.Role, isAdmin ? "Admin" : "Alumno"),
-            new Claim("isAdmin", isAdmin.ToString())
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Email, user.Email),
+            new Claim(ClaimTypes.Role, user.Role.ToString()),
+            new Claim(TechEvalClaims.SecurityStamp, user.SecurityStamp.ToString())
         };
 
         var token = new JwtSecurityToken(
@@ -50,34 +58,5 @@ public class TokenService : ITokenService
             signingCredentials: creds);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
-    }
-
-    public (int userId, string email, bool isAdmin)? ValidateJwtToken(string token)
-    {
-        try
-        {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
-            var handler = new JwtSecurityTokenHandler();
-            var principal = handler.ValidateToken(token, new TokenValidationParameters
-            {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = key,
-                ValidateIssuer = true,
-                ValidIssuer = _jwtSettings.Issuer,
-                ValidateAudience = true,
-                ValidAudience = _jwtSettings.Audience,
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.Zero
-            }, out _);
-
-            var userId = int.Parse(principal.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
-            var email = principal.FindFirst(ClaimTypes.Email)?.Value!;
-            var isAdmin = bool.Parse(principal.FindFirst("isAdmin")?.Value!);
-            return (userId, email, isAdmin);
-        }
-        catch
-        {
-            return null;
-        }
     }
 }

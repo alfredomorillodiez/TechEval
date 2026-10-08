@@ -1,0 +1,44 @@
+@implements IAsyncDisposable
+
+@* Renueva la reserva de un resultado mientras la pantalla de corrección sigue abierta. No la
+   libera al salir: el navegador no garantiza esa última petición, y la reserva caduca sola a
+   los 30 minutos. Liberarla es cosa del botón «Cancelar». *@
+
+@code {
+    /// <summary>Renueva la reserva. False si ya no es de quien corrige.</summary>
+    [Parameter, EditorRequired] public Func<Task<bool>> Renew { get; set; } = default!;
+
+    /// <summary>La renovación falló: otra persona tomó el resultado o ya no está disponible.</summary>
+    [Parameter] public EventCallback OnLost { get; set; }
+
+    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(10);
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized() => _ = LoopAsync();
+
+    private async Task LoopAsync()
+    {
+        using var timer = new PeriodicTimer(Interval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_cts.Token))
+            {
+                if (!await Renew())
+                {
+                    await OnLost.InvokeAsync();
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

@@ -1,0 +1,71 @@
+@page "/evaluacion/historial"
+@using TechEval.Application.DTOs
+@inject ApiService Api
+@inject NavigationManager Nav
+@inject AuthStateService Auth
+
+<PageTitle>Historial — TechEval</PageTitle>
+
+@* Lo que corrigió el evaluador, aunque ya no tenga asignada la prueba. A ciegas, como la cola. *@
+<div class="container-lg py-4">
+    <h1 class="h3 mb-4">Mis correcciones</h1>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_history.Count == 0)
+    {
+        <div class="text-center text-muted py-5">Todavía no has corregido ninguna prueba.</div>
+    }
+    else
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3">Candidato</th>
+                            <th>Prueba</th>
+                            <th>Corregida</th>
+                            <th>Nota</th>
+                            <th class="text-end pe-3"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var h in _history)
+                        {
+                            <tr>
+                                <td class="ps-3 fw-semibold">@h.CandidateAlias</td>
+                                <td>@h.ExamTitle</td>
+                                <td class="text-muted small">@h.ReviewedOn.ToString("dd/MM/yyyy")</td>
+                                <td>
+                                    <span class="badge @(h.Passed ? "bg-success" : "bg-danger")">
+                                        @h.ScorePercentage% · @(h.Passed ? "Aprobado" : "No aprobado")
+                                    </span>
+                                </td>
+                                <td class="text-end pe-3">
+                                    <a href="/evaluacion/historial/@h.ResultId" class="btn btn-sm btn-outline-primary">Ver</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private List<EvaluatorHistoryItemDto> _history = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Auth.InitializeAsync();
+        if (!Auth.IsEvaluador) { Nav.NavigateTo(Auth.Home); return; }
+
+        _history = await Api.GetEvaluationHistoryAsync() ?? new();
+        _loading = false;
+    }
+}

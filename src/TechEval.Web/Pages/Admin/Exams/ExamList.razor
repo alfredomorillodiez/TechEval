@@ -336,7 +336,7 @@
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
-        if (!Auth.IsAuthenticated || !Auth.IsAdmin) { Nav.NavigateTo("/login"); return; }
+        if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
         _exams = await Api.GetExamsAsync() ?? new();
         _loading = false;
     }

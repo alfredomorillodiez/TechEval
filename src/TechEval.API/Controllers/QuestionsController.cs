@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
@@ -8,7 +9,7 @@ namespace TechEval.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Admin")]
+[Authorize(Policy = Policies.Gestion)]
 public class QuestionsController : ControllerBase
 {
     private readonly IQuestionService _service;
@@ -23,6 +24,12 @@ public class QuestionsController : ControllerBase
         [FromQuery] QuestionType? type,
         CancellationToken ct)
         => Ok(await _service.GetAllAsync(categoryId, difficulty, type, ct));
+
+    /// <summary>Preguntas activas de cada nivel en unas categorías (todas, sin categorías)</summary>
+    [HttpGet("availability")]
+    [ProducesResponseType(typeof(IReadOnlyList<LevelCountDto>), 200)]
+    public async Task<IActionResult> GetAvailability([FromQuery] List<int>? categoryIds, CancellationToken ct)
+        => Ok(await _service.GetAvailabilityAsync(categoryIds, ct));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
@@ -39,8 +46,13 @@ public class QuestionsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
+    [ProducesResponseType(typeof(QuestionDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateQuestionDto dto, CancellationToken ct)
     {
+        // El 409 de `AnswerInUseException` lo produce ErrorHandlingMiddleware. El código de
+        // estado se decide en un solo sitio para que el mismo error no se mapee de dos formas.
         var result = await _service.UpdateAsync(id, dto, ct);
         return result is null ? NotFound() : Ok(result);
     }

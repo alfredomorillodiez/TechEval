@@ -18,5 +18,9 @@ public class ExamToken
     public ExamSession? ExamSession { get; set; }
 
     public bool IsExpired => DateTime.UtcNow > ExpiresAt;
-    public bool IsValid => !IsUsed && !IsExpired;
+
+    // Responde a "¿se puede EMPEZAR esta prueba?", no a "¿se puede volver a ella?".
+    // La vuelta depende del estado de ExamSession, que esta propiedad no puede consultar
+    // sin depender de que la navegación esté cargada: esa decisión vive en ExamTokenService.
+    public bool CanStart => !IsUsed && !IsExpired;
 }

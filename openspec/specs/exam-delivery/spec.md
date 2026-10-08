@@ -132,7 +132,7 @@ El sistema SHALL validar en el servidor los datos de una invitación y MUST resp
 - **THEN** el sistema responde `400` indicando que hace falta al menos un candidato
 
 ### Requirement: Una prueba desactivada no admite invitaciones
-El sistema SHALL rechazar con `409 Conflict` y un mensaje claro cualquier invitación, individual o masiva, a una prueba desactivada. El envío masivo SHALL rechazarse entero, antes de crear ningún token. Desactivar una prueba SHALL NOT invalidar los enlaces ya enviados.
+El sistema SHALL rechazar con `409 Conflict` y un mensaje claro cualquier invitación, individual o masiva, a una prueba desactivada. El envío masivo SHALL rechazarse entero, antes de crear ningún token. Desactivar una prueba SHALL retirar también los enlaces ya enviados que nadie ha abierto: no validan ni crean sesión. Una sesión ya en curso SHALL poder reanudarse y terminarse.
 
 #### Scenario: Invitación individual a una prueba desactivada
 - **GIVEN** una prueba con `IsActive = false`
@@ -145,10 +145,16 @@ El sistema SHALL rechazar con `409 Conflict` y un mensaje claro cualquier invita
 - **WHEN** un administrador envía `POST /api/exams/send-bulk` con tres candidatos
 - **THEN** el sistema responde `409` y no crea ningún token
 
-#### Scenario: Un enlace ya enviado sigue valiendo
-- **GIVEN** una invitación enviada antes de desactivar la prueba
+#### Scenario: Un enlace sin abrir deja de valer
+- **GIVEN** una invitación enviada antes de desactivar la prueba, sin sesión creada
 - **WHEN** el candidato abre su enlace
-- **THEN** el enlace se comporta como antes
+- **THEN** el sistema responde que la prueba ya no está disponible
+- **AND** no crea ninguna sesión
+
+#### Scenario: Una sesión en curso puede terminar
+- **GIVEN** un candidato con la sesión en curso cuando se desactiva la prueba
+- **WHEN** vuelve a abrir su enlace
+- **THEN** reanuda la sesión y puede enviarla
 
 ### Requirement: Las fechas de los correos van en hora local
 El correo de invitación y el de enlace para fijar la contraseña SHALL mostrar la fecha de expiración en la zona horaria que indique `Email:TimeZoneId` (por defecto `Europe/Madrid`), con el nombre de la zona y su desfase respecto a UTC. Si la zona configurada no existe en el equipo, SHALL mostrar la fecha en UTC con esa etiqueta, sin fallar. El valor almacenado SHALL seguir siendo UTC.

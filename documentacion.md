@@ -549,7 +549,7 @@ El detalle de la sesión (`ExamSessionInfoDto`) presenta las preguntas y las opc
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/student/pending` | Alumno | Sus invitaciones no usadas y no expiradas |
+| GET | `/api/student/pending` | Alumno | Sus invitaciones no usadas, no expiradas y de pruebas activas, más sus sesiones en curso |
 | GET | `/api/student/completed` | Alumno | Su historial de resultados (nota, aprobado, fecha) |
 
 El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro de la petición: un alumno no puede consultar los datos de otro.
@@ -704,6 +704,16 @@ El administrador da de alta administradores y evaluadores, cambia el rol, desact
 - **Sin contraseñas en la consola.** El alta y el restablecimiento envían un enlace a `/fijar-contrasena/{token}` que caduca a las 48 horas y vale una vez. Emitir un enlace nuevo invalida los anteriores del mismo usuario.
 - **Tres protecciones.** Nadie se cambia el rol, se desactiva ni se restablece el acceso a sí mismo. Y siempre queda un administrador activo: las operaciones que retiran un administrador toman un bloqueo de aplicación de SQL Server (`sp_getapplock`), así que dos administradores que se desactivan a la vez quedan en fila y el segundo recibe `409`.
 - **Invitaciones solo para alumnos.** Enviar una prueba al correo de un administrador o de un evaluador responde `400`; en el envío masivo, falla solo ese candidato.
+
+### Prueba desactivada
+
+Desactivar una prueba (`IsActive = false`) la retira de circulación:
+
+- **Invitaciones nuevas.** El envío individual y el masivo responden `409`. El masivo se rechaza entero, antes de crear ningún token.
+- **Enlaces ya enviados y sin abrir.** `validate` responde «Esta prueba ya no está disponible» y `start` no crea la sesión ni marca el token como usado. Tampoco salen en `/api/student/pending`.
+- **Sesión en curso.** Se puede reanudar y enviar: quien ya empezó puede terminar.
+
+Si se reactiva la prueba, los enlaces que no hayan expirado vuelven a funcionar.
 
 ### Corrección a ciegas (`/evaluacion`)
 

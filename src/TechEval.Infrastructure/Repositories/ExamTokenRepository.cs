@@ -48,7 +48,7 @@ public class ExamTokenRepository : BaseRepository<ExamToken>, IExamTokenReposito
             .Include(t => t.Exam)
             .Include(t => t.ExamSession)
             .Where(t => t.UserId == userId
-                && ((!t.IsUsed && t.ExpiresAt > DateTime.UtcNow)
+                && ((!t.IsUsed && t.ExpiresAt > DateTime.UtcNow && t.Exam!.IsActive)
                     || (t.ExamSession != null
                         && t.ExamSession.Status == SessionStatus.InProgress
                         && t.ExamSession.ExamResult == null)))

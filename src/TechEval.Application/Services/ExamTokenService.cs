@@ -243,6 +243,13 @@ public class ExamTokenService : IExamTokenService
         if (IsSessionFinished(examToken))
             return new ExamTokenValidationDto(false, "Esta prueba ya ha sido completada.", null, null, null, null);
 
+        // Una prueba desactivada retira también los enlaces que nadie ha abierto. La sesión ya
+        // abierta no se corta: quien empezó puede terminar.
+        if (!examToken.Exam.IsActive && !HasOpenSession(examToken))
+            return new ExamTokenValidationDto(false,
+                "Esta prueba ya no está disponible. Pide una invitación nueva a quien te la envió.",
+                null, null, null, null);
+
         // ExpiresAt es el plazo para EMPEZAR, no para terminar: una prueba ya abierta la
         // gobierna su tiempo límite, así que la expiración solo cierra la puerta de entrada.
         if (!HasOpenSession(examToken) && examToken.IsExpired)
@@ -327,7 +334,7 @@ public class ExamTokenService : IExamTokenService
         if (HasOpenSession(examToken))
             return BuildSessionInfo(examToken);
 
-        if (!examToken.CanStart) return null;
+        if (!examToken.CanStart || !examToken.Exam.IsActive) return null;
 
         examToken.IsUsed = true;
         examToken.UsedAt = DateTime.UtcNow;

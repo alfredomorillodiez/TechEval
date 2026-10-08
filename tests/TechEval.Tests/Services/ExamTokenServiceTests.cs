@@ -308,6 +308,57 @@ public class ExamTokenServiceTests
         result.Error.Should().Be("Token no válido.");
     }
 
+    // ---------- Prueba desactivada ----------
+
+    [Fact]
+    public async Task Validate_PruebaDesactivadaSinSesion_RetiraElEnlace()
+    {
+        var token = ConfigurarToken();
+        token.Exam.IsActive = false;
+
+        var result = await _sut.ValidateTokenAsync("tok");
+
+        result.IsValid.Should().BeFalse();
+        result.Error.Should().Contain("ya no está disponible");
+        result.AuthToken.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Validate_PruebaDesactivadaConSesionEnCurso_DejaTerminar()
+    {
+        var token = ConfigurarToken(usado: true, estadoSesion: SessionStatus.InProgress);
+        token.Exam.IsActive = false;
+
+        var result = await _sut.ValidateTokenAsync("tok");
+
+        result.IsValid.Should().BeTrue();
+        result.SessionId.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task Start_PruebaDesactivadaSinSesion_NoCreaSesion()
+    {
+        var token = ConfigurarToken();
+        token.Exam.IsActive = false;
+
+        var session = await _sut.StartSessionAsync("tok");
+
+        session.Should().BeNull();
+        _sessionsCreadas.Should().BeEmpty();
+        token.IsUsed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Start_PruebaDesactivadaConSesionEnCurso_Reanuda()
+    {
+        var token = ConfigurarToken(usado: true, estadoSesion: SessionStatus.InProgress);
+        token.Exam.IsActive = false;
+
+        var session = await _sut.StartSessionAsync("tok");
+
+        session!.SessionId.Should().Be(42);
+    }
+
     // ---------- Inicio y reanudación ----------
 
     [Fact]

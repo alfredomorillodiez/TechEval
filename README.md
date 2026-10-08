@@ -166,6 +166,9 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
 
 # Una respuesta por pregunta y sesión: índice único en UserAnswers. Si hay duplicados, no borra nada: los lista y se detiene
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_useranswers_unique_index.sql
+
+# Condiciones de cada sesión (tiempo y nota con que empezó) y marca de sesiones abandonadas
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_session_terms_columns.sql
 ```
 
 > **Antes de aplicar `add_user_roles.sql`**, comprueba que no hay pruebas en curso. Desde este cambio el JWT lleva un sello de seguridad, y la API rechaza los tokens emitidos por la versión anterior. Un candidato a mitad de prueba perdería el guardado de sus respuestas hasta volver a abrir su enlace. Despliega cuando esta consulta devuelva `0`:
@@ -223,6 +226,8 @@ Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`ap
 | `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — **obligatorio fuera de desarrollo** | vacío |
 | `Email:Office365:*` | `TenantId`, `ClientId` y `ClientSecret` de la aplicación de Entra ID — **obligatorios fuera de desarrollo** | vacío |
 | `Email:TimeZoneId` | Zona horaria de la fecha de expiración en los correos. Si el equipo no la conoce, los correos llevan la hora en UTC | `Europe/Madrid` |
+| `Sessions:AbandonAfterHours` | Horas, después del plazo, tras las que una sesión que nadie envió se marca abandonada. `0` desactiva el trabajo | `24` |
+| `Sessions:SweepMinutes` | Minutos entre dos revisiones de sesiones abandonadas | `15` |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del administrador creado en el primer arranque — **obligatoria** | vacío |

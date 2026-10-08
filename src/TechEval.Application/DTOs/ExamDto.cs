@@ -40,7 +40,10 @@ public record ExamSummaryDto(
     bool IsActive,
     DateTime CreatedAt,
     int TokensSent,
-    int ResultsCount);
+    int ResultsCount,
+    // Sesiones marcadas como abandonadas: empezaron y nadie las envió. Al final y con valor por
+    // defecto, para que las construcciones anteriores no cambien.
+    int AbandonedCount = 0);
 
 public record CreateExamDto(
     string Title,

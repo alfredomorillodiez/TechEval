@@ -90,6 +90,14 @@
                                     </div>
                                 </div>
                             </div>
+                            @if (exam.AbandonedCount > 0)
+                            {
+                                @* Empezaron y nadie las envió; se marcan solas pasado el plazo y la gracia. *@
+                                <div class="small text-muted mb-3" title="Sesiones que empezaron y nadie envió">
+                                    <i class="bi bi-person-x me-1"></i>
+                                    <strong>@exam.AbandonedCount</strong> @(exam.AbandonedCount == 1 ? "abandonada" : "abandonadas")
+                                </div>
+                            }
                             <div class="d-flex gap-2">
                                 <button class="btn btn-sm btn-primary flex-grow-1"
                                         @onclick="() => SendExam(exam.Id)">

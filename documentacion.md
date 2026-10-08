@@ -751,6 +751,8 @@ Las claves se leen de `appsettings.json`, se sobrescriben por entorno (`appsetti
 | `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — obligatorio fuera de desarrollo | vacío |
 | `Email:Office365:TenantId` · `ClientId` · `ClientSecret` | Aplicación de Entra ID con permiso `Mail.Send` — obligatorios fuera de desarrollo | vacío |
 | `Email:TimeZoneId` | Zona horaria de la fecha de expiración en los correos (id IANA o de Windows). Si el equipo no la conoce, los correos llevan la hora en UTC | `Europe/Madrid` |
+| `Sessions:AbandonAfterHours` | Horas, después del plazo, tras las que una sesión que nadie envió se marca `Abandoned`. `0` desactiva el trabajo | `24` |
+| `Sessions:SweepMinutes` | Minutos entre dos revisiones de sesiones abandonadas (mínimo 1) | `15` |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del admin creado en el primer arranque — **obligatoria, sin valor por defecto** | vacío |
@@ -953,6 +955,7 @@ Para bases de datos **ya existentes** creadas con una versión anterior. Son adi
 | [`add_user_roles.sql`](scripts/add_user_roles.sql) | Añade `Users.Role` (rellenado desde `IsAdmin`: 1 → Admin, 0 → Alumno) con su `CHECK`, `Users.SecurityStamp` con un valor propio por fila, y la tabla `PasswordSetupTokens`. Después **quita `Users.IsAdmin`**: el binario anterior ya no arranca contra la base actualizada. La cabecera trae el SQL para volver atrás |
 | [`add_evaluator_columns.sql`](scripts/add_evaluator_columns.sql) | Crea `ExamEvaluators` y añade `ExamResults.ReservedByUserId` y `ReservedUntil`. Solo añade: el binario anterior sigue funcionando contra la base actualizada |
 | [`add_useranswers_unique_index.sql`](scripts/add_useranswers_unique_index.sql) | Crea el índice único `IX_UserAnswers_ExamSessionId_QuestionId` (una respuesta por pregunta y sesión) y el índice `IX_UserAnswers_QuestionId`. Solo añade. **Si la base ya tiene respuestas duplicadas, no borra nada**: lista las parejas repetidas con sus `Id` y puntos y termina con error; borra a mano la fila sobrante y vuelve a ejecutarlo |
+| [`add_session_terms_columns.sql`](scripts/add_session_terms_columns.sql) | Añade `ExamSessions.TimeLimitMinutesSnapshot` y `PassingScoreSnapshot` (nulables): el tiempo y la nota de corte con que empezó cada sesión. Solo añade; las sesiones existentes quedan a `NULL` y siguen usando los valores de la prueba. **Al desplegar la API nueva, su trabajo marca como abandonadas las sesiones en curso vencidas hace más de 24 horas** |
 
 ```bash
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_link_columns.sql
@@ -961,6 +964,7 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_useranswers_unique_index.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_session_terms_columns.sql
 ```
 
 > **Antes de `add_user_roles.sql`**, comprueba que no hay pruebas en curso: los tokens de la versión anterior no llevan sello y la API los rechaza, así que un candidato a mitad de prueba perdería el guardado hasta volver a abrir su enlace. Despliega cuando `SELECT COUNT(*) FROM dbo.ExamSessions WHERE Status = 1` devuelva `0`.

@@ -217,6 +217,10 @@ CREATE TABLE dbo.ExamSessions (
     Status      INT       NOT NULL CONSTRAINT DF_ExamSessions_Status DEFAULT 1,
     ShuffleSeed INT       NULL,       -- semilla del orden de la sesión; NULL = anterior al cambio
     IntegrityLimitReached BIT NOT NULL CONSTRAINT DF_ExamSessions_IntegrityLimitReached DEFAULT 0,
+    -- Las condiciones con que empezo el candidato. Editar la prueba despues no las cambia.
+    -- NULL = sesion anterior al cambio: usa el tiempo y la nota actuales de la prueba.
+    TimeLimitMinutesSnapshot INT NULL,
+    PassingScoreSnapshot     INT NULL,
 
     CONSTRAINT PK_ExamSessions PRIMARY KEY (Id),
     CONSTRAINT FK_ExamSessions_ExamTokens FOREIGN KEY (ExamTokenId)

@@ -35,6 +35,17 @@ public class ExamAlreadySubmittedException : ConflictException
     public ExamAlreadySubmittedException(string message) : base(message) { }
 }
 
+/// <summary>
+/// Se lanza cuando la sesión se marcó como abandonada (plazo vencido hace más de la gracia y sin
+/// envío): la API la traduce a 409. No se puede reanudar ni escribir en ella.
+/// </summary>
+public class ExamAbandonedException : ConflictException
+{
+    public const string DefaultMessage = "La prueba se cerró por inactividad.";
+
+    public ExamAbandonedException() : base(DefaultMessage) { }
+}
+
 public interface IExamTokenService
 {
     Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default);
@@ -222,6 +233,13 @@ public class ExamTokenService : IExamTokenService
 
         // El estado de la sesión manda sobre el del token. Un token usado con la sesión
         // todavía abierta es el caso normal de quien recarga la página, y debe poder volver.
+        // Una abandonada no es una completada: el candidato no envió nada, y lo que le sirve es
+        // saber que tiene que pedir otra invitación.
+        if (examToken.ExamSession is { Status: SessionStatus.Abandoned })
+            return new ExamTokenValidationDto(false,
+                "Esta prueba se cerró por inactividad. Pide una invitación nueva a quien te la envió.",
+                null, null, null, null);
+
         if (IsSessionFinished(examToken))
             return new ExamTokenValidationDto(false, "Esta prueba ya ha sido completada.", null, null, null, null);
 
@@ -319,7 +337,12 @@ public class ExamTokenService : IExamTokenService
         var session = new ExamSession
         {
             ExamTokenId = examToken.Id,
-            ShuffleSeed = RandomNumberGenerator.GetInt32(int.MaxValue)
+            ShuffleSeed = RandomNumberGenerator.GetInt32(int.MaxValue),
+            // Las condiciones con que empieza. Se fijan aquí y solo aquí: la reanudación devuelve
+            // la sesión existente antes de llegar a esta línea. Editar la prueba después no las
+            // cambia, y el plazo y el veredicto salen de estos valores.
+            TimeLimitMinutesSnapshot = examToken.Exam.TimeLimitMinutes,
+            PassingScoreSnapshot = examToken.Exam.PassingScorePercentage
         };
         await _sessionRepo.AddAsync(session, ct);
         await _tokenRepo.UpdateAsync(examToken, ct);
@@ -335,6 +358,10 @@ public class ExamTokenService : IExamTokenService
             ?? throw new SessionAccessDeniedException("Sesión no encontrada.");
 
         EnsureOwnedBy(token, userId);
+
+        // Una abandonada se cierra con su propio mensaje: «ya se ha enviado» sería falso.
+        if (token.ExamSession is { Status: SessionStatus.Abandoned })
+            throw new ExamAbandonedException();
 
         // Una prueba enviada ya no cambia. Se mira el resultado además del estado, como hace
         // el envío: los dos se escriben juntos, pero un fallo antiguo pudo dejarlos a medias.
@@ -425,6 +452,10 @@ public class ExamTokenService : IExamTokenService
         if (yaEnviado.Count > 0)
             return BuildReceipt(yaEnviado[0], exam.Title);
 
+        // Sin resultado y abandonada: no hay nada que cerrar. El 409 le dice al candidato qué hacer.
+        if (session.Status == SessionStatus.Abandoned)
+            throw new ExamAbandonedException();
+
         // Antes de abrir la transacción, para no escribir nada. Fuera de plazo el cuerpo se
         // descarta, así que su longitud no importa: rechazarlo dejaría la prueba sin cerrar.
         if (!fueraDePlazo)
@@ -457,7 +488,7 @@ public class ExamTokenService : IExamTokenService
 
             pct = totalPoints > 0 ? Math.Round((decimal)obtained / totalPoints * 100, 2) : 0;
             passed = status == Domain.Enums.ExamResultStatus.Reviewed
-                ? pct >= exam.PassingScorePercentage
+                ? pct >= session.PassingScoreFor(exam)
                 : null;
 
             result = new ExamResult
@@ -663,7 +694,9 @@ public class ExamTokenService : IExamTokenService
     /// <summary>El plazo del examen, medido por el reloj del servidor y con su margen.</summary>
     private static bool IsPastDeadline(ExamToken token, int? timeLimitMinutes = null)
     {
-        var minutos = timeLimitMinutes ?? token.Exam?.TimeLimitMinutes ?? 0;
+        // El tiempo guardado al empezar manda sobre el argumento y sobre el de la prueba: editar la
+        // prueba con candidatos en curso no puede cambiarles el plazo.
+        var minutos = token.ExamSession?.TimeLimitMinutesSnapshot ?? timeLimitMinutes ?? token.Exam?.TimeLimitMinutes ?? 0;
         if (token.ExamSession is null || minutos <= 0) return false;
 
         var limite = token.ExamSession.StartedAt.AddMinutes(minutos).Add(GraciaDePlazo);
@@ -695,7 +728,7 @@ public class ExamTokenService : IExamTokenService
             token.Exam.Title,
             token.CandidateName,
             token.CandidateEmail,
-            token.Exam.TimeLimitMinutes,
+            token.ExamSession.TimeLimitFor(token.Exam),
             token.ExamSession.StartedAt,
             RemainingSecondsOf(token),
             SessionOrder.Questions(token.Exam.ExamQuestions, seed).Select((eq, i) => new SessionQuestionDto(
@@ -716,7 +749,7 @@ public class ExamTokenService : IExamTokenService
     /// </summary>
     private static int RemainingSecondsOf(ExamToken token)
     {
-        var deadline = token.ExamSession!.StartedAt.AddMinutes(token.Exam.TimeLimitMinutes);
+        var deadline = token.ExamSession!.StartedAt.AddMinutes(token.ExamSession.TimeLimitFor(token.Exam));
         var remaining = (deadline - DateTime.UtcNow).TotalSeconds;
         return remaining <= 0 ? 0 : (int)Math.Floor(remaining);
     }

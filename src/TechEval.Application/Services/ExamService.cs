@@ -36,7 +36,8 @@ public class ExamService : IExamService
             e.PassingScorePercentage,
             e.IsActive, e.CreatedAt,
             e.ExamTokens.Count,
-            e.ExamTokens.Count(t => t.ExamSession?.ExamResult != null))).ToList();
+            e.ExamTokens.Count(t => t.ExamSession?.ExamResult != null),
+            e.ExamTokens.Count(t => t.ExamSession?.Status == SessionStatus.Abandoned))).ToList();
     }
 
     public async Task<ExamDto?> GetByIdAsync(int id, CancellationToken ct = default)

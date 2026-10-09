@@ -3,6 +3,7 @@ using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 using TechEval.Domain.Enums;
 
 namespace TechEval.API.Controllers;
@@ -16,14 +17,20 @@ public class QuestionsController : ControllerBase
 
     public QuestionsController(IQuestionService service) => _service = service;
 
-    /// <summary>Listar preguntas con filtros opcionales</summary>
+    /// <summary>
+    /// Una página del banco de preguntas, con filtros opcionales. Sin <c>active</c> devuelve
+    /// activas e inactivas. No incluye las opciones de cada pregunta.
+    /// </summary>
     [HttpGet]
+    [ProducesResponseType(typeof(PagedResult<QuestionSummaryDto>), 200)]
     public async Task<IActionResult> GetAll(
+        [FromQuery] PageQuery paging,
         [FromQuery] int? categoryId,
         [FromQuery] DifficultyLevel? difficulty,
         [FromQuery] QuestionType? type,
+        [FromQuery] bool? active,
         CancellationToken ct)
-        => Ok(await _service.GetAllAsync(categoryId, difficulty, type, ct));
+        => Ok(await _service.GetPagedAsync(new QuestionFilter(categoryId, difficulty, type, active), paging, ct));
 
     /// <summary>Preguntas activas de cada nivel en unas categorías (todas, sin categorías)</summary>
     [HttpGet("availability")]

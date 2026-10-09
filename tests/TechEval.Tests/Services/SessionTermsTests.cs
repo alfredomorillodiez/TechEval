@@ -5,6 +5,7 @@ using Xunit;
 using TechEval.Application;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
@@ -405,22 +406,20 @@ public class SessionTermsTests
     // ---------- Lo que ve el administrador ----------
 
     [Fact]
-    public async Task ElListadoDePruebas_CuentaLasSesionesAbandonadas()
+    public async Task ElListadoDePruebas_LlevaLasAbandonadasQueCuentaElRepositorio()
     {
+        // El recuento se calcula en la consulta (ver PagedListsTests). Aquí solo se comprueba que
+        // el servicio lo lleva a la pantalla.
         var examRepo = new Mock<IExamRepository>();
-        ExamToken Con(SessionStatus? estado) => new()
-        {
-            ExamSession = estado is null ? null : new ExamSession { Status = estado.Value }
-        };
-        examRepo.Setup(r => r.GetWithStatsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<Exam>
-        {
-            new() { Id = 1, Title = "Con abandonos", ExamTokens = new List<ExamToken>
-                { Con(SessionStatus.Abandoned), Con(SessionStatus.Abandoned), Con(SessionStatus.Abandoned), Con(SessionStatus.InProgress), Con(null) } },
-            new() { Id = 2, Title = "Sin abandonos", ExamTokens = new List<ExamToken> { Con(SessionStatus.Completed) } }
-        });
+        examRepo.Setup(r => r.GetPagedSummariesAsync(It.IsAny<ExamFilter>(), It.IsAny<PageQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PagedResult<ExamSummaryRow>(new List<ExamSummaryRow>
+            {
+                new(1, "Con abandonos", 60, 70, true, DateTime.UtcNow, 4, 20, 5, 0, 3),
+                new(2, "Sin abandonos", 60, 70, true, DateTime.UtcNow, 4, 20, 1, 1, 0)
+            }, 2, 1, 25));
         var servicio = new ExamService(examRepo.Object, new Mock<IQuestionRepository>().Object);
 
-        var lista = await servicio.GetAllAsync();
+        var lista = (await servicio.GetPagedAsync(new ExamFilter(), new PageQuery())).Items;
 
         lista.Single(x => x.Id == 1).AbandonedCount.Should().Be(3);
         lista.Single(x => x.Id == 2).AbandonedCount.Should().Be(0);

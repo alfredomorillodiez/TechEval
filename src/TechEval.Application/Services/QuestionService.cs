@@ -1,4 +1,5 @@
 using TechEval.Application.DTOs;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
@@ -16,7 +17,8 @@ public class AnswerInUseException : ConflictException
 
 public interface IQuestionService
 {
-    Task<IReadOnlyList<QuestionSummaryDto>> GetAllAsync(int? categoryId, DifficultyLevel? difficulty, QuestionType? type, CancellationToken ct = default);
+    Task<PagedResult<QuestionSummaryDto>> GetPagedAsync(
+        QuestionFilter filter, PageQuery query, CancellationToken ct = default);
     Task<QuestionDto?> GetByIdAsync(int id, CancellationToken ct = default);
     Task<QuestionDto> CreateAsync(CreateQuestionDto dto, CancellationToken ct = default);
     Task<QuestionDto?> UpdateAsync(int id, UpdateQuestionDto dto, CancellationToken ct = default);
@@ -39,14 +41,11 @@ public class QuestionService : IQuestionService
             .Select(c => new LevelCountDto(c.Key, c.Value))
             .ToList();
 
-    public async Task<IReadOnlyList<QuestionSummaryDto>> GetAllAsync(
-        int? categoryId, DifficultyLevel? difficulty, QuestionType? type, CancellationToken ct = default)
-    {
-        var questions = await _repo.GetFilteredAsync(categoryId, difficulty, type, true, ct);
-        return questions.Select(q => new QuestionSummaryDto(
+    public async Task<PagedResult<QuestionSummaryDto>> GetPagedAsync(
+        QuestionFilter filter, PageQuery query, CancellationToken ct = default)
+        => (await _repo.GetPagedAsync(filter, query, ct)).Map(q => new QuestionSummaryDto(
             q.Id, q.Text, q.Type, q.Difficulty,
-            q.Category?.Name ?? "", q.Points, q.IsActive)).ToList();
-    }
+            q.Category?.Name ?? "", q.Points, q.IsActive));
 
     public async Task<QuestionDto?> GetByIdAsync(int id, CancellationToken ct = default)
     {

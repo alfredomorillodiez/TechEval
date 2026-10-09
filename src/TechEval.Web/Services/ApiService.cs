@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TechEval.Application.DTOs;
+using TechEval.Domain.Common;
 using TechEval.Domain.Enums;
 
 namespace TechEval.Web.Services;
@@ -65,16 +66,17 @@ public class ApiService
         => DeleteAsync($"api/categories/{id}");
 
     // Questions
-    public Task<List<QuestionSummaryDto>?> GetQuestionsAsync(
-        int? categoryId = null, DifficultyLevel? difficulty = null, QuestionType? type = null)
-    {
-        var q = new List<string>();
-        if (categoryId.HasValue) q.Add($"categoryId={categoryId}");
-        if (difficulty.HasValue) q.Add($"difficulty={difficulty}");
-        if (type.HasValue) q.Add($"type={type}");
-        var qs = q.Any() ? "?" + string.Join("&", q) : "";
-        return GetAsync<List<QuestionSummaryDto>>($"api/questions{qs}");
-    }
+    public Task<PagedResult<QuestionSummaryDto>?> GetQuestionsPageAsync(PageQuery page, QuestionFilter filter)
+        => GetAsync<PagedResult<QuestionSummaryDto>>("api/questions" + Qs(page,
+            ("categoryId", filter.CategoryId), ("difficulty", filter.Difficulty),
+            ("type", filter.Type), ("active", filter.Active)));
+
+    /// <summary>
+    /// Todo el banco, pidiendo páginas de 100. Para la composición manual de una prueba, que
+    /// necesita ofrecerlas todas. Null si alguna página falla: una lista incompleta engañaría.
+    /// </summary>
+    public Task<List<QuestionSummaryDto>?> GetAllQuestionsAsync(bool? active = null)
+        => GetAllPagesAsync(p => GetQuestionsPageAsync(p, new QuestionFilter(Active: active)));
 
     public Task<QuestionDto?> GetQuestionAsync(int id)
         => GetAsync<QuestionDto>($"api/questions/{id}");
@@ -91,8 +93,12 @@ public class ApiService
         => DeleteAsync($"api/questions/{id}");
 
     // Exams
-    public Task<List<ExamSummaryDto>?> GetExamsAsync()
-        => GetAsync<List<ExamSummaryDto>>("api/exams");
+    public Task<PagedResult<ExamSummaryDto>?> GetExamsPageAsync(PageQuery page, bool? active = null)
+        => GetAsync<PagedResult<ExamSummaryDto>>("api/exams" + Qs(page, ("active", active)));
+
+    /// <summary>Identificador y título de todas las pruebas, para los desplegables.</summary>
+    public Task<List<ExamOptionDto>?> GetExamOptionsAsync()
+        => GetAsync<List<ExamOptionDto>>("api/exams/options");
 
     public Task<ExamDto?> GetExamAsync(int id)
         => GetAsync<ExamDto>($"api/exams/{id}");
@@ -135,11 +141,21 @@ public class ApiService
         => SendAsync<BulkSendResultDto>(HttpMethod.Post, "api/exams/send-bulk", dto);
 
     // Results
-    public Task<List<ExamResultSummaryDto>?> GetResultsAsync()
-        => GetAsync<List<ExamResultSummaryDto>>("api/results");
+    public Task<PagedResult<ExamResultSummaryDto>?> GetResultsPageAsync(PageQuery page, ResultFilter filter)
+        => GetAsync<PagedResult<ExamResultSummaryDto>>("api/results" + Qs(page,
+            ("examId", filter.ExamId), ("outcome", filter.Outcome),
+            ("scoreMin", filter.ScoreMin), ("scoreMax", filter.ScoreMax),
+            ("from", filter.From), ("to", filter.To)));
 
-    public Task<List<ExamResultSummaryDto>?> GetResultsByExamAsync(int examId)
-        => GetAsync<List<ExamResultSummaryDto>>($"api/results/exam/{examId}");
+    public Task<PagedResult<ExamResultSummaryDto>?> GetResultsByExamPageAsync(
+        int examId, PageQuery page, ResultFilter filter)
+        => GetAsync<PagedResult<ExamResultSummaryDto>>($"api/results/exam/{examId}" + Qs(page,
+            ("outcome", filter.Outcome), ("scoreMin", filter.ScoreMin), ("scoreMax", filter.ScoreMax),
+            ("from", filter.From), ("to", filter.To)));
+
+    /// <summary>Cifras de todos los resultados o de los de una prueba. No dependen de ningún filtro.</summary>
+    public Task<ResultStatsDto?> GetResultStatsAsync(int? examId = null)
+        => GetAsync<ResultStatsDto>("api/results/stats" + Qs(null, ("examId", examId)));
 
     public Task<ExamResultDto?> GetResultDetailAsync(int id)
         => GetAsync<ExamResultDto>($"api/results/{id}");
@@ -311,14 +327,65 @@ public class ApiService
     }
 
     // Users
-    public Task<List<UserDto>?> GetUsersAsync(UserRole? role = null, bool? active = null, string? search = null)
+    public Task<PagedResult<UserDto>?> GetUsersPageAsync(PageQuery page, UserRole? role = null, bool? active = null)
+        => GetAsync<PagedResult<UserDto>>("api/users" + Qs(page, ("role", role), ("active", active)));
+
+    /// <summary>Todos los usuarios que cumplen el filtro, pidiendo páginas de 100. Null si alguna falla.</summary>
+    public Task<List<UserDto>?> GetAllUsersAsync(UserRole? role = null, bool? active = null)
+        => GetAllPagesAsync(p => GetUsersPageAsync(p, role, active));
+
+    // ---- Listados paginados ----
+
+    /// <summary>
+    /// Recorre las páginas de 100 hasta agotar el total y devuelve todas las filas. Null si alguna
+    /// página falla: una lista incompleta se tomaría por la entera.
+    /// </summary>
+    public async Task<List<T>?> GetAllPagesAsync<T>(Func<PageQuery, Task<PagedResult<T>?>> fetch)
     {
-        var q = new List<string>();
-        if (role.HasValue) q.Add($"role={role}");
-        if (active.HasValue) q.Add($"active={active.Value.ToString().ToLowerInvariant()}");
-        if (!string.IsNullOrWhiteSpace(search)) q.Add($"q={Uri.EscapeDataString(search.Trim())}");
-        var qs = q.Any() ? "?" + string.Join("&", q) : "";
-        return GetAsync<List<UserDto>>($"api/users{qs}");
+        var all = new List<T>();
+        for (var page = 1; ; page++)
+        {
+            var result = await fetch(new PageQuery { Page = page, PageSize = PageQuery.MaxPageSize });
+            if (result is null) return null;
+
+            all.AddRange(result.Items);
+            // Se para también con la página vacía: si el total sube mientras se recorre, no da vueltas.
+            if (result.Items.Count == 0 || all.Count >= result.Total) return all;
+        }
+    }
+
+    /// <summary>
+    /// La cadena de consulta de un listado: página, tamaño, texto y orden, más los filtros. Lo que
+    /// es nulo o está en blanco no se envía. Las fechas van en UTC, en formato ISO.
+    /// </summary>
+    private static string Qs(PageQuery? page, params (string Key, object? Value)[] filters)
+    {
+        var parts = new List<string>();
+
+        void Add(string key, object? value)
+        {
+            var text = value switch
+            {
+                null => null,
+                bool b => b ? "true" : "false",
+                DateTime d => DateTime.SpecifyKind(d, DateTimeKind.Utc).ToString("O"),
+                Enum e => e.ToString(),
+                _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)
+            };
+            if (!string.IsNullOrWhiteSpace(text)) parts.Add($"{key}={Uri.EscapeDataString(text)}");
+        }
+
+        if (page is not null)
+        {
+            Add("page", page.Page);
+            Add("pageSize", page.PageSize);
+            Add("q", page.Text);
+            Add("sort", page.SortKey);
+            if (page.Desc) Add("desc", true);
+        }
+        foreach (var (key, value) in filters) Add(key, value);
+
+        return parts.Count == 0 ? "" : "?" + string.Join("&", parts);
     }
 
     public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> CreateUserAsync(CreateUserDto dto)

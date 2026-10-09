@@ -45,6 +45,9 @@ public record ExamSummaryDto(
     // defecto, para que las construcciones anteriores no cambien.
     int AbandonedCount = 0);
 
+/// <summary>Identificador y título de una prueba, para los desplegables.</summary>
+public record ExamOptionDto(int Id, string Title);
+
 public record CreateExamDto(
     string Title,
     string Description,

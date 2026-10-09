@@ -22,7 +22,7 @@
         </div>
     </div>
 
-    @if (_loading)
+    @if (_firstLoad)
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
@@ -36,8 +36,7 @@
         <div class="row g-2 mb-3 align-items-center">
             <div class="col-md-5">
                 <input class="form-control" type="search" placeholder="Buscar por título…"
-                       aria-label="Buscar pruebas" value="@_search"
-                       @oninput="e => _search = e.Value?.ToString() ?? string.Empty" />
+                       aria-label="Buscar pruebas" value="@_search" @oninput="OnSearchInput" />
             </div>
             <div class="col-md-3">
                 <select class="form-select" aria-label="Ordenar pruebas" value="@SortValue" @onchange="OnSortChange">
@@ -50,16 +49,13 @@
                     <option value="results-desc">Más resultados primero</option>
                 </select>
             </div>
-            <div class="col-md-auto text-muted small">
-                Mostrando <strong>@Displayed.Count</strong> de @_exams.Count pruebas
-            </div>
         </div>
-        @if (_exams.Count > 0 && Displayed.Count == 0)
+        @if (_exams.Count == 0 && !string.IsNullOrWhiteSpace(_search))
         {
             <div class="text-center text-muted py-5">Ninguna prueba coincide con la búsqueda.</div>
         }
-        <div class="row g-4">
-            @foreach (var exam in Displayed)
+        <div class="row g-4 @(_busy ? "opacity-50" : "")" aria-busy="@(_busy ? "true" : "false")">
+            @foreach (var exam in _exams)
             {
                 <div class="col-md-6 col-xl-4">
                     <div class="card border-0 shadow-sm h-100">
@@ -122,13 +118,15 @@
                 </div>
             }
         </div>
-        @if (!_exams.Any())
+        @if (!_exams.Any() && string.IsNullOrWhiteSpace(_search))
         {
             <div class="text-center text-muted py-5">
                 <i class="bi bi-journal-x fs-1"></i>
                 <p class="mt-2">No hay pruebas creadas aún.</p>
             </div>
         }
+
+        <Pager State="_page" Noun="pruebas" Sizes="CardSizes" OnPage="GoToPageAsync" OnPageSize="SetPageSizeAsync" />
     }
 </div>
 
@@ -386,39 +384,55 @@
 
 @code {
     private List<ExamSummaryDto> _exams = new();
-    private bool _loading = true, _loadFailed;
+    private bool _firstLoad = true, _busy, _loadFailed;
 
-    // Búsqueda y orden se conservan al abrir una prueba y volver.
+    // Búsqueda, orden y página se conservan al abrir una prueba y volver.
     private const string StateKey = "exams";
     private string _search = string.Empty;
     private readonly SortState _sort = new();
-    private sealed record Saved(string Search, SortState Sort);
-
-    private static readonly IReadOnlyDictionary<string, Func<ExamSummaryDto, object?>> Columns =
-        new Dictionary<string, Func<ExamSummaryDto, object?>>
-        {
-            ["title"] = x => x.Title,
-            ["created"] = x => x.CreatedAt,
-            ["questions"] = x => x.QuestionCount,
-            ["results"] = x => x.ResultsCount
-        };
-
-    private List<ExamSummaryDto> Displayed => ListSort.Apply(
-            _exams.Where(x => string.IsNullOrWhiteSpace(_search)
-                || x.Title.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)),
-            _sort, Columns).ToList();
+    // Tarjetas en filas de 3: los tamaños son múltiplos de 3.
+    private static readonly int[] CardSizes = { 6, 12, 24, 48 };
+    private readonly PageState _page = new() { PageSize = 12 };
+    private readonly ListLoader _loader = new();
+    private sealed record Saved(string Search, SortState Sort, int Page, int PageSize);
 
     // El selector junta columna y dirección en un solo valor: «title», «title-desc»…
     private string SortValue => _sort.Key is null ? "" : _sort.Descending ? _sort.Key + "-desc" : _sort.Key;
 
-    private void OnSortChange(ChangeEventArgs e)
+    private async Task OnSortChange(ChangeEventArgs e)
     {
         var value = e.Value?.ToString() ?? "";
         _sort.Descending = value.EndsWith("-desc");
         _sort.Key = value.Length == 0 ? null : value.Replace("-desc", "");
+        _page.Reset();
+        await LoadAsync();
     }
 
-    public void Dispose() => Lists.Set(StateKey, new Saved(_search, _sort.Clone()));
+    private Task OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? string.Empty;
+        _page.Reset();
+        _ = _loader.DebounceAsync(LoadAsync);
+        return Task.CompletedTask;
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page.Page = page;
+        await LoadAsync();
+    }
+
+    private async Task SetPageSizeAsync(int size)
+    {
+        _page.SetPageSize(size);
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        Lists.Set(StateKey, new Saved(_search, _sort.Clone(), _page.Page, _page.PageSize));
+        _loader.Dispose();
+    }
 
     // Estado individual
     private int? _sendingExamId;
@@ -446,6 +460,7 @@
         {
             _search = saved.Search;
             _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+            _page.Page = saved.Page; _page.PageSize = saved.PageSize;
         }
 
         await LoadAsync();
@@ -453,11 +468,31 @@
 
     private async Task LoadAsync()
     {
-        _loading = true;
-        var exams = await Api.GetExamsAsync();
-        _loadFailed = exams is null;
-        if (exams is not null) _exams = exams;
-        _loading = false;
+        _busy = true;
+
+        // Si la página guardada ya no existe, o se vació al dar de baja la última tarjeta, se pide la última.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var again = false;
+            var query = _page.ToQuery(_search, _sort);
+            var applied = await _loader.LoadAsync(() => Api.GetExamsPageAsync(query), r =>
+            {
+                _loadFailed = r is null;
+                if (r is null) return;
+
+                var beyond = _page.IsBeyondEnd(r);
+                _page.Apply(r);
+                if (beyond) { _page.GoToLast(); again = true; return; }
+                _exams = r.Items.ToList();
+            });
+
+            if (!applied) return;
+            if (!again) break;
+        }
+
+        _firstLoad = false;
+        _busy = false;
+        StateHasChanged();
     }
 
     private void SendExam(int id)
@@ -529,7 +564,9 @@
 
     private async Task DeleteAsync(int id)
     {
+        // Dar de baja la desactiva. Se recarga la página en vez de quitar la tarjeta: sigue en el
+        // listado, marcada como inactiva, y el total y las páginas se mantienen verdaderos.
         if (await Api.DeleteExamAsync(id))
-            _exams.RemoveAll(e => e.Id == id);
+            await LoadAsync();
     }
 }

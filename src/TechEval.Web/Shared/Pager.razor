@@ -1,0 +1,133 @@
+@using TechEval.Application
+
+@* Control de paginación de un listado. Con una sola página solo dice cuántas filas hay. Con varias,
+   da el rango mostrado, los botones y el tamaño de página. Los botones son botones de verdad, la
+   página actual lleva `aria-current` y los que no tienen efecto van `disabled`, para que el teclado y
+   un lector de pantalla los traten bien. *@
+@if (State.Total > 0)
+{
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+        @if (State.TotalPages <= 1)
+        {
+            <span class="text-muted small" role="status">@State.Total @Noun</span>
+        }
+        else
+        {
+            <span class="text-muted small" role="status">
+                Mostrando @State.FirstRow–@State.LastRow de @State.Total
+            </span>
+        }
+
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            @if (State.Total > Sizes[0])
+            {
+                <label class="d-flex align-items-center gap-2 small text-muted mb-0">
+                    Por página
+                    <select class="form-select form-select-sm w-auto" aria-label="Filas por página"
+                            value="@State.PageSize" @onchange="OnSizeChange">
+                        @foreach (var size in Sizes)
+                        {
+                            <option value="@size">@size</option>
+                        }
+                    </select>
+                </label>
+            }
+
+            @if (State.TotalPages > 1)
+            {
+                <nav aria-label="Paginación">
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item @(State.Page <= 1 ? "disabled" : "")">
+                            <button type="button" class="page-link" aria-label="Primera página"
+                                    disabled="@(State.Page <= 1)" @onclick="() => GoTo(1)">
+                                <i class="bi bi-chevron-double-left" aria-hidden="true"></i>
+                            </button>
+                        </li>
+                        <li class="page-item @(State.Page <= 1 ? "disabled" : "")">
+                            <button type="button" class="page-link" aria-label="Página anterior"
+                                    disabled="@(State.Page <= 1)" @onclick="() => GoTo(State.Page - 1)">
+                                <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                            </button>
+                        </li>
+
+                        @foreach (var p in Window())
+                        {
+                            if (p == 0)
+                            {
+                                <li class="page-item disabled"><span class="page-link" aria-hidden="true">…</span></li>
+                            }
+                            else
+                            {
+                                var current = p == State.Page;
+                                <li class="page-item @(current ? "active" : "")">
+                                    <button type="button" class="page-link" aria-label="Página @p"
+                                            aria-current="@(current ? "page" : null)" @onclick="() => GoTo(p)">@p</button>
+                                </li>
+                            }
+                        }
+
+                        <li class="page-item @(State.Page >= State.TotalPages ? "disabled" : "")">
+                            <button type="button" class="page-link" aria-label="Página siguiente"
+                                    disabled="@(State.Page >= State.TotalPages)" @onclick="() => GoTo(State.Page + 1)">
+                                <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                            </button>
+                        </li>
+                        <li class="page-item @(State.Page >= State.TotalPages ? "disabled" : "")">
+                            <button type="button" class="page-link" aria-label="Última página"
+                                    disabled="@(State.Page >= State.TotalPages)" @onclick="() => GoTo(State.TotalPages)">
+                                <i class="bi bi-chevron-double-right" aria-hidden="true"></i>
+                            </button>
+                        </li>
+                    </ul>
+                </nav>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Los tamaños de página que se ofrecen. Los listados de tarjetas usan múltiplos de las columnas.</summary>
+    [Parameter] public int[] Sizes { get; set; } = { 10, 25, 50, 100 };
+
+    [Parameter, EditorRequired] public PageState State { get; set; } = default!;
+
+    /// <summary>Se lanza con la página a la que se quiere ir. La pantalla la pide al servidor.</summary>
+    [Parameter, EditorRequired] public EventCallback<int> OnPage { get; set; }
+
+    /// <summary>Se lanza con el tamaño elegido. La pantalla vuelve a la primera página.</summary>
+    [Parameter, EditorRequired] public EventCallback<int> OnPageSize { get; set; }
+
+    /// <summary>Lo que se cuenta, en plural y en minúsculas: «resultados», «preguntas».</summary>
+    [Parameter] public string Noun { get; set; } = "resultados";
+
+    private Task GoTo(int page)
+        => page < 1 || page > State.TotalPages || page == State.Page ? Task.CompletedTask : OnPage.InvokeAsync(page);
+
+    private Task OnSizeChange(ChangeEventArgs e)
+        => int.TryParse(e.Value?.ToString(), out var size) && size > 0 ? OnPageSize.InvokeAsync(size) : Task.CompletedTask;
+
+    /// <summary>
+    /// Las páginas que se pintan: la primera, la última y dos a cada lado de la actual. Un 0 es un
+    /// hueco («…»). Con pocas páginas salen todas.
+    /// </summary>
+    private IEnumerable<int> Window()
+    {
+        var last = State.TotalPages;
+        var shown = new SortedSet<int> { 1, last };
+        for (var p = State.Page - 2; p <= State.Page + 2; p++)
+            if (p >= 1 && p <= last) shown.Add(p);
+
+        var previous = 0;
+        foreach (var p in shown)
+        {
+            if (previous != 0 && p - previous > 1)
+            {
+                // Un hueco de una sola página se rellena con ella: «1 … 3» sería peor que «1 2 3».
+                if (p - previous == 2) yield return previous + 1;
+                else yield return 0;
+            }
+            yield return p;
+            previous = p;
+        }
+    }
+}

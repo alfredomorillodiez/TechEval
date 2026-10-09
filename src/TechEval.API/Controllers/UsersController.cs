@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 using TechEval.Domain.Enums;
 
 namespace TechEval.API.Controllers;
@@ -29,12 +30,12 @@ public class UsersController : ControllerBase
         _configuration = configuration;
     }
 
-    /// <summary>Usuarios, filtrados por rol, estado y texto sobre el nombre o el email</summary>
+    /// <summary>Una página de usuarios, filtrados por rol, estado y texto sobre el nombre o el email</summary>
     [HttpGet]
-    [ProducesResponseType(typeof(IReadOnlyList<UserDto>), 200)]
+    [ProducesResponseType(typeof(PagedResult<UserDto>), 200)]
     public async Task<IActionResult> List(
-        [FromQuery] UserRole? role, [FromQuery] bool? active, [FromQuery] string? q, CancellationToken ct)
-        => Ok(await _service.ListAsync(role, active, q, ct));
+        [FromQuery] PageQuery paging, [FromQuery] UserRole? role, [FromQuery] bool? active, CancellationToken ct)
+        => Ok(await _service.ListAsync(role, active, paging, ct));
 
     /// <summary>Crea un administrador o un evaluador y le envía el enlace para fijar la contraseña</summary>
     [HttpPost]

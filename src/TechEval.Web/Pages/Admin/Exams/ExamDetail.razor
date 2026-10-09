@@ -319,7 +319,8 @@
     private async Task LoadEvaluatorsAsync()
     {
         var assigned = await Api.GetExamEvaluatorsAsync(Id);
-        var available = await Api.GetUsersAsync(UserRole.Evaluador, active: true);
+        // Todos los evaluadores activos, pidiendo páginas de 100: el desplegable los ofrece todos.
+        var available = await Api.GetAllUsersAsync(UserRole.Evaluador, active: true);
         _evaluatorsFailed = assigned is null || available is null;
         if (assigned is not null) _evaluators = assigned;
         if (available is not null) _availableEvaluators = available;

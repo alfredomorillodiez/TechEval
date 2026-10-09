@@ -3,6 +3,7 @@ using TechEval.API.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 
 namespace TechEval.API.Controllers;
 
@@ -20,13 +21,38 @@ public class ResultsController : ControllerBase
         _integrityService = integrityService;
     }
 
+    /// <summary>
+    /// Una página de resultados. <c>from</c> es inclusivo y <c>to</c> exclusivo, en UTC.
+    /// <c>outcome</c> es <c>pending</c>, <c>passed</c> o <c>failed</c>.
+    /// </summary>
     [HttpGet]
-    public async Task<IActionResult> GetAll(CancellationToken ct)
-        => Ok(await _service.GetAllAsync(ct));
+    [ProducesResponseType(typeof(PagedResult<ExamResultSummaryDto>), 200)]
+    public async Task<IActionResult> GetAll(
+        [FromQuery] PageQuery paging,
+        [FromQuery] int? examId, [FromQuery] string? outcome,
+        [FromQuery] int? scoreMin, [FromQuery] int? scoreMax,
+        [FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to,
+        CancellationToken ct)
+        => Ok(await _service.GetPagedAsync(
+            new ResultFilter(examId, outcome, scoreMin, scoreMax, from?.UtcDateTime, to?.UtcDateTime), paging, ct));
 
+    /// <summary>Lo mismo que la lista general, fijada a una prueba</summary>
     [HttpGet("exam/{examId:int}")]
-    public async Task<IActionResult> GetByExam(int examId, CancellationToken ct)
-        => Ok(await _service.GetByExamAsync(examId, ct));
+    [ProducesResponseType(typeof(PagedResult<ExamResultSummaryDto>), 200)]
+    public async Task<IActionResult> GetByExam(
+        int examId, [FromQuery] PageQuery paging,
+        [FromQuery] string? outcome, [FromQuery] int? scoreMin, [FromQuery] int? scoreMax,
+        [FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to,
+        CancellationToken ct)
+        => Ok(await _service.GetPagedAsync(
+            new ResultFilter(examId, outcome, scoreMin, scoreMax, from?.UtcDateTime, to?.UtcDateTime), paging, ct));
+
+    /// <summary>Cifras de todos los resultados, o de los de una prueba. No dependen de ningún filtro</summary>
+    [HttpGet("stats")]
+    [ProducesResponseType(typeof(ResultStatsDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> GetStats([FromQuery] int? examId, CancellationToken ct)
+        => Ok(await _service.GetStatsAsync(examId, ct));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetDetail(int id, CancellationToken ct)

@@ -422,13 +422,30 @@ Swagger publica la referencia interactiva en `/swagger` (solo en entorno de desa
 { "token": "eyJhbGciOi…", "name": "Administrador", "email": "admin@techeval.com", "role": "Admin" }
 ```
 
+### Listados paginados
+
+Resultados, preguntas, pruebas y usuarios se paginan, se buscan, se filtran y se ordenan **en el servidor**. Responden `{ items, total, page, pageSize }`, donde `total` cuenta las filas que cumplen el filtro y `items` solo las de la página pedida.
+
+| Parámetro | Valor |
+|-----------|-------|
+| `page` | Empieza en 1. Un valor menor se trata como 1 |
+| `pageSize` | 25 por defecto, 100 como máximo. Un valor menor que 1 es 25 y uno mayor que 100 es 100 |
+| `q` | Texto de búsqueda, sin distinguir mayúsculas. Cada listado dice en qué campos busca |
+| `sort`, `desc` | Columna de orden y sentido descendente. Una columna desconocida se ignora y vale el orden por defecto |
+
+- **Un valor que no es un número** (`page=abc`) da `400`. Uno fuera de rango no da error: se corrige.
+- **Una página más allá del final** devuelve cero elementos con el `total` real.
+- **El orden es estable entre páginas.** Todo orden desempata por el identificador, así que dos páginas seguidas no repiten ni pierden filas.
+- **Pantallas que necesitan todo.** La composición manual de pruebas y el desplegable de evaluadores piden páginas de 100 hasta agotar el total. Si una página falla, la pantalla muestra el error de carga y no una lista incompleta.
+- **Un parámetro del controlador no puede llamarse como una propiedad de `PageQuery`.** Con `[FromQuery] PageQuery page`, MVC toma `page` como prefijo del objeto y no como el valor `page=3`, y el listado devuelve siempre la primera página de 25. Una prueba lo vigila.
+
 ### Usuarios
 
 Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mismo y las que dejarían cero administradores activos responden `409`.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/api/users?role=&active=&q=` | Listado con filtros por rol, estado y texto. Nunca expone hash, sello ni enlaces |
+| GET | `/api/users?role=&active=&q=` | Página de usuarios, con filtros por rol, estado y texto sobre el nombre o el email. Orden: `name`, `email`, `role`, `status`, `created`. Nunca expone hash, sello ni enlaces |
 | POST | `/api/users` | `{ name, email, role }`, rol `Admin` o `Evaluador`. `201` con `{ user, emailSent }`; `409` si el email existe |
 | PUT | `/api/users/{id}/role` | `{ role }`. Permitido: Admin ↔ Evaluador y Alumno → Admin/Evaluador. Nadie pasa a Alumno (`400`) |
 | POST | `/api/users/{id}/deactivate` | Desactiva y cambia el sello |
@@ -451,7 +468,7 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/questions?categoryId=&difficulty=&type=` | Admin | Listar con filtros |
+| GET | `/api/questions?categoryId=&difficulty=&type=&active=&q=` | Admin | Página del banco, sin las opciones. Sin `active` trae activas e inactivas. `q` busca en el enunciado. Orden: `text`, `category`, `difficulty`, `type`, `points`, `status` |
 | GET | `/api/questions/availability?categoryIds=1&categoryIds=3` | Admin | Preguntas activas de cada nivel en esas categorías (los tres niveles siempre) |
 | GET | `/api/questions/{id}` | Admin | Detalle con respuestas |
 | POST | `/api/questions` | Admin | Crear pregunta (nace `Approved`) |
@@ -462,7 +479,8 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/exams` | Admin | Listar con estadísticas |
+| GET | `/api/exams?active=&q=` | Admin | Página de pruebas con sus recuentos, calculados en la consulta. `q` busca en el título. Orden: `title`, `created`, `questions`, `time`, `invitations`, `results` |
+| GET | `/api/exams/options` | Admin | Identificador y título de todas las pruebas, para los desplegables |
 | GET | `/api/exams/{id}` | Admin | Detalle con preguntas |
 | POST | `/api/exams` | Admin | Crear manual |
 | POST | `/api/exams/generate` | Admin | Generar automático |
@@ -558,8 +576,9 @@ El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro d
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/results` | Admin | Historial completo |
-| GET | `/api/results/exam/{examId}` | Admin | Por prueba |
+| GET | `/api/results?examId=&outcome=&scoreMin=&scoreMax=&from=&to=&q=` | Admin | Página del historial. `outcome`: `pending`, `passed` o `failed`. El rango de nota deja fuera a los pendientes. `from` inclusivo y `to` exclusivo, en UTC: la Web convierte el día local. `q` busca en nombre y correo. Orden: `candidate`, `exam`, `score` (los pendientes al final), `outcome`, `date` |
+| GET | `/api/results/exam/{examId}` | Admin | Lo mismo, fijado a una prueba |
+| GET | `/api/results/stats?examId=` | Admin | Totales, aprobados, nota media y distribución en seis tramos, de todos los resultados o de los de una prueba (con su título y las notas máxima y mínima). No dependen de ningún filtro. Notas y distribución, solo de los corregidos. `404` si la prueba no existe |
 | GET | `/api/results/{id}` | Admin | Detalle con revisión de respuestas |
 | GET | `/api/results/dashboard` | Admin | Estadísticas del dashboard |
 | GET | `/api/results/{id}/integrity` | Admin | Actividad del candidato durante la prueba: resumen y cronología (`IntegrityReportDto`) |

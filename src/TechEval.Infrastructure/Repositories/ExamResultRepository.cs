@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
@@ -9,13 +10,6 @@ namespace TechEval.Infrastructure.Repositories;
 public class ExamResultRepository : BaseRepository<ExamResult>, IExamResultRepository
 {
     public ExamResultRepository(AppDbContext context) : base(context) { }
-
-    public async Task<IReadOnlyList<ExamResult>> GetByExamAsync(int examId, CancellationToken ct = default)
-        => await Context.ExamResults
-            .Include(r => r.Exam)
-            .Where(r => r.ExamId == examId)
-            .OrderByDescending(r => r.CompletedAt)
-            .ToListAsync(ct);
 
     public async Task<IReadOnlyList<ExamResult>> GetByCandidateEmailAsync(string email, CancellationToken ct = default)
         => await Context.ExamResults
@@ -45,11 +39,109 @@ public class ExamResultRepository : BaseRepository<ExamResult>, IExamResultRepos
                     .ThenInclude(ua => ua.SelectedAnswer)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
 
-    public async Task<IReadOnlyList<ExamResult>> GetAllWithDetailsAsync(CancellationToken ct = default)
-        => await Context.ExamResults
-            .Include(r => r.Exam)
-            .OrderByDescending(r => r.CompletedAt)
+    public async Task<PagedResult<ExamResult>> GetPagedAsync(
+        ResultFilter filter, PageQuery query, CancellationToken ct = default)
+    {
+        var filtered = ApplyFilter(Context.ExamResults.AsNoTracking(), filter, query.Text);
+        var total = await filtered.CountAsync(ct);
+
+        var items = await Order(filtered.Include(r => r.Exam), query)
+            .Skip(query.Skip).Take(query.EffectivePageSize)
             .ToListAsync(ct);
+
+        return PagedResult<ExamResult>.Of(items, total, query);
+    }
+
+    private static IQueryable<ExamResult> ApplyFilter(
+        IQueryable<ExamResult> q, ResultFilter f, string? text)
+    {
+        if (f.ExamId is { } examId) q = q.Where(r => r.ExamId == examId);
+
+        if (text is not null)
+        {
+            var t = PagedQuery.Lower(text);
+            q = q.Where(r => r.CandidateName.ToLower().Contains(t) || r.CandidateEmail.ToLower().Contains(t));
+        }
+
+        // Los mismos tres valores que entendía el filtro del cliente. Otro valor no filtra.
+        q = f.Outcome?.Trim().ToLowerInvariant() switch
+        {
+            "pending" => q.Where(r => r.Status == ExamResultStatus.PendingReview),
+            "passed" => q.Where(r => r.Status == ExamResultStatus.Reviewed && r.Passed == true),
+            "failed" => q.Where(r => r.Status == ExamResultStatus.Reviewed && r.Passed == false),
+            _ => q
+        };
+
+        // Un pendiente lleva una puntuación parcial: no tiene nota que comparar.
+        if (f.ScoreMin is { } min)
+            q = q.Where(r => r.Status == ExamResultStatus.Reviewed && r.ScorePercentage >= min);
+        if (f.ScoreMax is { } max)
+            q = q.Where(r => r.Status == ExamResultStatus.Reviewed && r.ScorePercentage <= max);
+
+        if (f.From is { } from) q = q.Where(r => r.CompletedAt >= from);
+        if (f.To is { } to) q = q.Where(r => r.CompletedAt < to);
+        return q;
+    }
+
+    // Lista blanca de columnas: una clave desconocida no llega a SQL, cae en el orden natural.
+    // Todas desempatan por Id, para que dos páginas seguidas no repitan ni pierdan filas.
+    private static IOrderedQueryable<ExamResult> Order(IQueryable<ExamResult> q, PageQuery p)
+    {
+        var desc = p.Desc;
+        var ordered = p.SortKey switch
+        {
+            "candidate" => PagedQuery.By(q, r => r.CandidateName.ToLower(), desc),
+            "exam" => PagedQuery.By(q, r => r.Exam.Title.ToLower(), desc),
+            // Los pendientes, sin nota definitiva, al final en cualquier dirección.
+            "score" => PagedQuery.ThenBy(
+                q.OrderBy(r => r.Status == ExamResultStatus.Reviewed ? 0 : 1), r => r.ScorePercentage, desc),
+            "outcome" => PagedQuery.By(q, r => r.Status == ExamResultStatus.PendingReview ? 2 : r.Passed == true ? 0 : 1, desc),
+            "date" => PagedQuery.By(q, r => r.CompletedAt, desc),
+            _ => q.OrderByDescending(r => r.CompletedAt)
+        };
+        return ordered.ThenByDescending(r => r.Id);
+    }
+
+    public async Task<ResultStats> GetStatsAsync(int? examId, CancellationToken ct = default)
+    {
+        var all = Context.ExamResults.AsNoTracking();
+        if (examId is { } id) all = all.Where(r => r.ExamId == id);
+
+        var total = await all.CountAsync(ct);
+        var reviewed = all.Where(r => r.Status == ExamResultStatus.Reviewed);
+
+        var agg = await reviewed
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Count = g.Count(),
+                Passed = g.Count(r => r.Passed == true),
+                Avg = g.Average(r => r.ScorePercentage),
+                Max = g.Max(r => r.ScorePercentage),
+                Min = g.Min(r => r.ScorePercentage)
+            })
+            .FirstOrDefaultAsync(ct);
+
+        // Tramos por umbral y no por entero: una nota de 49,5 cae en el primero. Con rangos
+        // cerrados de enteros (0–49, 50–59...) las notas con decimales entre dos tramos se perdían.
+        var buckets = await reviewed
+            .GroupBy(r => r.ScorePercentage < 50 ? 0
+                : r.ScorePercentage < 60 ? 1
+                : r.ScorePercentage < 70 ? 2
+                : r.ScorePercentage < 80 ? 3
+                : r.ScorePercentage < 90 ? 4 : 5)
+            .Select(g => new { Bucket = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var distribution = new int[6];
+        foreach (var b in buckets) distribution[b.Bucket] = b.Count;
+
+        var reviewedCount = agg?.Count ?? 0;
+        return new ResultStats(
+            total, reviewedCount, total - reviewedCount, agg?.Passed ?? 0,
+            agg is null ? 0 : Math.Round(agg.Avg, 1),
+            agg?.Max ?? 0, agg?.Min ?? 0, distribution);
+    }
 
     // Orden ascendente a propósito: la espera del candidato marca la prioridad.
     public async Task<IReadOnlyList<ExamResult>> GetPendingReviewAsync(CancellationToken ct = default)

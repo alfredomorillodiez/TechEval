@@ -334,10 +334,10 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | `GET` `POST` `PUT` `DELETE` | `/api/categories` | Admin |
 | `GET` `POST` `PUT` `DELETE` | `/api/questions` | Admin |
 | `GET` | `/api/questions/availability?categoryIds=` | Admin — preguntas activas de cada nivel, para la vista previa del reparto |
-| `GET` `POST` `PUT` `DELETE` | `/api/exams` | Admin |
+| `GET` `POST` `PUT` `DELETE` | `/api/exams` · `GET /api/exams/options` | Admin |
 | `POST` | `/api/exams/generate` | Admin |
 | `POST` | `/api/exams/send` · `/api/exams/send-bulk` | Admin |
-| `GET` | `/api/results` · `/api/results/{id}` · `/api/results/exam/{examId}` · `/api/results/dashboard` | Admin |
+| `GET` | `/api/results` · `/api/results/{id}` · `/api/results/exam/{examId}` · `/api/results/stats` · `/api/results/dashboard` | Admin — los listados se paginan en servidor (`page`, `pageSize`, `q`, `sort`, `desc`) |
 | `GET` | `/api/results/{id}/integrity` | Admin — actividad del candidato durante la prueba |
 | `GET` | `/api/review/pending` · `/api/review/{resultId}` | Admin |
 | `POST` | `/api/review/{resultId}` | Admin |

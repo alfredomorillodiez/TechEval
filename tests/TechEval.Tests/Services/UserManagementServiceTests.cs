@@ -6,6 +6,7 @@ using Xunit;
 using TechEval.Application;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Services;
@@ -81,22 +82,22 @@ public class UserManagementServiceTests
 
     [Fact]
     public async Task Listado_sin_filtros_trae_a_todos()
-        => (await _sut.ListAsync(null, null, null)).Should().HaveCount(3);
+        => (await _sut.ListAsync(null, null, new PageQuery())).Items.Should().HaveCount(3);
 
     [Fact]
     public async Task Filtro_por_rol()
-        => (await _sut.ListAsync(UserRole.Evaluador, null, null)).Should().ContainSingle()
+        => (await _sut.ListAsync(UserRole.Evaluador, null, new PageQuery())).Items.Should().ContainSingle()
             .Which.Email.Should().Be("laura@test.com");
 
     [Fact]
     public async Task Filtro_por_texto_en_nombre_o_email()
-        => (await _sut.ListAsync(null, null, "ana")).Should().ContainSingle()
+        => (await _sut.ListAsync(null, null, new PageQuery { Q = "ANA" })).Items.Should().ContainSingle()
             .Which.Role.Should().Be(UserRole.Alumno);
 
     [Fact]
     public async Task El_alumno_sin_contrasena_no_tiene_acceso_pendiente()
     {
-        var lista = await _sut.ListAsync(null, null, null);
+        var lista = (await _sut.ListAsync(null, null, new PageQuery())).Items;
 
         lista.Single(u => u.Role == UserRole.Alumno).AccessPending.Should().BeFalse();
         lista.Single(u => u.Role == UserRole.Evaluador).AccessPending.Should().BeFalse();

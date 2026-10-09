@@ -56,6 +56,19 @@ public class BaseRepository<T> : IRepository<T> where T : class
         await Context.SaveChangesAsync(ct);
     }
 
+    public virtual async Task<(IReadOnlyList<T> Items, int Total)> GetPageAsync(
+        Expression<Func<T, bool>>? filter,
+        Func<IQueryable<T>, IOrderedQueryable<T>> order,
+        int skip, int take, CancellationToken ct = default)
+    {
+        IQueryable<T> query = DbSet.AsNoTracking();
+        if (filter is not null) query = query.Where(filter);
+
+        var total = await query.CountAsync(ct);
+        var items = await order(query).Skip(skip).Take(take).ToListAsync(ct);
+        return (items, total);
+    }
+
     public virtual async Task<int> CountAsync(
         Expression<Func<T, bool>>? predicate = null, CancellationToken ct = default)
         => predicate is null

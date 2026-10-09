@@ -3,6 +3,7 @@ using FluentAssertions;
 using Moq;
 using Xunit;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
@@ -121,10 +122,10 @@ public class ResultServiceDashboardTests
 
         await _sut.GetDashboardStatsAsync();
 
-        _resultRepo.Verify(r => r.GetAllWithDetailsAsync(default), Times.Never,
+        _resultRepo.Verify(r => r.GetPagedAsync(It.IsAny<ResultFilter>(), It.IsAny<PageQuery>(), default), Times.Never,
             "el dashboard no debe materializar el histórico completo de resultados");
-        _examRepo.Verify(r => r.GetWithStatsAsync(default), Times.Never,
-            "contar exámenes activos no debe traer sus preguntas, invitaciones ni sesiones");
+        _examRepo.Verify(r => r.GetPagedSummariesAsync(It.IsAny<ExamFilter>(), It.IsAny<PageQuery>(), default), Times.Never,
+            "contar exámenes activos no debe pedir el listado de pruebas con sus recuentos");
     }
 
     [Fact]

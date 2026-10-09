@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 
 namespace TechEval.API.Controllers;
 
@@ -28,9 +29,18 @@ public class ExamsController : ControllerBase
         _configuration = configuration;
     }
 
+    /// <summary>Una página de pruebas, con sus recuentos</summary>
     [HttpGet]
-    public async Task<IActionResult> GetAll(CancellationToken ct)
-        => Ok(await _examService.GetAllAsync(ct));
+    [ProducesResponseType(typeof(PagedResult<ExamSummaryDto>), 200)]
+    public async Task<IActionResult> GetAll(
+        [FromQuery] PageQuery paging, [FromQuery] bool? active, CancellationToken ct)
+        => Ok(await _examService.GetPagedAsync(new ExamFilter(active), paging, ct));
+
+    /// <summary>Identificador y título de todas las pruebas, para los desplegables</summary>
+    [HttpGet("options")]
+    [ProducesResponseType(typeof(IReadOnlyList<ExamOptionDto>), 200)]
+    public async Task<IActionResult> GetOptions(CancellationToken ct)
+        => Ok(await _examService.GetOptionsAsync(ct));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)

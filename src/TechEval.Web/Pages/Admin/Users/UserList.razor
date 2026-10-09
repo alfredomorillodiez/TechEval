@@ -36,7 +36,7 @@
         <div class="card-body d-flex flex-wrap gap-2 align-items-end">
             <div>
                 <label class="form-label small mb-1">Rol</label>
-                <select class="form-select form-select-sm" @bind="_filterRole" @bind:after="LoadAsync">
+                <select class="form-select form-select-sm" @bind="_filterRole" @bind:after="OnFilterChanged">
                     <option value="">Todos</option>
                     @foreach (var r in Enum.GetValues<UserRole>())
                     {
@@ -46,7 +46,7 @@
             </div>
             <div>
                 <label class="form-label small mb-1">Estado</label>
-                <select class="form-select form-select-sm" @bind="_filterActive" @bind:after="LoadAsync">
+                <select class="form-select form-select-sm" @bind="_filterActive" @bind:after="OnFilterChanged">
                     <option value="">Todos</option>
                     <option value="true">Activas</option>
                     <option value="false">Inactivas</option>
@@ -54,16 +54,16 @@
             </div>
             <div class="flex-grow-1" style="min-width:220px;">
                 <label class="form-label small mb-1">Nombre o email</label>
-                <input class="form-control form-control-sm" @bind="_search" @bind:event="oninput"
+                <input class="form-control form-control-sm" value="@_search" @oninput="OnSearchInput"
                        @onkeydown="OnSearchKey" placeholder="Buscar…" />
             </div>
-            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync">
+            <button class="btn btn-sm btn-outline-secondary" aria-label="Buscar" @onclick="OnFilterChanged">
                 <i class="bi bi-search"></i>
             </button>
         </div>
     </div>
 
-    @if (_loading)
+    @if (_firstLoad)
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
@@ -77,7 +77,7 @@
     }
     else
     {
-        <div class="card border-0 shadow-sm">
+        <div class="card border-0 shadow-sm @(_loadingRows ? "opacity-50" : "")" aria-busy="@(_loadingRows ? "true" : "false")">
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
@@ -91,7 +91,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var u in SortedUsers)
+                        @foreach (var u in _users)
                         {
                             var isSelf = IsSelf(u);
                             <tr class="@(u.IsActive ? "" : "text-muted")">
@@ -150,6 +150,8 @@
                 </table>
             </div>
         </div>
+
+        <Pager State="_page" Noun="usuarios" OnPage="GoToPageAsync" OnPageSize="SetPageSizeAsync" />
     }
 </div>
 
@@ -261,7 +263,7 @@
         string Title, string Message, string Button, string ButtonClass, Func<Task> Action);
 
     private List<UserDto> _users = new();
-    private bool _loading = true, _busy, _loadFailed;
+    private bool _firstLoad = true, _loadingRows, _busy, _loadFailed;
 
     private string _filterRole = string.Empty, _filterActive = string.Empty, _search = string.Empty;
 
@@ -277,28 +279,54 @@
 
     private Confirmation? _confirm;
 
-    // Filtros, búsqueda y orden se conservan al volver a la pantalla. El rol, el estado y la
-    // búsqueda son de servidor: se restauran antes de la primera carga para que salgan en ella.
+    // Filtros, búsqueda, orden y página se conservan al volver a la pantalla. Todo es de servidor: se
+    // restaura antes de la primera carga para que salga en ella.
     private const string StateKey = "users";
     private readonly SortState _sort = new();
+    private readonly PageState _page = new();
+    private readonly ListLoader _loader = new();
 
-    private sealed record Saved(string Role, string Active, string Search, SortState Sort);
+    private sealed record Saved(string Role, string Active, string Search, SortState Sort, int Page, int PageSize);
 
-    private static readonly IReadOnlyDictionary<string, Func<UserDto, object?>> Columns =
-        new Dictionary<string, Func<UserDto, object?>>
-        {
-            ["name"] = u => u.Name,
-            ["email"] = u => u.Email,
-            ["role"] = u => (int)u.Role,
-            ["status"] = u => u.IsActive,
-            ["created"] = u => u.CreatedAt
-        };
+    public void Dispose()
+    {
+        Lists.Set(StateKey, new Saved(_filterRole, _filterActive, _search, _sort.Clone(), _page.Page, _page.PageSize));
+        _loader.Dispose();
+    }
 
-    private IEnumerable<UserDto> SortedUsers => ListSort.Apply(_users, _sort, Columns);
+    // Buscar, filtrar u ordenar vuelve a la primera página. Las acciones sobre un usuario (desactivar,
+    // cambiar el rol…) recargan la página en la que está el administrador, con LoadAsync.
+    private async Task OnFilterChanged()
+    {
+        _page.Reset();
+        await LoadAsync();
+    }
 
-    private void SortBy(string key) => _sort.Toggle(key);
+    private Task OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? string.Empty;
+        _page.Reset();
+        _ = _loader.DebounceAsync(LoadAsync);
+        return Task.CompletedTask;
+    }
 
-    public void Dispose() => Lists.Set(StateKey, new Saved(_filterRole, _filterActive, _search, _sort.Clone()));
+    private async Task SortBy(string key)
+    {
+        _sort.Toggle(key);
+        await OnFilterChanged();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page.Page = page;
+        await LoadAsync();
+    }
+
+    private async Task SetPageSizeAsync(int size)
+    {
+        _page.SetPageSize(size);
+        await LoadAsync();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -309,25 +337,48 @@
         {
             _filterRole = saved.Role; _filterActive = saved.Active; _search = saved.Search;
             _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+            _page.Page = saved.Page; _page.PageSize = saved.PageSize;
         }
 
         await LoadAsync();
     }
 
+    // Recarga la página actual con los filtros actuales.
     private async Task LoadAsync()
     {
-        _loading = true;
+        _loadingRows = true;
         UserRole? role = Enum.TryParse<UserRole>(_filterRole, out var r) ? r : null;
         bool? active = bool.TryParse(_filterActive, out var a) ? a : null;
-        var users = await Api.GetUsersAsync(role, active, _search);
-        _loadFailed = users is null;
-        if (users is not null) _users = users;
-        _loading = false;
+
+        // Si la página guardada ya no existe, o se vació al desactivar al último de la página, se pide la última.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var again = false;
+            var query = _page.ToQuery(_search, _sort);
+            var applied = await _loader.LoadAsync(() => Api.GetUsersPageAsync(query, role, active), result =>
+            {
+                _loadFailed = result is null;
+                if (result is null) return;
+
+                var beyond = _page.IsBeyondEnd(result);
+                _page.Apply(result);
+                if (beyond) { _page.GoToLast(); again = true; return; }
+                _users = result.Items.ToList();
+            });
+
+            if (!applied) return;
+            if (!again) break;
+        }
+
+        _firstLoad = false;
+        _loadingRows = false;
+        StateHasChanged();
     }
 
+    // Enter busca ya, sin esperar a la pausa de la escritura.
     private async Task OnSearchKey(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter") await LoadAsync();
+        if (e.Key == "Enter") await OnFilterChanged();
     }
 
     // La API también lo impide. Aquí solo se evita ofrecer lo que va a fallar.

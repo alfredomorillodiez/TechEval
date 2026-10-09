@@ -1,3 +1,4 @@
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 
@@ -7,12 +8,12 @@ public interface IQuestionRepository : IRepository<Question>
 {
     Task<Question?> GetWithAnswersAsync(int id, CancellationToken ct = default);
     Task<IReadOnlyList<Question>> GetByCategoryAsync(int categoryId, CancellationToken ct = default);
-    Task<IReadOnlyList<Question>> GetFilteredAsync(
-        int? categoryId,
-        DifficultyLevel? difficulty,
-        QuestionType? type,
-        bool onlyActive = true,
-        CancellationToken ct = default);
+    /// <summary>
+    /// Una página del banco, con la categoría y sin las opciones: la tabla no las muestra.
+    /// </summary>
+    Task<PagedResult<Question>> GetPagedAsync(
+        QuestionFilter filter, PageQuery query, CancellationToken ct = default);
+
     Task<IReadOnlyList<Question>> GetRandomAsync(
         int count,
         List<int>? categoryIds,

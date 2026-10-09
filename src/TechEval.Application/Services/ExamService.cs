@@ -1,4 +1,5 @@
 using TechEval.Application.DTOs;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
@@ -7,7 +8,11 @@ namespace TechEval.Application.Services;
 
 public interface IExamService
 {
-    Task<IReadOnlyList<ExamSummaryDto>> GetAllAsync(CancellationToken ct = default);
+    Task<PagedResult<ExamSummaryDto>> GetPagedAsync(
+        ExamFilter filter, PageQuery query, CancellationToken ct = default);
+
+    /// <summary>Identificador y título de todas las pruebas, para los desplegables.</summary>
+    Task<IReadOnlyList<ExamOptionDto>> GetOptionsAsync(CancellationToken ct = default);
     Task<ExamDto?> GetByIdAsync(int id, CancellationToken ct = default);
     Task<ExamDto> CreateAsync(CreateExamDto dto, int createdByUserId, CancellationToken ct = default);
     Task<ExamDto> GenerateAsync(GenerateExamDto dto, int createdByUserId, CancellationToken ct = default);
@@ -26,19 +31,15 @@ public class ExamService : IExamService
         _questionRepo = questionRepo;
     }
 
-    public async Task<IReadOnlyList<ExamSummaryDto>> GetAllAsync(CancellationToken ct = default)
-    {
-        var exams = await _examRepo.GetWithStatsAsync(ct);
-        return exams.Select(e => new ExamSummaryDto(
-            e.Id, e.Title, e.TimeLimitMinutes,
-            e.ExamQuestions.Count,
-            e.ExamQuestions.Sum(eq => eq.Question?.Points ?? 0),
-            e.PassingScorePercentage,
-            e.IsActive, e.CreatedAt,
-            e.ExamTokens.Count,
-            e.ExamTokens.Count(t => t.ExamSession?.ExamResult != null),
-            e.ExamTokens.Count(t => t.ExamSession?.Status == SessionStatus.Abandoned))).ToList();
-    }
+    public async Task<PagedResult<ExamSummaryDto>> GetPagedAsync(
+        ExamFilter filter, PageQuery query, CancellationToken ct = default)
+        => (await _examRepo.GetPagedSummariesAsync(filter, query, ct)).Map(e => new ExamSummaryDto(
+            e.Id, e.Title, e.TimeLimitMinutes, e.QuestionCount, e.TotalPoints,
+            e.PassingScorePercentage, e.IsActive, e.CreatedAt,
+            e.InvitationCount, e.ResultCount, e.AbandonedCount));
+
+    public async Task<IReadOnlyList<ExamOptionDto>> GetOptionsAsync(CancellationToken ct = default)
+        => (await _examRepo.GetOptionsAsync(ct)).Select(o => new ExamOptionDto(o.Id, o.Title)).ToList();
 
     public async Task<ExamDto?> GetByIdAsync(int id, CancellationToken ct = default)
     {

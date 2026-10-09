@@ -1,5 +1,6 @@
 using System.Net.Mail;
 using TechEval.Application.DTOs;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
@@ -8,8 +9,8 @@ namespace TechEval.Application.Services;
 
 public interface IUserManagementService
 {
-    Task<IReadOnlyList<UserDto>> ListAsync(
-        UserRole? role, bool? active, string? search, CancellationToken ct = default);
+    Task<PagedResult<UserDto>> ListAsync(
+        UserRole? role, bool? active, PageQuery query, CancellationToken ct = default);
 
     Task<UserActionResultDto> CreateAsync(CreateUserDto dto, string baseUrl, CancellationToken ct = default);
 
@@ -61,21 +62,33 @@ public class UserManagementService : IUserManagementService
         _unitOfWork = unitOfWork;
     }
 
-    public async Task<IReadOnlyList<UserDto>> ListAsync(
-        UserRole? role, bool? active, string? search, CancellationToken ct = default)
+    public async Task<PagedResult<UserDto>> ListAsync(
+        UserRole? role, bool? active, PageQuery query, CancellationToken ct = default)
     {
-        var text = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        var text = query.Text?.ToLowerInvariant();
+        var desc = query.Desc;
 
-        var users = await _userRepo.FindAsync(u =>
-            (role == null || u.Role == role) &&
-            (active == null || u.IsActive == active) &&
-            (text == null || u.Name.Contains(text) || u.Email.Contains(text)), ct);
+        var (users, total) = await _userRepo.GetPageAsync(
+            u => (role == null || u.Role == role) &&
+                 (active == null || u.IsActive == active) &&
+                 (text == null || u.Name.ToLower().Contains(text) || u.Email.ToLower().Contains(text)),
+            q =>
+            {
+                // Lista blanca de columnas, con Id al final para que las páginas no repitan ni pierdan filas.
+                var ordered = query.SortKey switch
+                {
+                    "name" => desc ? q.OrderByDescending(u => u.Name.ToLower()) : q.OrderBy(u => u.Name.ToLower()),
+                    "email" => desc ? q.OrderByDescending(u => u.Email.ToLower()) : q.OrderBy(u => u.Email.ToLower()),
+                    "role" => desc ? q.OrderByDescending(u => u.Role) : q.OrderBy(u => u.Role),
+                    "status" => desc ? q.OrderByDescending(u => u.IsActive) : q.OrderBy(u => u.IsActive),
+                    "created" => desc ? q.OrderByDescending(u => u.CreatedAt) : q.OrderBy(u => u.CreatedAt),
+                    _ => q.OrderBy(u => u.Role).ThenBy(u => u.Name)
+                };
+                return ordered.ThenBy(u => u.Id);
+            },
+            query.Skip, query.EffectivePageSize, ct);
 
-        return users
-            .OrderBy(u => u.Role)
-            .ThenBy(u => u.Name)
-            .Select(ToDto)
-            .ToList();
+        return PagedResult<UserDto>.Of(users.Select(ToDto).ToList(), total, query);
     }
 
     public async Task<UserActionResultDto> CreateAsync(

@@ -187,7 +187,8 @@
     private async Task LoadAsync()
     {
         _loading = true;
-        var questions = await Api.GetQuestionsAsync();
+        // Todo el banco activo, pidiendo páginas de 100: la composición manual ofrece todas las preguntas.
+        var questions = await Api.GetAllQuestionsAsync(active: true);
         var categories = await Api.GetCategoriesAsync();
 
         // Sin las preguntas o sin las categorías no se puede armar la prueba, y una pantalla

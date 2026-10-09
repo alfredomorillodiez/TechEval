@@ -10,7 +10,7 @@ Lo que condiciona el enfoque:
 - La imagen `nginx:alpine` ejecuta, antes de arrancar, los `*.sh` ejecutables de `/docker-entrypoint.d/` con `set -e`: un fallo detiene el contenedor.
 - La API ya lee `FrontendBaseUrl` y `AllowedOrigins` de la configuración; Compose pasa variables de entorno con `__` o con el nombre plano, y ASP.NET las lee como configuración. Ningún cambio de código.
 - Lo publicado por la web: 62 ficheros sin contar las copias comprimidas. 53 llevan una huella de diez caracteres en el nombre (`dotnet.native.6sals8nuk0.js`, `icudt_CJK.tjcz0u77k5.dat`, 48 `.wasm`) y 9 no (`index.html`, `appsettings.json`, `css/app.css`, `js/exam-*.js` ×3, `_framework/blazor.boot.json`, `blazor.webassembly.js`, `dotnet.js`).
-- El demonio de Docker Desktop no estaba en marcha al hacer este cambio, así que las imágenes no se construyeron.
+- El demonio de Docker Desktop no estaba en marcha al implementar; se arrancó después para la tarea 3.1.
 
 ## Goals / Non-Goals
 
@@ -67,7 +67,7 @@ Como las demás variables de Compose: `${MSSQL_PID:?mensaje}`. Una variable con 
 
 ## Risks / Trade-offs
 
-- **Las imágenes no se han construido.** No había demonio de Docker. Se verificó por partes: `docker compose config` con y sin variables, el guion de arranque con seis casos en un directorio temporal, y la regla de caché contra los nombres reales. No está verificado: la sintaxis de `nginx.conf` con `nginx -t`, que el `ENTRYPOINT` de la imagen ejecute el guion, y las cabeceras reales. Comandos para hacerlo en la tarea 3.1.
+- **Verificado con la imagen de la web el 09·10·2026** (tarea 3.1): `nginx -t`, el guion de arranque dentro del contenedor y las cabeceras reales. **No verificado:** el stack completo con `docker compose up` (exige la imagen de SQL Server) y la construcción de `Dockerfile.api` con el nuevo `.dockerignore`.
 - **`no-cache` cuesta una petición condicional por fichero sin huella** (nueve) en cada carga. Es un `304` de unos cientos de bytes.
 - **`MSSQL_PID` obligatoria rompe los `.env` existentes.** Es un mensaje claro y una línea que añadir.
 - **`appsettings.json` generado al arrancar** significa que cambiar la URL pide reiniciar el contenedor, no reconstruirlo.

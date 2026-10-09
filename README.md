@@ -125,7 +125,7 @@ Con los valores de `.env.example`, el stack solo sirve en el equipo donde corre:
 - Un `FRONTEND_BASE_URL` equivocado no da ningún error al arrancar: las invitaciones salen con un enlace a una página que no existe. Compruébalo enviando una a una dirección propia.
 - nginx guarda sin revalidar solo los ficheros con huella en el nombre. El resto (`index.html`, `blazor.boot.json`, `css/`, `js/`) se revalida en cada carga, así que una actualización llega sin que nadie tenga que vaciar la caché.
 
-> **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. El procedimiento está en [docs/rotacion-de-secretos.md](docs/rotacion-de-secretos.md), con el guion que genera los valores nuevos.
+> **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. El procedimiento está en [docs/rotacion-de-secretos.md](docs/rotacion-de-secretos.md), con el guion que genera los valores nuevos (`scripts/rotar-secretos.sh` o `.ps1`, que conserva del `.env` anterior lo que no es un secreto) y la comprobación `scripts/comprobar-rotacion.sh` o `.ps1`, que dice si algún valor en uso sigue en el historial de git. Un despliegue con los valores viejos funciona igual de bien que uno con los nuevos: esa comprobación es la única prueba de que se rotó.
 
 ---
 

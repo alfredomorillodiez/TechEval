@@ -1,0 +1,24 @@
+# Lo que NO va al contexto de construcción. Sin este fichero, `COPY src/ src/` copiaba al contenedor
+# los bin/ y obj/ de la máquina que construye: un obj/project.assets.json de Windows, con sus rutas,
+# sustituía al que acababa de generar `dotnet restore` y rompía la compilación en Linux. Y el .env,
+# con los secretos, entraba en el contexto aunque ninguna instrucción lo copie.
+
+**/bin
+**/obj
+**/.vs
+artifacts
+
+.git
+.github
+.claude
+
+.env
+.env.*
+!.env.example
+
+# Nada de esto hace falta para construir las imágenes.
+tests
+docs
+openspec
+scripts
+*.md

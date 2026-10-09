@@ -6,7 +6,8 @@ services:
     environment:
       SA_PASSWORD: "${SA_PASSWORD:?define SA_PASSWORD en tu .env — ver .env.example}"
       ACCEPT_EULA: "Y"
-      MSSQL_PID: "Developer"
+      # Developer no tiene licencia para producción. Se elige en .env, no aquí: ver .env.example.
+      MSSQL_PID: "${MSSQL_PID:?define MSSQL_PID en tu .env — ver .env.example}"
     ports:
       - "1433:1433"
     volumes:
@@ -32,6 +33,11 @@ services:
       - Email__Office365__ClientId=${O365_CLIENT_ID:?define O365_CLIENT_ID en tu .env}
       - Email__Office365__ClientSecret=${O365_CLIENT_SECRET:?define O365_CLIENT_SECRET en tu .env}
       - AdminPassword=${ADMIN_PASSWORD:?define ADMIN_PASSWORD en tu .env}
+      # La web de este stack. Una sola variable para los dos usos: el origen que acepta CORS y la base de
+      # los enlaces de los correos (invitaciones y «fijar contraseña»). Sin barra final. Sin definirla, los
+      # enlaces llevaban a https://localhost:60805, la web de desarrollo.
+      - FrontendBaseUrl=${FRONTEND_BASE_URL:-http://localhost:5001}
+      - AllowedOrigins=${FRONTEND_BASE_URL:-http://localhost:5001}
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -42,6 +48,10 @@ services:
       dockerfile: Dockerfile.web
     ports:
       - "5001:80"
+    environment:
+      # Dónde está la API para el navegador de quien usa la web, no para este contenedor. La imagen escribe
+      # appsettings.json con este valor al arrancar.
+      - API_BASE_URL=${API_BASE_URL:-http://localhost:5000/}
     depends_on:
       - api
 

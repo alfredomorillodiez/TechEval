@@ -14,4 +14,13 @@ RUN dotnet publish src/TechEval.Web/TechEval.Web.csproj -c Release -o /app/publi
 FROM nginx:alpine AS runtime
 COPY --from=build /app/publish/wwwroot /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
+
+# La URL de la API se escribe al arrancar el contenedor, no al construir la imagen: una misma imagen
+# sirve para cualquier despliegue. nginx ejecuta lo que haya en /docker-entrypoint.d/ antes de arrancar.
+# Se quitan los fines de línea de Windows (con CRLF, el intérprete busca «/bin/sh\r» y falla sin
+# decir la causa) y se marca ejecutable: nginx ignora los .sh que no lo son.
+COPY docker/web-appsettings.sh /docker-entrypoint.d/40-appsettings.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.d/40-appsettings.sh && chmod +x /docker-entrypoint.d/40-appsettings.sh
+
+ENV API_BASE_URL=http://localhost:5000/
 EXPOSE 80

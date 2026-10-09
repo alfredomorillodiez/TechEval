@@ -110,6 +110,21 @@ docker-compose up -d
 > cp .env.example .env    # y edita los valores
 > ```
 >
+### Fuera de `localhost`
+
+Con los valores de `.env.example`, el stack solo sirve en el equipo donde corre: la web y los enlaces de los correos apuntan a `localhost`. Para otro servidor hay tres variables en `.env`, todas **vistas desde el navegador** de quien usa la aplicación:
+
+| Variable | Qué es | Ejemplo |
+|----------|--------|---------|
+| `FRONTEND_BASE_URL` | La web. Es el origen que acepta la API (CORS) y la base de los enlaces de las invitaciones y de «fijar contraseña». **Sin barra final** | `https://techeval.empresa.com` |
+| `API_BASE_URL` | La API. La web la llama desde el navegador | `https://api.techeval.empresa.com` |
+| `MSSQL_PID` | Edición de SQL Server. **Obligatoria**. `Developer` solo vale para desarrollo: no tiene licencia de producción. Producción: `Express` (gratuita, 10 GB por base de datos), `Standard` o `Enterprise` | `Express` |
+
+- La imagen de la web **no se reconstruye** para cambiar `API_BASE_URL`: escribe su `appsettings.json` al arrancar el contenedor. Se cambia el valor y se reinicia.
+- nginx y la API escuchan en HTTP. El certificado lo pone un proxy inverso delante; detrás de uno hay que declarar sus direcciones (ver el apartado del despliegue detrás de un proxy).
+- Un `FRONTEND_BASE_URL` equivocado no da ningún error al arrancar: las invitaciones salen con un enlace a una página que no existe. Compruébalo enviando una a una dirección propia.
+- nginx guarda sin revalidar solo los ficheros con huella en el nombre. El resto (`index.html`, `blazor.boot.json`, `css/`, `js/`) se revalida en cada carga, así que una actualización llega sin que nadie tenga que vaciar la caché.
+
 > **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. El procedimiento está en [docs/rotacion-de-secretos.md](docs/rotacion-de-secretos.md), con el guion que genera los valores nuevos.
 
 ---

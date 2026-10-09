@@ -1074,11 +1074,27 @@ docker-compose up -d
 
 | Servicio | Puerto | Descripción |
 |----------|--------|-------------|
-| `sqlserver` | 1433 | SQL Server 2022 Developer |
+| `sqlserver` | 1433 | SQL Server 2022. La edición la elige `MSSQL_PID` |
 | `api` | 5000 | ASP.NET Core API |
 | `web` | 5001 | Blazor WebAssembly (Nginx) |
 
 Volumen persistente: `sqlserver_data` (datos de SQL Server).
+
+### Desplegar fuera de `localhost`
+
+Una web Blazor WebAssembly se ejecuta en el navegador, así que sus direcciones son las que ve quien la usa, no las de la red de Compose. Hay tres variables en `.env`:
+
+| Variable | Dónde llega | Por defecto |
+|----------|-------------|-------------|
+| `FRONTEND_BASE_URL` | La API, como `FrontendBaseUrl` (base de los enlaces de los correos) y como `AllowedOrigins` (origen que acepta CORS). Sin barra final | `http://localhost:5001` |
+| `API_BASE_URL` | La web, que escribe su `appsettings.json` con ella al arrancar el contenedor. La barra final se añade sola | `http://localhost:5000/` |
+| `MSSQL_PID` | SQL Server. Obligatoria. `Developer` no tiene licencia de producción; sirve `Express`, `Standard` o `Enterprise` | sin valor: Compose no arranca |
+
+- **La imagen de la web es la misma en cualquier despliegue.** `dotnet publish` deja en ella el `appsettings.json` de desarrollo (la API en `https://localhost:60807/`) y `docker/web-appsettings.sh`, que nginx ejecuta antes de arrancar, lo sustituye. Un valor con comillas o barras invertidas detiene el contenedor y lo dice.
+- **Caché.** De los 62 ficheros que publica la web, 53 llevan una huella en el nombre (`dotnet.native.6sals8nuk0.js`) y nginx los marca `immutable` durante un año. Los otros 9 (`index.html`, `appsettings.json`, `css/app.css`, `js/exam-*.js`, `_framework/blazor.boot.json`, `blazor.webassembly.js`, `dotnet.js`) se sirven con `no-cache`: el navegador pregunta en cada carga y recibe un `304` si no cambiaron. Antes iban como inmutables o sin cabecera, y una actualización podía tardar un año en llegar.
+- **`.dockerignore`.** Deja fuera del contexto de construcción los `bin/` y `obj/` de quien construye, `.env` y lo que las imágenes no usan. Sin él, un `obj/project.assets.json` de Windows sustituía al que `dotnet restore` acababa de generar.
+- **Fin de línea de los guiones.** `.gitattributes` fuerza LF en `*.sh`. Con CRLF, el guion de arranque falla en Alpine con «not found».
+- **TLS.** nginx y la API escuchan en HTTP; el certificado lo pone un proxy inverso delante.
 
 ### Configurar el correo en Docker
 

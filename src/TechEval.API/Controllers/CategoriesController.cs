@@ -16,8 +16,8 @@ public class CategoriesController : ControllerBase
     public CategoriesController(ICategoryService service) => _service = service;
 
     [HttpGet]
-    public async Task<IActionResult> GetAll(CancellationToken ct)
-        => Ok(await _service.GetAllAsync(ct));
+    public async Task<IActionResult> GetAll([FromQuery] bool includeInactive, CancellationToken ct)
+        => Ok(await _service.GetAllAsync(includeInactive, ct));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)

@@ -32,6 +32,14 @@ public class ExamTokenRepository : BaseRepository<ExamToken>, IExamTokenReposito
             .Include(t => t.ExamSession)
             .FirstOrDefaultAsync(t => t.ExamSession != null && t.ExamSession.Id == sessionId, ct);
 
+    public async Task<IReadOnlyList<ExamToken>> GetInProgressAsync(CancellationToken ct = default)
+        => await Context.ExamTokens
+            .Include(t => t.Exam)
+            .Include(t => t.ExamSession)
+                .ThenInclude(s => s!.ExamResult)
+            .Where(t => t.ExamSession != null && t.ExamSession.Status == SessionStatus.InProgress)
+            .ToListAsync(ct);
+
     // Pendiente es lo que el alumno todavía puede resolver: la invitación sin usar y en
     // plazo, o la prueba que dejó a medias. Filtrar solo por !IsUsed escondía del portal
     // la prueba en curso, que es justo la que el alumno necesita encontrar para volver.
@@ -40,7 +48,7 @@ public class ExamTokenRepository : BaseRepository<ExamToken>, IExamTokenReposito
             .Include(t => t.Exam)
             .Include(t => t.ExamSession)
             .Where(t => t.UserId == userId
-                && ((!t.IsUsed && t.ExpiresAt > DateTime.UtcNow)
+                && ((!t.IsUsed && t.ExpiresAt > DateTime.UtcNow && t.Exam!.IsActive)
                     || (t.ExamSession != null
                         && t.ExamSession.Status == SessionStatus.InProgress
                         && t.ExamSession.ExamResult == null)))

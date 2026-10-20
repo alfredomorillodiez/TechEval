@@ -120,7 +120,10 @@ public sealed class ReviewWorkflow
         ValidateReview(openAnswers, submitted);
 
         var exam = await _examRepo.GetByIdAsync(result.ExamId, ct);
-        int passingScore = exam?.PassingScorePercentage ?? 0;
+        // La nota con que empezó la sesión, no la actual de la prueba: subirla entre el envío y la
+        // corrección daba veredictos distintos a dos candidatos con la misma nota. Sin sesión
+        // cargada, o en una anterior al cambio, la de la prueba.
+        int passingScore = result.ExamSession?.PassingScoreSnapshot ?? exam?.PassingScorePercentage ?? 0;
 
         decimal pct = 0;
         bool passed = false;

@@ -138,7 +138,7 @@ El sistema SHALL crear automáticamente un usuario administrador por defecto la 
 - **THEN** el sistema MUST insertar un usuario con `Email = "admin@techeval.com"`, rol `Admin`, `IsActive = true` y un `PasswordHash` derivado de `AdminPassword` con PBKDF2 y sal propia
 
 ### Requirement: Aprovisionamiento automático de cuenta de alumno
-El sistema SHALL crear automáticamente un `User` con rol `Alumno` la primera vez que se abre una invitación de examen (`GET /api/exam/validate/{token}`) para un email que no corresponde a ningún usuario existente, derivando el `username` de la parte local del email. La cuenta SHALL nacer **sin contraseña utilizable**: el sistema MUST NOT derivar ninguna contraseña del email, del nombre ni de ningún otro dato conocido del candidato.
+El sistema SHALL crear automáticamente un `User` con rol `Alumno` la primera vez que se abre una invitación de examen (`GET /api/exam/validate/{token}`) para un email que no corresponde a ningún usuario existente. La cuenta SHALL nacer **sin nombre de usuario**: el alumno no entra con usuario y contraseña, y un nombre derivado de la parte local del email hacía chocar a dos candidatos de dominios distintos. La cuenta SHALL nacer también **sin contraseña utilizable**: el sistema MUST NOT derivar ninguna contraseña del email, del nombre ni de ningún otro dato conocido del candidato.
 
 El acceso del candidato es el enlace de la invitación, que ya emite su sesión autenticada.
 
@@ -147,7 +147,14 @@ Si el email corresponde a un usuario existente con un rol distinto de `Alumno`, 
 #### Scenario: Primera apertura de una invitación con email nuevo
 - **GIVEN** un `ExamToken` válido con `CandidateEmail = "alejandro.robles@pronet-ise.com"` y ningún `User` existente con ese email
 - **WHEN** se invoca `GET /api/exam/validate/{token}` con ese token
-- **THEN** el sistema MUST crear un `User` con `Email = "alejandro.robles@pronet-ise.com"`, `Name` igual al `CandidateName` de la invitación, rol `Alumno`, `IsActive = true` y sin contraseña utilizable
+- **THEN** el sistema MUST crear un `User` con `Email = "alejandro.robles@pronet-ise.com"`, `Name` igual al `CandidateName` de la invitación, rol `Alumno`, `IsActive = true`, sin nombre de usuario y sin contraseña utilizable
+
+#### Scenario: Dos candidatos con la misma parte local del email
+- **GIVEN** un alumno existente con email `maria.lopez@gmail.com`
+- **AND** un `ExamToken` válido con `CandidateEmail = "maria.lopez@hotmail.com"`
+- **WHEN** se invoca `GET /api/exam/validate/{token}` con ese token
+- **THEN** el sistema MUST crear un `User` nuevo para `maria.lopez@hotmail.com`, sin nombre de usuario, y responder con `isValid = true` y un JWT
+- **AND** el alumno `maria.lopez@gmail.com` no cambia
 
 #### Scenario: La cuenta recién creada no permite entrar con datos del candidato
 - **GIVEN** una cuenta de alumno recién aprovisionada para `alejandro.robles@pronet-ise.com`
@@ -275,3 +282,24 @@ El sistema SHALL exigir un JWT válido con rol `Evaluador` para acceder a los en
 #### Scenario: Petición sin token a un endpoint de evaluación
 - **WHEN** se envía una petición a un endpoint de evaluación sin header `Authorization`
 - **THEN** el sistema MUST responder `401 Unauthorized`
+
+### Requirement: El formulario de acceso dice por qué falla
+El formulario de acceso SHALL mostrar un mensaje distinto según la causa del fallo. Un `401` SHALL mostrar «Credenciales incorrectas.». Un `429` SHALL mostrar el mensaje del servidor, que indica cuándo reintentar, y SHALL NOT mostrar «Credenciales incorrectas.». Un fallo de red SHALL decir que no se pudo conectar con el servidor. Cualquier otro error SHALL decir que el servidor falló e invitar a reintentar.
+
+#### Scenario: Credenciales incorrectas
+- **WHEN** el servidor responde `401` al intento de acceso
+- **THEN** el formulario muestra «Credenciales incorrectas.»
+
+#### Scenario: Límite de ritmo
+- **WHEN** el servidor responde `429` al intento de acceso
+- **THEN** el formulario muestra que hay demasiados intentos y cuándo volver a intentarlo
+- **AND** SHALL NOT mostrar «Credenciales incorrectas.»
+
+#### Scenario: API caída
+- **GIVEN** la API parada
+- **WHEN** la persona intenta acceder
+- **THEN** el formulario dice que no se pudo conectar con el servidor, no que las credenciales sean incorrectas
+
+#### Scenario: Error del servidor
+- **WHEN** el servidor responde `500`
+- **THEN** el formulario dice que el servidor falló y que se puede reintentar

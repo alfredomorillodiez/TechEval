@@ -339,3 +339,262 @@ El detalle de una prueba (`/admin/pruebas/{id}`) SHALL mostrar cuántas pregunta
 - **GIVEN** una prueba con 3 preguntas básicas, 5 intermedias y 2 avanzadas
 - **WHEN** el administrador abre su detalle
 - **THEN** la pantalla muestra 3 (30 %) básicas, 5 (50 %) intermedias y 2 (20 %) avanzadas
+
+### Requirement: Un fallo de carga no se muestra como un listado vacío
+Toda pantalla que carga un listado de la API SHALL distinguir una respuesta vacía de un fallo de carga. Ante un fallo (API caída, red, `429`, `5xx`, sesión sin permiso distinta de la expirada), la pantalla SHALL mostrar un aviso que diga qué no se pudo cargar y un botón «Reintentar», y SHALL NOT mostrar el mensaje de «vacío» ni afirmar un estado del sistema que no ha podido comprobar. Una lista realmente vacía SHALL seguir mostrando su mensaje propio. Esto aplica, al menos, a: la bandeja de correcciones del administrador y la del evaluador, el historial del evaluador, el portal del alumno (pendientes y completadas), el listado de resultados y los resultados de una prueba, el listado de usuarios, el listado de pruebas, los evaluadores de una prueba y las categorías que alimentan los formularios del banco de preguntas y de las pruebas.
+
+#### Scenario: Bandeja de correcciones con la API caída
+- **GIVEN** la API parada
+- **WHEN** un administrador abre `/admin/results/pending`
+- **THEN** la pantalla muestra «No se pudo cargar las correcciones pendientes» con un botón «Reintentar»
+- **AND** la pantalla SHALL NOT mostrar «No hay correcciones pendientes» ni «Todas las pruebas con preguntas abiertas están corregidas»
+
+#### Scenario: Reintentar tras volver la API
+- **GIVEN** una pantalla que mostró el error de carga
+- **WHEN** la API vuelve y la persona pulsa «Reintentar»
+- **THEN** la pantalla carga el listado y muestra sus filas, o su mensaje de vacío si de verdad no hay ninguna
+
+#### Scenario: Una lista vacía de verdad
+- **GIVEN** la API disponible y sin correcciones pendientes
+- **WHEN** se abre la bandeja
+- **THEN** la pantalla muestra su mensaje de que no hay correcciones pendientes, sin aviso de error
+
+#### Scenario: Una carga auxiliar que falla
+- **GIVEN** el formulario del banco de preguntas, que necesita las categorías para el desplegable
+- **WHEN** las categorías no se pueden cargar
+- **THEN** el formulario avisa de que no se pudieron cargar las categorías y ofrece reintentar, en lugar de mostrar un desplegable vacío sin explicación
+
+### Requirement: Una pregunta que se escribe no se pierde ni cambia de estado sin avisar
+El formulario de preguntas SHALL conservar el estado activo de la pregunta que se edita. Una pregunta desactivada SHALL mostrar un aviso de que lo está y un interruptor «Activa» que solo cambia si la persona lo cambia. Si el alta de una pregunta falla, el formulario SHALL permanecer abierto con todo lo escrito y SHALL mostrar el mensaje del servidor. Si la edición falla, SHALL mostrar el mensaje del servidor, y solo aconsejará dar de baja y crear otra cuando el servidor indique que la causa son respuestas ya registradas. Si la pregunta que se va a editar no se puede cargar, el formulario SHALL mostrar un error y SHALL NOT permitir guardar. Si una baja falla, la pantalla SHALL avisar.
+
+#### Scenario: Editar una pregunta desactivada
+- **GIVEN** una pregunta desactivada
+- **WHEN** un administrador la abre, cambia el enunciado y guarda sin tocar el interruptor
+- **THEN** la pregunta sigue desactivada
+
+#### Scenario: Reactivar a propósito
+- **GIVEN** una pregunta desactivada abierta en el formulario
+- **WHEN** el administrador activa el interruptor «Activa» y guarda
+- **THEN** la pregunta queda activa
+
+#### Scenario: El alta falla
+- **GIVEN** un alta que el servidor rechaza con un mensaje
+- **WHEN** el administrador pulsa guardar
+- **THEN** el formulario permanece abierto, conserva lo escrito y muestra el mensaje
+- **AND** la pantalla SHALL NOT navegar al listado
+
+#### Scenario: La pregunta que se edita no carga
+- **GIVEN** la API caída al abrir `/admin/questions/{id}/edit`
+- **WHEN** el formulario intenta cargar la pregunta
+- **THEN** muestra un error con «Reintentar» y no deja guardar un formulario vacío
+
+#### Scenario: Una baja que falla
+- **WHEN** el servidor rechaza dar de baja una pregunta
+- **THEN** la pantalla muestra un aviso y la pregunta sigue en el listado
+
+### Requirement: Los resultados de una prueba cuentan bien a los reprobados
+La pantalla de resultados de una prueba SHALL contar como «Reprobados» solo los resultados corregidos con `Passed = false`. Los pendientes de corrección SHALL NOT contarse como reprobados. Los porcentajes de aprobados y reprobados SHALL calcularse sobre los corregidos, y si no hay ninguno corregido, la pantalla SHALL NOT mostrar un porcentaje. El número de pendientes SHALL mostrarse aparte.
+
+#### Scenario: Una prueba con pendientes
+- **GIVEN** una prueba con 5 resultados: 2 aprobados, 1 reprobado y 2 pendientes de corrección
+- **WHEN** se abre la pantalla de resultados de esa prueba
+- **THEN** «Aprobados» muestra 2, «Reprobados» muestra 1 y «Pendientes» muestra 2
+- **AND** los porcentajes son 67 % y 33 %, sobre los 3 corregidos
+
+#### Scenario: Ningún resultado corregido
+- **GIVEN** una prueba con 2 resultados, los dos pendientes
+- **WHEN** se abre la pantalla
+- **THEN** «Reprobados» muestra 0, «Pendientes» muestra 2 y no se muestra ningún porcentaje
+
+### Requirement: El botón de resultados de una prueba abre sus resultados
+En el listado de pruebas, el botón de resultados de cada prueba SHALL abrir la pantalla de resultados de esa prueba (`/admin/results/prueba/{id}`), no el listado global.
+
+#### Scenario: Abrir los resultados de una prueba
+- **WHEN** un administrador pulsa el botón de resultados de la prueba 7
+- **THEN** la aplicación abre `/admin/results/prueba/7` y muestra solo los resultados de esa prueba
+
+### Requirement: La importación de candidatos desde CSV dice qué importó y qué no
+La importación de candidatos del envío masivo SHALL aceptar `;`, tabulador o `,` como separador, ignorar las líneas vacías y una primera línea de encabezado, y validar el correo de cada línea. El resultado SHALL indicar cuántos candidatos se importaron y, de cada línea ignorada, su número y el motivo. Cuando no se importe ninguno, SHALL decir por qué y SHALL NOT limitarse a dejar la lista vacía.
+
+#### Scenario: CSV separado por punto y coma
+- **GIVEN** un CSV de Excel con líneas «Juan García;juan@empresa.com»
+- **WHEN** el administrador pulsa Importar
+- **THEN** se importan los candidatos y la pantalla dice cuántos
+
+#### Scenario: CSV con encabezado
+- **GIVEN** un CSV cuya primera línea es «Nombre;Email»
+- **WHEN** se importa
+- **THEN** la línea de encabezado se ignora sin contarla como error
+
+#### Scenario: Línea con un correo inválido
+- **GIVEN** un CSV con la línea 3 «Ana López;ana-empresa»
+- **WHEN** se importa
+- **THEN** los candidatos válidos se importan
+- **AND** la pantalla dice que la línea 3 se ignoró porque el correo no es válido
+
+#### Scenario: Ninguna línea válida
+- **GIVEN** un texto en el que ninguna línea tiene nombre y correo
+- **WHEN** se importa
+- **THEN** la pantalla dice que no se importó ningún candidato y explica el formato esperado
+
+#### Scenario: Nombre con coma entre comillas
+- **GIVEN** la línea `"García, Juan",juan@empresa.com`
+- **WHEN** se importa
+- **THEN** el candidato se importa con el nombre «García, Juan»
+
+### Requirement: El motivo de un envío rechazado llega a la pantalla
+Cuando el servidor rechaza una invitación, individual o masiva, la pantalla de envío SHALL mostrar el mensaje del servidor, y SHALL NOT mostrar un texto genérico sobre la configuración del correo que oculte la causa.
+
+#### Scenario: Invitación a una prueba desactivada
+- **GIVEN** una prueba desactivada
+- **WHEN** el administrador intenta enviarla y el servidor responde `409` con un mensaje
+- **THEN** la pantalla muestra ese mensaje
+
+### Requirement: Buscador y orden por columna en los listados
+Los listados de la interfaz SHALL ofrecer un buscador de texto y ordenar por columna. Esto aplica a: preguntas, resultados, resultados de una prueba, usuarios, categorías, correcciones pendientes del administrador, cola e historial del evaluador y pruebas. Pulsar la cabecera de una columna SHALL ordenar por ella de forma ascendente; pulsarla de nuevo SHALL invertir el orden. La cabecera ordenada SHALL indicar la dirección con una flecha y con `aria-sort`. El orden de los textos SHALL seguir las reglas del castellano, sin distinguir mayúsculas, y los valores vacíos SHALL quedar al final. El listado de pruebas, que son tarjetas, SHALL ofrecer en su lugar un selector de orden.
+
+#### Scenario: Ordenar por una columna
+- **GIVEN** el listado de resultados
+- **WHEN** el administrador pulsa la cabecera «Nota»
+- **THEN** las filas se ordenan por nota de menor a mayor, y la cabecera muestra una flecha ascendente y `aria-sort="ascending"`
+
+#### Scenario: Invertir el orden
+- **GIVEN** un listado ordenado por «Nota» ascendente
+- **WHEN** el administrador pulsa otra vez «Nota»
+- **THEN** el orden pasa a descendente y `aria-sort="descending"`
+
+#### Scenario: Cambiar de columna
+- **GIVEN** un listado ordenado por «Nota» descendente
+- **WHEN** el administrador pulsa «Candidato»
+- **THEN** el orden pasa a «Candidato» ascendente
+
+#### Scenario: Orden de textos con tildes
+- **GIVEN** candidatos llamados «Álvaro», «Zoe» y «Andrés»
+- **WHEN** se ordena por nombre ascendente
+- **THEN** el orden es «Álvaro», «Andrés», «Zoe»
+
+#### Scenario: Los valores vacíos van al final
+- **GIVEN** resultados pendientes, que no tienen nota definitiva
+- **WHEN** se ordena por nota en cualquier dirección
+- **THEN** los pendientes quedan al final de la lista
+
+#### Scenario: Buscar en la cola de correcciones
+- **GIVEN** una cola con pruebas de «SQL» y de «C#»
+- **WHEN** el evaluador escribe «sql» en el buscador
+- **THEN** la cola muestra solo las pruebas de «SQL»
+
+### Requirement: Los filtros de un listado se conservan al volver
+Los listados con búsqueda, filtros u orden SHALL conservar ese estado mientras dure la sesión del navegador y restaurarlo cuando la persona vuelva a la pantalla, por ejemplo tras abrir el detalle de un elemento. El estado SHALL guardarse solo en el cliente, SHALL NOT guardarse en disco, y SHALL borrarse al cerrar la sesión. El estado de una pantalla SHALL ser independiente del de las demás, y el de los resultados de cada prueba SHALL ser independiente del de las otras pruebas.
+
+#### Scenario: Volver desde el detalle
+- **GIVEN** el listado de preguntas filtrado por la categoría «SQL» y con la búsqueda «join»
+- **WHEN** el administrador abre una pregunta y vuelve al listado
+- **THEN** el listado muestra el mismo filtro, la misma búsqueda y el mismo orden
+
+#### Scenario: Cerrar la sesión
+- **GIVEN** un listado con filtros
+- **WHEN** la persona cierra la sesión y otra inicia sesión en el mismo navegador
+- **THEN** los listados empiezan sin filtros
+
+#### Scenario: Listados independientes
+- **GIVEN** el listado de usuarios filtrado por el rol Evaluador
+- **WHEN** el administrador abre el listado de resultados
+- **THEN** el listado de resultados no hereda ese filtro
+
+#### Scenario: Resultados de dos pruebas distintas
+- **GIVEN** los resultados de la prueba 3 filtrados por «Reprobado»
+- **WHEN** el administrador abre los resultados de la prueba 4
+- **THEN** los resultados de la prueba 4 empiezan sin filtros
+
+### Requirement: Los listados de administración muestran una página
+Los listados de resultados, resultados de una prueba, preguntas, pruebas y usuarios SHALL mostrar una sola página y un control de paginación. El control SHALL indicar el rango mostrado y el total («Mostrando 26–50 de 312»), permitir ir a la página anterior, a la siguiente, a la primera y a la última, y elegir el tamaño de página entre 10, 25, 50 y 100. El control SHALL ser accesible: botones reales, la página actual con `aria-current="page"` y los botones sin efecto con `disabled`. Con una sola página, SHALL mostrar solo el total.
+
+#### Scenario: Pasar de página
+- **GIVEN** el listado de resultados con 60 filas y 25 por página
+- **WHEN** el administrador pulsa «Siguiente»
+- **THEN** se muestran las filas 26 a 50 y el control dice «Mostrando 26–50 de 60»
+
+#### Scenario: Cambiar el tamaño de página
+- **GIVEN** un listado en la página 3 con 25 por página
+- **WHEN** el administrador elige 50 por página
+- **THEN** el listado vuelve a la página 1
+
+#### Scenario: Una sola página
+- **GIVEN** un listado con 12 filas
+- **WHEN** se muestra
+- **THEN** no hay botones de página y el control dice «12 resultados»
+
+### Requirement: Buscar, filtrar u ordenar vuelve a la primera página
+Cambiar el texto de búsqueda, un filtro o el orden de un listado paginado SHALL volver a la página 1 y pedir los datos al servidor. La búsqueda SHALL esperar 300 ms desde la última pulsación antes de pedir. Una respuesta que llega tarde SHALL NOT sustituir a una más reciente.
+
+#### Scenario: Buscar desde la página 3
+- **GIVEN** el listado de resultados en la página 3
+- **WHEN** el administrador escribe un texto en el buscador
+- **THEN** el listado pide la página 1 con ese texto
+
+#### Scenario: Escribir deprisa
+- **GIVEN** el buscador de usuarios
+- **WHEN** el administrador escribe cinco letras en medio segundo
+- **THEN** la pantalla hace una sola petición
+
+#### Scenario: Respuesta tardía
+- **GIVEN** una búsqueda lenta que se pidió antes que otra rápida
+- **WHEN** llega primero la rápida y después la lenta
+- **THEN** la pantalla conserva el resultado de la rápida
+
+### Requirement: La página se conserva al volver
+El estado guardado de un listado (búsqueda, filtros y orden) SHALL incluir también la página y el tamaño de página. Al abrir una ficha y volver, SHALL mostrarse la misma página. Si la página guardada ya no existe porque hay menos filas, SHALL mostrarse la última.
+
+#### Scenario: Volver desde una ficha
+- **GIVEN** el administrador en la página 3 de los resultados
+- **WHEN** abre una ficha y vuelve
+- **THEN** el listado muestra la página 3
+
+#### Scenario: La página guardada ya no existe
+- **GIVEN** una página guardada que es la 5 y un listado que ahora tiene 3 páginas
+- **WHEN** el administrador vuelve
+- **THEN** el listado muestra la página 3
+
+### Requirement: Los filtros de resultados se aplican en servidor
+Las pantallas de resultados y de resultados de una prueba SHALL pedir al servidor la búsqueda, el filtro de resultado, el rango de nota, el rango de fechas y el orden. Las cifras de arriba SHALL venir de `GET /api/results/stats` y SHALL NOT cambiar con los filtros. El filtro por prueba SHALL usar el identificador de la prueba, con las opciones de `GET /api/exams/options`. Las fechas SHALL convertirse del día local del administrador a un instante UTC antes de pedirse.
+
+#### Scenario: Las cifras no dependen del filtro
+- **GIVEN** las cifras de la pantalla de resultados
+- **WHEN** el administrador filtra por «Reprobados»
+- **THEN** las tarjetas de arriba no cambian
+
+#### Scenario: Filtrar por una prueba
+- **GIVEN** el desplegable de pruebas de la pantalla de resultados
+- **WHEN** el administrador elige una prueba
+- **THEN** el listado pide `examId` y muestra solo sus resultados
+
+### Requirement: El listado de preguntas filtra una sola vez
+El listado de preguntas SHALL ofrecer un único conjunto de filtros: categoría, nivel y tipo arriba; búsqueda de texto y estado en la fila de la tabla. Todos SHALL aplicarse en servidor.
+
+#### Scenario: Filtro de categoría
+- **GIVEN** el listado de preguntas
+- **WHEN** el administrador elige una categoría arriba
+- **THEN** el listado pide `categoryId` y vuelve a la página 1
+
+#### Scenario: Estado por defecto
+- **GIVEN** un administrador que abre el listado de preguntas por primera vez
+- **WHEN** se muestra
+- **THEN** el filtro «Estado» está en «Activas» y solo se ven las activas
+
+#### Scenario: Ver las desactivadas
+- **GIVEN** una pregunta dada de baja
+- **WHEN** el administrador elige «Inactivas» en «Estado»
+- **THEN** el listado la muestra
+
+### Requirement: Las pantallas que necesitan la lista entera la recorren por páginas
+La composición manual de pruebas y la lista de evaluadores del detalle de una prueba SHALL obtener sus datos pidiendo páginas de 100 hasta agotar el total. Si una página falla, SHALL mostrarse el error de carga, no una lista incompleta.
+
+#### Scenario: Más de 100 preguntas en la composición
+- **GIVEN** un banco con 250 preguntas
+- **WHEN** el administrador abre la composición manual de una prueba
+- **THEN** la pantalla ofrece las 250 preguntas
+
+#### Scenario: Falla la segunda página
+- **GIVEN** un banco con 250 preguntas
+- **WHEN** la segunda petición falla
+- **THEN** la pantalla muestra el error de carga con «Reintentar» y no una lista de 100

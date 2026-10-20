@@ -17,7 +17,7 @@ Plataforma de evaluación técnica para gestionar bancos de preguntas, generar e
 - **Generación de exámenes** — manual o automática con preguntas aleatorias por categoría y dificultad
 - **Reparto por nivel** — la generación automática acepta un porcentaje de preguntas por nivel (por ejemplo 30 % básicas, 50 % intermedias, 20 % avanzadas). El número de cada nivel se redondea por el método del mayor resto, así que la suma es siempre el total. Si un nivel no tiene bastantes preguntas en las categorías elegidas, la generación se rechaza: nunca se completa con otro nivel. La pantalla muestra antes cuántas preguntas saldrán y cuántas hay de cada nivel
 - **Envío por email** — enlace único por candidato con expiración configurable; envío masivo a múltiples candidatos desde CSV o lista manual
-- **Prueba del candidato** — temporizador, auto-guardado de respuestas y envío automático al agotar el tiempo
+- **Prueba del candidato** — temporizador, progreso real («N de M respondidas»), preguntas marcadas para revisar, «Finalizar» siempre visible, estado del guardado con aviso de falta de conexión y envío automático al agotar el tiempo
 - **Reanudación de la prueba** — una recarga, un cierre de pestaña o una pérdida de red no expulsan al candidato: vuelve a sus preguntas con las respuestas que ya tenía y con el tiempo restante que calcula el servidor. La invitación caducada no corta una prueba ya empezada
 - **Corrección automática** — para preguntas tipo test; preguntas abiertas pendientes de revisión manual
 - **Dashboard de resultados** — historial, estadísticas y detalle por candidato, con filtros combinables
@@ -102,7 +102,7 @@ docker-compose up -d
 
 **Administrador:** `admin@techeval.com`. Su contraseña sale de `AdminPassword`, que **no tiene valor por defecto**. En desarrollo la trae `appsettings.Development.json` con el valor público `Admin@123!`. Fuera de desarrollo, la API se niega a arrancar si falta, y también si conserva ese valor de desarrollo.
 
-> Las cuentas de alumno se crean solas al abrir una invitación, y **nacen sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña era la parte local de su email, así que cualquiera que conociese el email entraba en su portal.
+> Las cuentas de alumno se crean solas al abrir una invitación, y **nacen sin nombre de usuario ni contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña era la parte local de su email, así que cualquiera que conociese el email entraba en su portal. Las cuentas de esa época pueden conservarla: [documentacion.md](documentacion.md) trae la sentencia que la vacía.
 
 > **Antes de levantar el stack**, copia `.env.example` a `.env` y rellena sus valores. Ni `docker-compose.yml` ni `appsettings.json` llevan secretos: si falta alguno, el arranque para y dice cuál.
 >
@@ -110,7 +110,22 @@ docker-compose up -d
 > cp .env.example .env    # y edita los valores
 > ```
 >
-> **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. El procedimiento está en [docs/rotacion-de-secretos.md](docs/rotacion-de-secretos.md), con el guion que genera los valores nuevos.
+### Fuera de `localhost`
+
+Con los valores de `.env.example`, el stack solo sirve en el equipo donde corre: la web y los enlaces de los correos apuntan a `localhost`. Para otro servidor hay tres variables en `.env`, todas **vistas desde el navegador** de quien usa la aplicación:
+
+| Variable | Qué es | Ejemplo |
+|----------|--------|---------|
+| `FRONTEND_BASE_URL` | La web. Es el origen que acepta la API (CORS) y la base de los enlaces de las invitaciones y de «fijar contraseña». **Sin barra final** | `https://techeval.empresa.com` |
+| `API_BASE_URL` | La API. La web la llama desde el navegador | `https://api.techeval.empresa.com` |
+| `MSSQL_PID` | Edición de SQL Server. **Obligatoria**. `Developer` solo vale para desarrollo: no tiene licencia de producción. Producción: `Express` (gratuita, 10 GB por base de datos), `Standard` o `Enterprise` | `Express` |
+
+- La imagen de la web **no se reconstruye** para cambiar `API_BASE_URL`: escribe su `appsettings.json` al arrancar el contenedor. Se cambia el valor y se reinicia.
+- nginx y la API escuchan en HTTP. El certificado lo pone un proxy inverso delante; detrás de uno hay que declarar sus direcciones (ver el apartado del despliegue detrás de un proxy).
+- Un `FRONTEND_BASE_URL` equivocado no da ningún error al arrancar: las invitaciones salen con un enlace a una página que no existe. Compruébalo enviando una a una dirección propia.
+- nginx guarda sin revalidar solo los ficheros con huella en el nombre. El resto (`index.html`, `blazor.boot.json`, `css/`, `js/`) se revalida en cada carga, así que una actualización llega sin que nadie tenga que vaciar la caché.
+
+> **Aviso de seguridad**: la contraseña de `sa`, la clave JWT, la contraseña del administrador y las credenciales SMTP **estuvieron versionadas** hasta el 16·09·2026. Siguen en el historial de git, así que hay que darlas por comprometidas: no basta con moverlas, hay que **rotarlas**. El procedimiento está en [docs/rotacion-de-secretos.md](docs/rotacion-de-secretos.md), con el guion que genera los valores nuevos (`scripts/rotar-secretos.sh` o `.ps1`, que conserva del `.env` anterior lo que no es un secreto) y la comprobación `scripts/comprobar-rotacion.sh` o `.ps1`, que dice si algún valor en uso sigue en el historial de git. Un despliegue con los valores viejos funciona igual de bien que uno con los nuevos: esa comprobación es la única prueba de que se rotó.
 
 ---
 
@@ -163,6 +178,12 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
 
 # Evaluadores: tabla ExamEvaluators y la reserva en ExamResults (ReservedByUserId, ReservedUntil)
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
+
+# Una respuesta por pregunta y sesión: índice único en UserAnswers. Si hay duplicados, no borra nada: los lista y se detiene
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_useranswers_unique_index.sql
+
+# Condiciones de cada sesión (tiempo y nota con que empezó) y marca de sesiones abandonadas
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_session_terms_columns.sql
 ```
 
 > **Antes de aplicar `add_user_roles.sql`**, comprueba que no hay pruebas en curso. Desde este cambio el JWT lleva un sello de seguridad, y la API rechaza los tokens emitidos por la versión anterior. Un candidato a mitad de prueba perdería el guardado de sus respuestas hasta volver a abrir su enlace. Despliega cuando esta consulta devuelva `0`:
@@ -219,6 +240,9 @@ Las claves viven en `appsettings.json` y se pueden sobrescribir por entorno (`ap
 | `Jwt:ExpirationHours` | Vigencia del token de sesión | `8` |
 | `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — **obligatorio fuera de desarrollo** | vacío |
 | `Email:Office365:*` | `TenantId`, `ClientId` y `ClientSecret` de la aplicación de Entra ID — **obligatorios fuera de desarrollo** | vacío |
+| `Email:TimeZoneId` | Zona horaria de la fecha de expiración en los correos. Si el equipo no la conoce, los correos llevan la hora en UTC | `Europe/Madrid` |
+| `Sessions:AbandonAfterHours` | Horas, después del plazo, tras las que una sesión que nadie envió se marca abandonada. `0` desactiva el trabajo | `24` |
+| `Sessions:SweepMinutes` | Minutos entre dos revisiones de sesiones abandonadas | `15` |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del administrador creado en el primer arranque — **obligatoria** | vacío |
@@ -291,7 +315,8 @@ TechEval/
 |------|-----|-------------|
 | `/` · `/login` | — | Acceso con email (o usuario) y contraseña; lleva a la página de inicio del rol |
 | `/admin` · `/admin/dashboard` | Admin | Dashboard con indicadores generales |
-| `/admin/questions` | Admin | Banco de preguntas con filtros |
+| `/admin/questions` | Admin | Banco de preguntas con filtros y orden por columna |
+| `/admin/categorias` | Admin | Categorías: alta, edición, baja con confirmación y reactivación, con buscador y orden por columna |
 | `/admin/questions/new` · `/admin/questions/{id}` | Admin | Alta y edición de preguntas |
 | `/admin/pruebas` · `/admin/pruebas/{id}` | Admin | Listado de pruebas y detalle |
 | `/admin/pruebas/new` · `/admin/pruebas/generate` | Admin | Creación manual y generación automática |
@@ -324,10 +349,10 @@ Swagger publica la referencia completa en `/swagger` (solo en desarrollo). Resum
 | `GET` `POST` `PUT` `DELETE` | `/api/categories` | Admin |
 | `GET` `POST` `PUT` `DELETE` | `/api/questions` | Admin |
 | `GET` | `/api/questions/availability?categoryIds=` | Admin — preguntas activas de cada nivel, para la vista previa del reparto |
-| `GET` `POST` `PUT` `DELETE` | `/api/exams` | Admin |
+| `GET` `POST` `PUT` `DELETE` | `/api/exams` · `GET /api/exams/options` | Admin |
 | `POST` | `/api/exams/generate` | Admin |
 | `POST` | `/api/exams/send` · `/api/exams/send-bulk` | Admin |
-| `GET` | `/api/results` · `/api/results/{id}` · `/api/results/exam/{examId}` · `/api/results/dashboard` | Admin |
+| `GET` | `/api/results` · `/api/results/{id}` · `/api/results/exam/{examId}` · `/api/results/stats` · `/api/results/dashboard` | Admin — los listados se paginan en servidor (`page`, `pageSize`, `q`, `sort`, `desc`) |
 | `GET` | `/api/results/{id}/integrity` | Admin — actividad del candidato durante la prueba |
 | `GET` | `/api/review/pending` · `/api/review/{resultId}` | Admin |
 | `POST` | `/api/review/{resultId}` | Admin |

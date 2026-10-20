@@ -28,7 +28,7 @@ TechEval es una plataforma de evaluación técnica que permite:
 - **Gestionar un banco de preguntas** con categorías, niveles de dificultad y tipos (test / respuesta abierta).
 - **Generar exámenes** manualmente o de forma automática y aleatoria.
 - **Enviar exámenes por email** con un enlace de un solo uso y tiempo de expiración configurable, de forma individual o masiva.
-- **Realizar exámenes** con temporizador, auto-guardado y UI responsive.
+- **Realizar exámenes** con temporizador, progreso real, marcas para revisar, estado del guardado y aviso de falta de conexión, y UI responsive.
 - **Consultar resultados** con corrección automática (tipo test) y dashboard con estadísticas.
 - **Ofrecer un portal al alumno** donde consulta sus pruebas pendientes y su historial de notas, con cuenta creada automáticamente al abrir su primera invitación.
 
@@ -112,7 +112,7 @@ Se aplica **Clean Architecture** con separación estricta de responsabilidades e
 Users
 ├── Id (PK)
 ├── Email (UNIQUE)
-├── Username (UNIQUE filtrado WHERE Username IS NOT NULL)
+├── Username (UNIQUE filtrado WHERE Username IS NOT NULL; solo cuentas antiguas, ninguna nueva lo rellena)
 ├── Name
 ├── PasswordHash (PBKDF2; vacío = sin contraseña utilizable)
 ├── Role             -- 1 = Admin, 2 = Evaluador, 3 = Alumno (CHECK)
@@ -422,13 +422,30 @@ Swagger publica la referencia interactiva en `/swagger` (solo en entorno de desa
 { "token": "eyJhbGciOi…", "name": "Administrador", "email": "admin@techeval.com", "role": "Admin" }
 ```
 
+### Listados paginados
+
+Resultados, preguntas, pruebas y usuarios se paginan, se buscan, se filtran y se ordenan **en el servidor**. Responden `{ items, total, page, pageSize }`, donde `total` cuenta las filas que cumplen el filtro y `items` solo las de la página pedida.
+
+| Parámetro | Valor |
+|-----------|-------|
+| `page` | Empieza en 1. Un valor menor se trata como 1 |
+| `pageSize` | 25 por defecto, 100 como máximo. Un valor menor que 1 es 25 y uno mayor que 100 es 100 |
+| `q` | Texto de búsqueda, sin distinguir mayúsculas. Cada listado dice en qué campos busca |
+| `sort`, `desc` | Columna de orden y sentido descendente. Una columna desconocida se ignora y vale el orden por defecto |
+
+- **Un valor que no es un número** (`page=abc`) da `400`. Uno fuera de rango no da error: se corrige.
+- **Una página más allá del final** devuelve cero elementos con el `total` real.
+- **El orden es estable entre páginas.** Todo orden desempata por el identificador, así que dos páginas seguidas no repiten ni pierden filas.
+- **Pantallas que necesitan todo.** La composición manual de pruebas y el desplegable de evaluadores piden páginas de 100 hasta agotar el total. Si una página falla, la pantalla muestra el error de carga y no una lista incompleta.
+- **Un parámetro del controlador no puede llamarse como una propiedad de `PageQuery`.** Con `[FromQuery] PageQuery page`, MVC toma `page` como prefijo del objeto y no como el valor `page=3`, y el listado devuelve siempre la primera página de 25. Una prueba lo vigila.
+
 ### Usuarios
 
 Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mismo y las que dejarían cero administradores activos responden `409`.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/api/users?role=&active=&q=` | Listado con filtros por rol, estado y texto. Nunca expone hash, sello ni enlaces |
+| GET | `/api/users?role=&active=&q=` | Página de usuarios, con filtros por rol, estado y texto sobre el nombre o el email. Orden: `name`, `email`, `role`, `status`, `created`. Nunca expone hash, sello ni enlaces |
 | POST | `/api/users` | `{ name, email, role }`, rol `Admin` o `Evaluador`. `201` con `{ user, emailSent }`; `409` si el email existe |
 | PUT | `/api/users/{id}/role` | `{ role }`. Permitido: Admin ↔ Evaluador y Alumno → Admin/Evaluador. Nadie pasa a Alumno (`400`) |
 | POST | `/api/users/{id}/deactivate` | Desactiva y cambia el sello |
@@ -441,17 +458,17 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/categories` | Admin | Listar categorías (incluye `questionCount` y `allowsAiGeneration`) |
+| GET | `/api/categories` | Admin | Listar las categorías **activas** (con `questionCount`, las preguntas activas, e `isActive`). Con `?includeInactive=true`, todas |
 | GET | `/api/categories/{id}` | Admin | Detalle |
-| POST | `/api/categories` | Admin | Crear categoría |
-| PUT | `/api/categories/{id}` | Admin | Actualizar |
+| POST | `/api/categories` | Admin | Crear categoría. `400` si el nombre está vacío o pasa de 100 caracteres, o la descripción pasa de 500; `409` si el nombre ya existe (sin distinguir mayúsculas) |
+| PUT | `/api/categories/{id}` | Admin | Actualizar. Las mismas validaciones. `isActive` opcional: con `true` reactiva la categoría; si falta, conserva el estado |
 | DELETE | `/api/categories/{id}` | Admin | Desactivar (soft delete) |
 
 ### Preguntas
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/questions?categoryId=&difficulty=&type=` | Admin | Listar con filtros |
+| GET | `/api/questions?categoryId=&difficulty=&type=&active=&q=` | Admin | Página del banco, sin las opciones. Sin `active` trae activas e inactivas. `q` busca en el enunciado. Orden: `text`, `category`, `difficulty`, `type`, `points`, `status` |
 | GET | `/api/questions/availability?categoryIds=1&categoryIds=3` | Admin | Preguntas activas de cada nivel en esas categorías (los tres niveles siempre) |
 | GET | `/api/questions/{id}` | Admin | Detalle con respuestas |
 | POST | `/api/questions` | Admin | Crear pregunta (nace `Approved`) |
@@ -462,7 +479,8 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/exams` | Admin | Listar con estadísticas |
+| GET | `/api/exams?active=&q=` | Admin | Página de pruebas con sus recuentos, calculados en la consulta. `q` busca en el título. Orden: `title`, `created`, `questions`, `time`, `invitations`, `results` |
+| GET | `/api/exams/options` | Admin | Identificador y título de todas las pruebas, para los desplegables |
 | GET | `/api/exams/{id}` | Admin | Detalle con preguntas |
 | POST | `/api/exams` | Admin | Crear manual |
 | POST | `/api/exams/generate` | Admin | Generar automático |
@@ -470,6 +488,8 @@ Todos exigen la política `Gestion` (rol `Admin`). Las operaciones sobre uno mis
 | DELETE | `/api/exams/{id}` | Admin | Desactivar |
 | POST | `/api/exams/send` | Admin | Enviar por email a un candidato |
 | POST | `/api/exams/send-bulk` | Admin | Enviar por email a varios candidatos |
+
+**Validación (`400`):** título no vacío y de hasta 200 caracteres; tiempo límite de 1 a 600 minutos; nota de corte de 0 a 100; alta manual con al menos una pregunta y sin repetidas; generación de 1 a 200 preguntas; invitación con nombre, correo válido y expiración de 1 a 720 horas; envío masivo de 1 a 500 candidatos. Una prueba desactivada rechaza las invitaciones con `409`. Las preguntas de una categoría desactivada no entran en la generación ni en el alta manual. Los límites están en `ExamLimits`.
 
 **Body de `/api/exams/generate`:**
 ```json
@@ -547,7 +567,7 @@ El detalle de la sesión (`ExamSessionInfoDto`) presenta las preguntas y las opc
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/student/pending` | Alumno | Sus invitaciones no usadas y no expiradas |
+| GET | `/api/student/pending` | Alumno | Sus invitaciones no usadas, no expiradas y de pruebas activas, más sus sesiones en curso |
 | GET | `/api/student/completed` | Alumno | Su historial de resultados (nota, aprobado, fecha) |
 
 El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro de la petición: un alumno no puede consultar los datos de otro.
@@ -556,8 +576,9 @@ El `UserId` se toma del claim `NameIdentifier` del JWT, nunca de un parámetro d
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/api/results` | Admin | Historial completo |
-| GET | `/api/results/exam/{examId}` | Admin | Por prueba |
+| GET | `/api/results?examId=&outcome=&scoreMin=&scoreMax=&from=&to=&q=` | Admin | Página del historial. `outcome`: `pending`, `passed` o `failed`. El rango de nota deja fuera a los pendientes. `from` inclusivo y `to` exclusivo, en UTC: la Web convierte el día local. `q` busca en nombre y correo. Orden: `candidate`, `exam`, `score` (los pendientes al final), `outcome`, `date` |
+| GET | `/api/results/exam/{examId}` | Admin | Lo mismo, fijado a una prueba |
+| GET | `/api/results/stats?examId=` | Admin | Totales, aprobados, nota media y distribución en seis tramos, de todos los resultados o de los de una prueba (con su título y las notas máxima y mínima). No dependen de ningún filtro. Notas y distribución, solo de los corregidos. `404` si la prueba no existe |
 | GET | `/api/results/{id}` | Admin | Detalle con revisión de respuestas |
 | GET | `/api/results/dashboard` | Admin | Estadísticas del dashboard |
 | GET | `/api/results/{id}/integrity` | Admin | Actividad del candidato durante la prueba: resumen y cronología (`IntegrityReportDto`) |
@@ -623,7 +644,8 @@ POST /api/exam/start/{token}
 Candidato responde preguntas con temporizador visible
     ├── Preguntas y opciones en el orden propio de su sesión
     ├── Marca de agua con su nombre y su correo sobre las preguntas
-    ├── Auto-guardado: POST /api/exam/answer/{sessionId} (cada respuesta)
+    ├── Auto-guardado: POST /api/exam/answer/{sessionId} (cada respuesta; una sola fila por pregunta y sesión)
+    │       (una prueba ya enviada responde 409 y no admite más cambios)
     ├── Salidas de la página y pegados en abiertas: POST /api/exam/integrity/{sessionId}
     │       (una señal que falla se guarda en memoria y se reintenta con la siguiente)
     └── Si el tiempo se agota → auto-envío
@@ -633,7 +655,7 @@ Candidato pulsa "Finalizar" → POST /api/exam/submit
     ├── Calcula puntuación y % de éxito
     ├── Crea ExamResult (con UserId del alumno)
     ├── Actualiza ExamSession.Status = Completed
-    └── Envía email con resultado al candidato
+    └── Envía email con resultado al candidato (si el correo falla, el candidato recibe igualmente su acuse con 200)
     ↓
 Admin consulta resultados en el dashboard
 Alumno consulta su nota en /portal
@@ -642,15 +664,17 @@ Alumno consulta su nota en /portal
 ### Flujo del alumno recurrente
 
 ```
-Alumno entra en /login con su email (o username) y contraseña
+Alumno abre el enlace de una de sus invitaciones
     ↓
-POST /api/auth/login → JWT con rol Alumno → redirección a /portal
+GET /api/exam/validate/{token} → JWT con rol Alumno, válido 8 horas
     ↓
-Portal del alumno
+Portal del alumno (/portal)
     ├── GET /api/student/pending    → pruebas pendientes con su fecha de expiración
     │       └── "Comenzar" → /prueba/{token} (mismo flujo que desde el email)
     └── GET /api/student/completed  → historial de notas (%, aprobado/suspenso, fecha)
 ```
+
+El alumno no entra por `/login`: su cuenta no tiene contraseña utilizable. Cuando caduca su sesión, vuelve a abrir el enlace de una invitación pendiente. Si todas sus pruebas están enviadas, ningún enlace abre sesión y no puede volver al portal.
 
 ---
 
@@ -667,7 +691,7 @@ GET /api/exam/validate/{token}
     │      Sí, de otro rol o desactivado → "Token no válido.", sin JWT
     │      No → se crea:
     │             Email        = CandidateEmail
-    │             Username     = parte local del email (antes de la @)
+    │             Username     = null (el alumno no entra con usuario y contraseña)
     │             Name         = CandidateName de la invitación
     │             PasswordHash = vacío (sin contraseña utilizable)
     │             Role         = Alumno
@@ -676,7 +700,9 @@ GET /api/exam/validate/{token}
     └── Respuesta con authToken: JWT firmado con rol Alumno (auto-login)
 ```
 
-Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`. La cuenta nace **sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica. Hasta el 16·09·2026 la contraseña inicial era esa misma parte local, así que quien conociera el email entraba en el portal del candidato.
+La cuenta nace **sin nombre de usuario y sin contraseña utilizable**: el candidato entra por el enlace de la invitación, que ya lo autentica.
+
+Hasta el 08·10·2026 el nombre de usuario era la parte local del email, con índice único. Dos candidatos de dominios distintos chocaban: si existía `maria.lopez@gmail.com`, la invitación de `maria.lopez@hotmail.com` daba error en cada intento. Hasta el 16·09·2026 la contraseña inicial era esa misma parte local, así que quien conociera el email entraba en el portal del candidato.
 
 ### Sesión y navegación
 
@@ -684,7 +710,7 @@ Ejemplo: `alejandro.robles@pronet-ise.com` → usuario `alejandro.robles`. La cu
 |-----------|----------------|
 | Login de admin | `POST /api/auth/login` → JWT rol `Admin` → redirección a `/admin`, sidebar completo |
 | Login de evaluador | `POST /api/auth/login` → JWT rol `Evaluador` → redirección a `/evaluacion`, sidebar solo con «Inicio» |
-| Login de alumno | `POST /api/auth/login` (email o username) → JWT rol `Alumno` → redirección a `/portal`, barra superior simple |
+| Alumno en `/login` | Recibe `401`: su cuenta no tiene contraseña utilizable. Entra por el enlace de la invitación, que lleva a `/portal` con la barra superior simple |
 | Apertura del enlace de invitación | `authToken` devuelto por `validate` → sesión iniciada sin pedir credenciales |
 | Sesión previa en `localStorage` | `AuthStateService.InitializeAsync` la restaura y redirige según el rol (`auth_role`). Una sesión de la versión anterior, sin rol, se borra |
 | Página de otro rol | Cada página comprueba el rol y, si no es el suyo, lleva a la página de inicio del rol de la sesión |
@@ -697,6 +723,16 @@ El administrador da de alta administradores y evaluadores, cambia el rol, desact
 - **Sin contraseñas en la consola.** El alta y el restablecimiento envían un enlace a `/fijar-contrasena/{token}` que caduca a las 48 horas y vale una vez. Emitir un enlace nuevo invalida los anteriores del mismo usuario.
 - **Tres protecciones.** Nadie se cambia el rol, se desactiva ni se restablece el acceso a sí mismo. Y siempre queda un administrador activo: las operaciones que retiran un administrador toman un bloqueo de aplicación de SQL Server (`sp_getapplock`), así que dos administradores que se desactivan a la vez quedan en fila y el segundo recibe `409`.
 - **Invitaciones solo para alumnos.** Enviar una prueba al correo de un administrador o de un evaluador responde `400`; en el envío masivo, falla solo ese candidato.
+
+### Prueba desactivada
+
+Desactivar una prueba (`IsActive = false`) la retira de circulación:
+
+- **Invitaciones nuevas.** El envío individual y el masivo responden `409`. El masivo se rechaza entero, antes de crear ningún token.
+- **Enlaces ya enviados y sin abrir.** `validate` responde «Esta prueba ya no está disponible» y `start` no crea la sesión ni marca el token como usado. Tampoco salen en `/api/student/pending`.
+- **Sesión en curso.** Se puede reanudar y enviar: quien ya empezó puede terminar.
+
+Si se reactiva la prueba, los enlaces que no hayan expirado vuelven a funcionar.
 
 ### Corrección a ciegas (`/evaluacion`)
 
@@ -743,6 +779,9 @@ Las claves se leen de `appsettings.json`, se sobrescriben por entorno (`appsetti
 | `Jwt:ExpirationHours` | Vigencia del token | `8` |
 | `Email:FromEmail` | Buzón que envía, y remitente que ve el destinatario — obligatorio fuera de desarrollo | vacío |
 | `Email:Office365:TenantId` · `ClientId` · `ClientSecret` | Aplicación de Entra ID con permiso `Mail.Send` — obligatorios fuera de desarrollo | vacío |
+| `Email:TimeZoneId` | Zona horaria de la fecha de expiración en los correos (id IANA o de Windows). Si el equipo no la conoce, los correos llevan la hora en UTC | `Europe/Madrid` |
+| `Sessions:AbandonAfterHours` | Horas, después del plazo, tras las que una sesión que nadie envió se marca `Abandoned`. `0` desactiva el trabajo | `24` |
+| `Sessions:SweepMinutes` | Minutos entre dos revisiones de sesiones abandonadas (mínimo 1) | `15` |
 | `FrontendBaseUrl` | Base con la que se construyen los enlaces de invitación | `https://localhost:60805` |
 | `AllowedOrigins` | Orígenes CORS permitidos en producción (separados por coma) | `http://localhost:5001` |
 | `AdminPassword` | Contraseña del admin creado en el primer arranque — **obligatoria, sin valor por defecto** | vacío |
@@ -944,6 +983,8 @@ Para bases de datos **ya existentes** creadas con una versión anterior. Son adi
 | [`add_category_ai_generation_flag.sql`](scripts/add_category_ai_generation_flag.sql) | Añade `Categories.AllowsAiGeneration` con default `1` y marca la categoría `iECS` como no apta para generación por IA |
 | [`add_user_roles.sql`](scripts/add_user_roles.sql) | Añade `Users.Role` (rellenado desde `IsAdmin`: 1 → Admin, 0 → Alumno) con su `CHECK`, `Users.SecurityStamp` con un valor propio por fila, y la tabla `PasswordSetupTokens`. Después **quita `Users.IsAdmin`**: el binario anterior ya no arranca contra la base actualizada. La cabecera trae el SQL para volver atrás |
 | [`add_evaluator_columns.sql`](scripts/add_evaluator_columns.sql) | Crea `ExamEvaluators` y añade `ExamResults.ReservedByUserId` y `ReservedUntil`. Solo añade: el binario anterior sigue funcionando contra la base actualizada |
+| [`add_useranswers_unique_index.sql`](scripts/add_useranswers_unique_index.sql) | Crea el índice único `IX_UserAnswers_ExamSessionId_QuestionId` (una respuesta por pregunta y sesión) y el índice `IX_UserAnswers_QuestionId`. Solo añade. **Si la base ya tiene respuestas duplicadas, no borra nada**: lista las parejas repetidas con sus `Id` y puntos y termina con error; borra a mano la fila sobrante y vuelve a ejecutarlo |
+| [`add_session_terms_columns.sql`](scripts/add_session_terms_columns.sql) | Añade `ExamSessions.TimeLimitMinutesSnapshot` y `PassingScoreSnapshot` (nulables): el tiempo y la nota de corte con que empezó cada sesión. Solo añade; las sesiones existentes quedan a `NULL` y siguen usando los valores de la prueba. **Al desplegar la API nueva, su trabajo marca como abandonadas las sesiones en curso vencidas hace más de 24 horas** |
 
 ```bash
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_link_columns.sql
@@ -951,6 +992,8 @@ sqlcmd -S localhost -d TechEvalDb -i scripts/add_category_ai_generation_flag.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_integrity_columns.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_user_roles.sql
 sqlcmd -S localhost -d TechEvalDb -i scripts/add_evaluator_columns.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_useranswers_unique_index.sql
+sqlcmd -S localhost -d TechEvalDb -i scripts/add_session_terms_columns.sql
 ```
 
 > **Antes de `add_user_roles.sql`**, comprueba que no hay pruebas en curso: los tokens de la versión anterior no llevan sello y la API los rechaza, así que un candidato a mitad de prueba perdería el guardado hasta volver a abrir su enlace. Despliega cuando `SELECT COUNT(*) FROM dbo.ExamSessions WHERE Status = 1` devuelva `0`.
@@ -1031,11 +1074,27 @@ docker-compose up -d
 
 | Servicio | Puerto | Descripción |
 |----------|--------|-------------|
-| `sqlserver` | 1433 | SQL Server 2022 Developer |
+| `sqlserver` | 1433 | SQL Server 2022. La edición la elige `MSSQL_PID` |
 | `api` | 5000 | ASP.NET Core API |
 | `web` | 5001 | Blazor WebAssembly (Nginx) |
 
 Volumen persistente: `sqlserver_data` (datos de SQL Server).
+
+### Desplegar fuera de `localhost`
+
+Una web Blazor WebAssembly se ejecuta en el navegador, así que sus direcciones son las que ve quien la usa, no las de la red de Compose. Hay tres variables en `.env`:
+
+| Variable | Dónde llega | Por defecto |
+|----------|-------------|-------------|
+| `FRONTEND_BASE_URL` | La API, como `FrontendBaseUrl` (base de los enlaces de los correos) y como `AllowedOrigins` (origen que acepta CORS). Sin barra final | `http://localhost:5001` |
+| `API_BASE_URL` | La web, que escribe su `appsettings.json` con ella al arrancar el contenedor. La barra final se añade sola | `http://localhost:5000/` |
+| `MSSQL_PID` | SQL Server. Obligatoria. `Developer` no tiene licencia de producción; sirve `Express`, `Standard` o `Enterprise` | sin valor: Compose no arranca |
+
+- **La imagen de la web es la misma en cualquier despliegue.** `dotnet publish` deja en ella el `appsettings.json` de desarrollo (la API en `https://localhost:60807/`) y `docker/web-appsettings.sh`, que nginx ejecuta antes de arrancar, lo sustituye. Un valor con comillas o barras invertidas detiene el contenedor y lo dice.
+- **Caché.** De los 62 ficheros que publica la web, 53 llevan una huella en el nombre (`dotnet.native.6sals8nuk0.js`) y nginx los marca `immutable` durante un año. Los otros 9 (`index.html`, `appsettings.json`, `css/app.css`, `js/exam-*.js`, `_framework/blazor.boot.json`, `blazor.webassembly.js`, `dotnet.js`) se sirven con `no-cache`: el navegador pregunta en cada carga y recibe un `304` si no cambiaron. Antes iban como inmutables o sin cabecera, y una actualización podía tardar un año en llegar.
+- **`.dockerignore`.** Deja fuera del contexto de construcción los `bin/` y `obj/` de quien construye, `.env` y lo que las imágenes no usan. Sin él, un `obj/project.assets.json` de Windows sustituía al que `dotnet restore` acababa de generar.
+- **Fin de línea de los guiones.** `.gitattributes` fuerza LF en `*.sh`. Con CRLF, el guion de arranque falla en Alpine con «not found».
+- **TLS.** nginx y la API escuchan en HTTP; el certificado lo pone un proxy inverso delante.
 
 ### Configurar el correo en Docker
 
@@ -1101,11 +1160,12 @@ var context = new AppDbContext(options);
 
 ### Cuentas de alumno aprovisionadas automáticamente
 
-La contraseña inicial de un alumno es **la parte local de su email**, un valor predecible a partir de la propia dirección. Es aceptable para un portal de consulta de notas, pero conviene tenerlo presente:
+Las cuentas de alumno nacen **sin nombre de usuario y sin contraseña utilizable**. Conocer el email de un candidato no da acceso a su portal: la única entrada es el enlace de la invitación, que abre una sesión de 8 horas.
 
-```
-✓ Forzar cambio de contraseña en el primer acceso al portal
-✓ O emitir una contraseña aleatoria y enviarla en el email de invitación
+Las cuentas de alumno creadas antes del 16·09·2026 pueden conservar como contraseña la parte local de su email, en el formato SHA-256 antiguo, que sigue verificando. Para cerrarlas en una base existente:
+
+```sql
+UPDATE dbo.Users SET PasswordHash = '' WHERE Role = 3;  -- 3 = Alumno
 ```
 
 El aislamiento entre alumnos sí está garantizado: los endpoints del portal resuelven el `UserId` desde el claim del JWT y nunca desde un parámetro de la petición.

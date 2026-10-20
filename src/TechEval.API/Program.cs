@@ -53,6 +53,11 @@ builder.Services.AddScoped<IUserManagementService, UserManagementService>();
 builder.Services.AddScoped<IExamEvaluatorService, ExamEvaluatorService>();
 builder.Services.AddScoped<IEvaluationService, EvaluationService>();
 
+// Marca como abandonadas las sesiones que nadie envió. Configurable con la sección Sessions.
+builder.Services.Configure<SessionSweepOptions>(builder.Configuration.GetSection("Sessions"));
+builder.Services.AddScoped<ISessionMaintenanceService, SessionMaintenanceService>();
+builder.Services.AddHostedService<AbandonedSessionWorker>();
+
 // JWT Auth
 var jwtKey = builder.Configuration["Jwt:SecretKey"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

@@ -51,7 +51,17 @@
     }
     else
     {
-        <ReservationKeeper Renew="() => Api.RenewEvaluationReservationAsync(Id)" OnLost="OnReservationLost" />
+        <ReservationKeeper Renew="() => Api.RenewEvaluationReservationAsync(Id)"
+                           OnLost="OnReservationLost" OnReachable="OnReservationReachable" />
+
+        @if (_reservationUnreachable)
+        {
+            @* El formulario sigue debajo con todo lo escrito: solo se avisa. *@
+            <div class="alert alert-warning" role="alert">
+                <i class="bi bi-wifi-off me-2"></i>
+                No se pudo renovar tu reserva: comprueba la conexión. Tu corrección sigue aquí.
+            </div>
+        }
 
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-body">
@@ -122,8 +132,12 @@
         _loading = false;
     }
 
+    private bool _reservationUnreachable;
+
     private void OnReservationLost()
         => _conflict = "La reserva de este resultado se perdió: otra persona lo está corrigiendo.";
+
+    private void OnReservationReachable(bool reachable) => _reservationUnreachable = !reachable;
 
     private async Task CancelAsync()
     {

@@ -15,7 +15,9 @@ Mover un secreto no lo limpia. Solo lo limpia emitir otro.
 | Contraseña de `sa` de SQL Server | `docker-compose.yml` | Cambiarla en el servidor **y** en `.env` |
 | Clave de firma JWT | `docker-compose.yml` y `appsettings.json` | Solo en `.env`. **Cierra todas las sesiones abiertas** |
 | Contraseña del administrador | `docker-compose.yml` y `appsettings.json` | En `.env` **y** reasignarla a la cuenta ya creada |
-| Credenciales SMTP | `appsettings.Local.json`, versionado desde el primer commit | Revocar la clave en el proveedor y emitir otra |
+| Credenciales SMTP | `appsettings.Local.json`, versionado desde el primer commit | Cambiar la contraseña del buzón, aunque TechEval ya no la use (ver el paso 3) |
+
+**Lo que no hay que rotar por haber estado en git:** el secreto de cliente de Microsoft Graph (`O365_CLIENT_SECRET`). Se comprobó el 09·10·2026 que no ha estado en ningún commit: el historial solo lo nombra con marcadores de posición en la documentación. Se rota igualmente si alguien lo ha compartido por otro medio, o cuando caduque el de Entra ID.
 
 ## Antes de empezar
 
@@ -40,6 +42,10 @@ pwsh scripts/rotar-secretos.ps1
 ```
 
 El guion escribe `.env` y guarda una copia del anterior con marca de tiempo. **No muestra los valores**: no hace falta verlos, y verlos los expone al historial de la terminal.
+
+Del `.env` anterior **conserva lo que no es un secreto** y no cambia al rotar: `MSSQL_PID`, `FRONTEND_BASE_URL`, `API_BASE_URL`, `O365_TENANT_ID`, `O365_CLIENT_ID` y `EMAIL_FROM`. Los cuatro secretos nunca se copian: tres se generan nuevos y `O365_CLIENT_SECRET` queda vacío, porque lo emite Entra ID. Si el `.env` anterior no tenía `MSSQL_PID`, el guion lo deja vacío y lo avisa: Compose no arranca hasta que elijas la edición (`Developer` solo vale para desarrollo).
+
+> **La copia `.env.<fecha>.bak` lleva los secretos que hay que dar por comprometidos.** `.gitignore` la cubre (`.env.*`), pero sigue en el disco: **bórrala cuando la rotación esté completa**, y no la copies a ninguna otra parte.
 
 ### 2. Cambiar la contraseña de `sa` en el servidor
 
@@ -76,6 +82,29 @@ docker compose up -d
 Si falta alguna variable, Compose falla nombrándola y la API se niega a arrancar nombrando la clave. Es lo previsto: un despliegue mal configurado debe parar, no arrancar a medias.
 
 ### 6. Comprobar
+
+Primero, la comprobación que dice si los valores en uso siguen en el historial. Es lo único que prueba que se rotó: un despliegue con los valores viejos funciona igual de bien que uno con los nuevos.
+
+```bash
+./scripts/comprobar-rotacion.sh
+```
+
+En Windows:
+
+```powershell
+pwsh scripts/comprobar-rotacion.ps1
+```
+
+Para `SA_PASSWORD`, `JWT_SECRET_KEY`, `ADMIN_PASSWORD` y `O365_CLIENT_SECRET`, busca el valor del `.env` en todo el historial (`git log --all -S`). **No imprime ningún valor**, solo el nombre de la variable y el commit donde apareció. Falla, con código de salida 1, si:
+
+- algún valor aparece en cualquier commit (no está rotado);
+- falta algún secreto, o es demasiado corto para comprobarlo (menos de 8 caracteres);
+- `.env` o `appsettings.Local.json` están rastreados por git;
+- el repositorio es una copia superficial (`--depth`): un historial incompleto daría un falso «todo bien». Con `git fetch --unshallow` se arregla.
+
+Esto **no** comprueba lo que no está en git: que la contraseña de `sa` del servidor sea la del `.env`, que el secreto de cliente anterior esté revocado en Entra ID, ni que el administrador ya creado tenga la contraseña nueva. Esos son los pasos 2 a 4.
+
+Después:
 
 - La API arranca y responde.
 - Un inicio de sesión de administrador funciona con la contraseña nueva.

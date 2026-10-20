@@ -20,8 +20,21 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        @* Un formulario vacío con «Guardar» pisaría la pregunta con datos en blanco. *@
+        <LoadError What="@(_isEdit ? "la pregunta" : "las categorías")" OnRetry="LoadAsync" />
+    }
     else
     {
+        @if (_isEdit && !_isActive)
+        {
+            <div class="alert alert-secondary mb-3" role="note">
+                <i class="bi bi-slash-circle me-2"></i>
+                Esta pregunta está <strong>desactivada</strong>: no entra en pruebas nuevas.
+                Guardar los cambios no la reactiva; usa el interruptor «Activa» si quieres hacerlo.
+            </div>
+        }
         @if (!string.IsNullOrEmpty(_error))
         {
             <div class="alert alert-danger alert-dismissible mb-3">
@@ -100,9 +113,11 @@
                             <label class="form-label fw-semibold small">Categoría *</label>
                             <select class="form-select" @bind="_categoryId">
                                 <option value="0">Selecciona...</option>
-                                @foreach (var c in _categories)
+                                @* Solo se ofrecen las activas. La de la pregunta que se edita se
+                                   conserva aunque esté de baja, marcada, para no cambiársela sin avisar. *@
+                                @foreach (var c in _categories.Where(c => c.IsActive || c.Id == _categoryId))
                                 {
-                                    <option value="@c.Id">@c.Name</option>
+                                    <option value="@c.Id">@c.Name@(c.IsActive ? "" : " (desactivada)")</option>
                                 }
                             </select>
                         </div>
@@ -121,10 +136,17 @@
                                 <option value="@QuestionType.OpenEnded">Respuesta abierta</option>
                             </select>
                         </div>
-                        <div class="mb-0">
+                        <div class="mb-3">
                             <label class="form-label fw-semibold small">Puntos</label>
                             <input type="number" class="form-control" @bind="_points" min="1" max="10" />
                         </div>
+                        @if (_isEdit)
+                        {
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" role="switch" id="question-active" @bind="_isActive" />
+                                <label class="form-check-label small fw-semibold" for="question-active">Activa</label>
+                            </div>
+                        }
                     </div>
                 </div>
 
@@ -164,8 +186,12 @@
     [Parameter] public int? Id { get; set; }
 
     private bool _isEdit => Id.HasValue;
-    private bool _loading = true, _saving = false;
+    private bool _loading = true, _saving = false, _loadFailed;
     private string _error = string.Empty;
+
+    // Editar no cambia el estado: el formulario enviaba `true` fijo y reactivaba en silencio
+    // una pregunta que alguien había dado de baja. Solo el interruptor lo cambia.
+    private bool _isActive = true;
 
     private string _text = string.Empty;
     private int _categoryId = 0;
@@ -184,24 +210,44 @@
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
 
-        _categories = await Api.GetCategoriesAsync() ?? new();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
+
+        var categories = await Api.GetCategoriesAsync(includeInactive: true);
+        if (categories is null)
+        {
+            _loadFailed = true;
+            _loading = false;
+            return;
+        }
+        _categories = categories;
 
         if (_isEdit)
         {
             var q = await Api.GetQuestionAsync(Id!.Value);
-            if (q is not null)
+            if (q is null)
             {
-                _text = q.Text;
-                _categoryId = q.CategoryId;
-                _difficulty = q.Difficulty;
-                _type = q.Type;
-                _points = q.Points;
-                _sampleAnswer = q.SampleAnswer;
-                _createdAt = q.CreatedAt;
-                _updatedAt = q.UpdatedAt;
-                _answers = q.Answers.Select(a => new AnswerModel
-                    { Id = a.Id, Text = a.Text, IsCorrect = a.IsCorrect, Order = a.Order }).ToList();
+                _loadFailed = true;
+                _loading = false;
+                return;
             }
+
+            _text = q.Text;
+            _isActive = q.IsActive;
+            _categoryId = q.CategoryId;
+            _difficulty = q.Difficulty;
+            _type = q.Type;
+            _points = q.Points;
+            _sampleAnswer = q.SampleAnswer;
+            _createdAt = q.CreatedAt;
+            _updatedAt = q.UpdatedAt;
+            _answers = q.Answers.Select(a => new AnswerModel
+                { Id = a.Id, Text = a.Text, IsCorrect = a.IsCorrect, Order = a.Order }).ToList();
         }
 
         _loading = false;
@@ -236,13 +282,16 @@
             var updateDtos = _answers
                 .Select(a => new UpdateAnswerDto(a.Id, a.Text, a.IsCorrect, a.Order)).ToList();
 
-            var updated = await Api.UpdateQuestionAsync(Id!.Value, new UpdateQuestionDto(
-                _text, _type, _difficulty, _categoryId, _points, true, _sampleAnswer, updateDtos));
+            var (updated, status, error) = await Api.UpdateQuestionAsync(Id!.Value, new UpdateQuestionDto(
+                _text, _type, _difficulty, _categoryId, _points, _isActive, _sampleAnswer, updateDtos));
 
             if (updated is null)
             {
-                _error = "No se pudo guardar. Si la pregunta ya ha sido respondida por candidatos, "
-                       + "no se pueden eliminar sus opciones: da la pregunta de baja y crea una nueva.";
+                // El mensaje es el del servidor. El consejo de dar de baja solo vale cuando la
+                // causa son las respuestas ya registradas (409): con la red caída sería falso.
+                _error = status == 409
+                    ? $"{error} Si la pregunta ya ha sido respondida por candidatos, no se pueden eliminar sus opciones: da la pregunta de baja y crea una nueva."
+                    : error ?? "No se pudo guardar la pregunta. Comprueba la conexión e inténtalo de nuevo.";
                 _saving = false;
                 return;
             }
@@ -250,8 +299,17 @@
         else
         {
             var createDtos = _answers.Select(a => new CreateAnswerDto(a.Text, a.IsCorrect, a.Order)).ToList();
-            await Api.CreateQuestionAsync(new CreateQuestionDto(
+            var (created, _, error) = await Api.CreateQuestionAsync(new CreateQuestionDto(
                 _text, _type, _difficulty, _categoryId, _points, _sampleAnswer, createDtos));
+
+            // Antes se ignoraba el resultado y se navegaba siempre: un alta fallida perdía la
+            // pregunta escrita. Ahora el formulario se queda con todo lo que había.
+            if (created is null)
+            {
+                _error = error ?? "No se pudo crear la pregunta. Comprueba la conexión e inténtalo de nuevo.";
+                _saving = false;
+                return;
+            }
         }
 
         _saving = false;

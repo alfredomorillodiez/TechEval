@@ -1,9 +1,13 @@
 @page "/admin/questions"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
+@using TechEval.Domain.Common
 @using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Preguntas — TechEval</PageTitle>
 
@@ -22,7 +26,7 @@
         <div class="card-body">
             <div class="row g-3">
                 <div class="col-md-4">
-                    <select class="form-select" @onchange="OnCategoryChange">
+                    <select class="form-select" aria-label="Categoría" value="@(_categoryId?.ToString() ?? "")" @onchange="OnCategoryChange">
                         <option value="">Todas las categorías</option>
                         @foreach (var c in _categories)
                         {
@@ -31,7 +35,7 @@
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <select class="form-select" @onchange="OnDifficultyChange">
+                    <select class="form-select" aria-label="Nivel" value="@(_difficulty is { } d ? ((int)d).ToString() : "")" @onchange="OnDifficultyChange">
                         <option value="">Todos los niveles</option>
                         <option value="1">Básico</option>
                         <option value="2">Intermedio</option>
@@ -39,7 +43,7 @@
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <select class="form-select" @onchange="OnTypeChange">
+                    <select class="form-select" aria-label="Tipo" value="@(_type is { } t ? ((int)t).ToString() : "")" @onchange="OnTypeChange">
                         <option value="">Todos los tipos</option>
                         <option value="1">Test (4 opciones)</option>
                         <option value="2">Respuesta abierta</option>
@@ -49,6 +53,17 @@
         </div>
     </div>
 
+    @if (_categoriesFailed)
+    {
+        <LoadError What="las categorías del filtro" OnRetry="LoadCategoriesAsync" />
+    }
+    @if (!string.IsNullOrEmpty(_deleteError))
+    {
+        <div class="alert alert-danger alert-dismissible mb-4" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_deleteError
+            <button type="button" class="btn-close" aria-label="Cerrar" @onclick="() => _deleteError = string.Empty"></button>
+        </div>
+    }
     @if (!string.IsNullOrEmpty(_error))
     {
         <div class="alert alert-warning d-flex align-items-center gap-2 mb-4">
@@ -60,72 +75,48 @@
         </div>
     }
 
-    @if (_loading)
+    @if (_firstLoad)
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
     else
     {
         <div class="card border-0 shadow-sm">
-            <div class="card-body p-0">
+            <div class="card-body p-0 @(_busy ? "opacity-50" : "")" aria-busy="@(_busy ? "true" : "false")">
                 <div class="table-responsive">
                     <table class="table table-hover mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>Pregunta</th>
-                                <th>Categoría</th>
-                                <th>Nivel</th>
-                                <th>Tipo</th>
-                                <th>Puntos</th>
-                                <th>Estado</th>
+                                <SortHeader Key="text" State="_sort" OnSort="SortBy">Pregunta</SortHeader>
+                                <SortHeader Key="category" State="_sort" OnSort="SortBy">Categoría</SortHeader>
+                                <SortHeader Key="difficulty" State="_sort" OnSort="SortBy">Nivel</SortHeader>
+                                <SortHeader Key="type" State="_sort" OnSort="SortBy">Tipo</SortHeader>
+                                <SortHeader Key="points" State="_sort" OnSort="SortBy">Puntos</SortHeader>
+                                <SortHeader Key="status" State="_sort" OnSort="SortBy">Estado</SortHeader>
                                 <th>Acciones</th>
                             </tr>
                             <tr>
                                 <th>
-                                    <input class="form-control form-control-sm" placeholder="Buscar..."
-                                           @oninput="e => _textFilter = e.Value?.ToString() ?? string.Empty" />
-                                </th>
-                                <th>
-                                    <select class="form-select form-select-sm"
-                                            @onchange="e => _catFilter = e.Value?.ToString() ?? string.Empty">
-                                        <option value="">Todas</option>
-                                        @foreach (var c in _categories)
-                                        {
-                                            <option value="@c.Name">@c.Name</option>
-                                        }
-                                    </select>
-                                </th>
-                                <th>
-                                    <select class="form-select form-select-sm"
-                                            @onchange="e => _diffFilter = e.Value?.ToString() ?? string.Empty">
-                                        <option value="">Todos</option>
-                                        <option value="Basic">Básico</option>
-                                        <option value="Intermediate">Intermedio</option>
-                                        <option value="Advanced">Avanzado</option>
-                                    </select>
-                                </th>
-                                <th>
-                                    <select class="form-select form-select-sm"
-                                            @onchange="e => _typeFilter = e.Value?.ToString() ?? string.Empty">
-                                        <option value="">Todos</option>
-                                        <option value="MultipleChoice">Test</option>
-                                        <option value="OpenEnded">Abierta</option>
-                                    </select>
+                                    <input class="form-control form-control-sm" placeholder="Buscar..." aria-label="Buscar en el enunciado"
+                                           value="@_textFilter" @oninput="OnSearchInput" />
                                 </th>
                                 <th></th>
+                                <th></th>
+                                <th></th>
+                                <th></th>
                                 <th>
-                                    <select class="form-select form-select-sm"
-                                            @onchange="e => _activeFilter = e.Value?.ToString() ?? string.Empty">
-                                        <option value="">Todos</option>
-                                        <option value="true">Activa</option>
-                                        <option value="false">Inactiva</option>
+                                    <select class="form-select form-select-sm" aria-label="Estado" value="@_activeFilter"
+                                            @onchange="OnActiveChange">
+                                        <option value="true">Activas</option>
+                                        <option value="false">Inactivas</option>
+                                        <option value="">Todas</option>
                                     </select>
                                 </th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var q in DisplayedQuestions)
+                            @foreach (var q in _questions)
                             {
                                 <tr>
                                     <td style="max-width:350px;">
@@ -158,7 +149,7 @@
                         </tbody>
                     </table>
                 </div>
-                @if (!DisplayedQuestions.Any())
+                @if (!_questions.Any())
                 {
                     <div class="text-center text-muted py-5">
                         <i class="bi bi-inbox fs-1"></i>
@@ -167,80 +158,172 @@
                 }
             </div>
         </div>
+
+        <Pager State="_page" Noun="preguntas" OnPage="GoToPageAsync" OnPageSize="SetPageSizeAsync" />
     }
 </div>
 
 @code {
     private List<QuestionSummaryDto> _questions = new();
     private List<CategoryDto> _categories = new();
-    private bool _loading = true;
+    private bool _firstLoad = true, _busy, _categoriesFailed;
     private string _error = string.Empty;
+    private string _deleteError = string.Empty;
     private int? _categoryId;
     private DifficultyLevel? _difficulty;
     private QuestionType? _type;
 
     private string _textFilter = string.Empty;
-    private string _catFilter = string.Empty;
-    private string _diffFilter = string.Empty;
-    private string _typeFilter = string.Empty;
-    private string _activeFilter = string.Empty;
 
-    private IEnumerable<QuestionSummaryDto> DisplayedQuestions => _questions
-        .Where(q => string.IsNullOrEmpty(_textFilter) ||
-                    q.Text.Contains(_textFilter, StringComparison.OrdinalIgnoreCase))
-        .Where(q => string.IsNullOrEmpty(_catFilter) ||
-                    q.CategoryName == _catFilter)
-        .Where(q => string.IsNullOrEmpty(_diffFilter) ||
-                    q.Difficulty.ToString() == _diffFilter)
-        .Where(q => string.IsNullOrEmpty(_typeFilter) ||
-                    q.Type.ToString() == _typeFilter)
-        .Where(q => string.IsNullOrEmpty(_activeFilter) ||
-                    q.IsActive.ToString().ToLower() == _activeFilter);
+    // «Activas» por defecto: es lo que el administrador veía antes. La lista no devolvía las inactivas,
+    // y por eso el filtro «Estado» que ya existía nunca podía mostrarlas.
+    private string _activeFilter = "true";
+
+    // Búsqueda, filtros, orden y página se conservan al abrir una pregunta y volver.
+    private const string StateKey = "questions";
+    private readonly SortState _sort = new();
+    private readonly PageState _page = new();
+    private readonly ListLoader _loader = new();
+
+    private sealed record Saved(
+        string Text, string Active, int? CategoryId, DifficultyLevel? Difficulty, QuestionType? QType,
+        SortState Sort, int Page, int PageSize);
+
+    public void Dispose()
+    {
+        Lists.Set(StateKey, new Saved(
+            _textFilter, _activeFilter, _categoryId, _difficulty, _type,
+            _sort.Clone(), _page.Page, _page.PageSize));
+        _loader.Dispose();
+    }
 
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
-        _categories = await Api.GetCategoriesAsync() ?? new();
+
+        if (Lists.Get<Saved>(StateKey) is { } saved)
+        {
+            _textFilter = saved.Text; _activeFilter = saved.Active;
+            _categoryId = saved.CategoryId; _difficulty = saved.Difficulty; _type = saved.QType;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+            _page.Page = saved.Page; _page.PageSize = saved.PageSize;
+        }
+
+        await LoadCategoriesAsync();
         await LoadQuestionsAsync();
+        _firstLoad = false;
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        var categories = await Api.GetCategoriesAsync(includeInactive: true);
+        _categoriesFailed = categories is null;
+        if (categories is not null) _categories = categories;
     }
 
     private async Task LoadQuestionsAsync()
     {
-        _loading = true;
+        _busy = true;
         _error = string.Empty;
-        var result = await Api.GetQuestionsAsync(_categoryId, _difficulty, _type);
-        if (result is null)
-            _error = "No se pudo conectar con la API. Verifica que la API esté activa y que tu sesión sea válida.";
-        else
-            _questions = result;
-        _loading = false;
+        bool? active = bool.TryParse(_activeFilter, out var a) ? a : null;
+        var filter = new QuestionFilter(_categoryId, _difficulty, _type, active);
+
+        // Si la página guardada ya no existe, o se vació al dar de baja la última fila, se pide la última.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var again = false;
+            var query = _page.ToQuery(_textFilter, _sort);
+            var applied = await _loader.LoadAsync(() => Api.GetQuestionsPageAsync(query, filter), r =>
+            {
+                if (r is null)
+                {
+                    _error = "No se pudo conectar con la API. Verifica que la API esté activa y que tu sesión sea válida.";
+                    return;
+                }
+
+                var beyond = _page.IsBeyondEnd(r);
+                _page.Apply(r);
+                if (beyond) { _page.GoToLast(); again = true; return; }
+                _questions = r.Items.ToList();
+            });
+
+            if (!applied) return;
+            if (!again) break;
+        }
+
+        _busy = false;
+        StateHasChanged();
+    }
+
+    // Buscar, filtrar u ordenar vuelve a la primera página.
+    private async Task Refilter()
+    {
+        _page.Reset();
+        await LoadQuestionsAsync();
     }
 
     private async Task OnCategoryChange(ChangeEventArgs e)
     {
         _categoryId = string.IsNullOrEmpty(e.Value?.ToString()) ? null : int.Parse(e.Value.ToString()!);
-        await LoadQuestionsAsync();
+        await Refilter();
     }
 
     private async Task OnDifficultyChange(ChangeEventArgs e)
     {
         _difficulty = string.IsNullOrEmpty(e.Value?.ToString()) ? null :
             (DifficultyLevel)int.Parse(e.Value.ToString()!);
-        await LoadQuestionsAsync();
+        await Refilter();
     }
 
     private async Task OnTypeChange(ChangeEventArgs e)
     {
         _type = string.IsNullOrEmpty(e.Value?.ToString()) ? null :
             (QuestionType)int.Parse(e.Value.ToString()!);
+        await Refilter();
+    }
+
+    private async Task OnActiveChange(ChangeEventArgs e)
+    {
+        _activeFilter = e.Value?.ToString() ?? string.Empty;
+        await Refilter();
+    }
+
+    private Task OnSearchInput(ChangeEventArgs e)
+    {
+        _textFilter = e.Value?.ToString() ?? string.Empty;
+        _page.Reset();
+        _ = _loader.DebounceAsync(LoadQuestionsAsync);
+        return Task.CompletedTask;
+    }
+
+    private async Task SortBy(string key)
+    {
+        _sort.Toggle(key);
+        await Refilter();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page.Page = page;
+        await LoadQuestionsAsync();
+    }
+
+    private async Task SetPageSizeAsync(int size)
+    {
+        _page.SetPageSize(size);
         await LoadQuestionsAsync();
     }
 
     private async Task DeleteAsync(int id)
     {
+        _deleteError = string.Empty;
+        // Dar de baja la desactiva. Se recarga la página en vez de quitar la fila: con el filtro en
+        // «Activas» la fila sale, y si era la última de la página hay que volver a la anterior.
         if (await Api.DeleteQuestionAsync(id))
-            _questions.RemoveAll(q => q.Id == id);
+            await LoadQuestionsAsync();
+        else
+            _deleteError = "No se pudo dar de baja la pregunta. Comprueba la conexión e inténtalo de nuevo.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

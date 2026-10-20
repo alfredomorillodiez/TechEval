@@ -1,8 +1,11 @@
 @page "/admin/pruebas"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Pruebas — TechEval</PageTitle>
 
@@ -19,13 +22,39 @@
         </div>
     </div>
 
-    @if (_loading)
+    @if (_firstLoad)
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="las pruebas" OnRetry="LoadAsync" />
+    }
     else
     {
-        <div class="row g-4">
+        @* Las pruebas son tarjetas, no una tabla: el orden se elige en un selector en lugar de en las cabeceras. *@
+        <div class="row g-2 mb-3 align-items-center">
+            <div class="col-md-5">
+                <input class="form-control" type="search" placeholder="Buscar por título…"
+                       aria-label="Buscar pruebas" value="@_search" @oninput="OnSearchInput" />
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" aria-label="Ordenar pruebas" value="@SortValue" @onchange="OnSortChange">
+                    <option value="">Orden por defecto</option>
+                    <option value="title">Título (A–Z)</option>
+                    <option value="title-desc">Título (Z–A)</option>
+                    <option value="created-desc">Más recientes primero</option>
+                    <option value="created">Más antiguas primero</option>
+                    <option value="questions-desc">Más preguntas primero</option>
+                    <option value="results-desc">Más resultados primero</option>
+                </select>
+            </div>
+        </div>
+        @if (_exams.Count == 0 && !string.IsNullOrWhiteSpace(_search))
+        {
+            <div class="text-center text-muted py-5">Ninguna prueba coincide con la búsqueda.</div>
+        }
+        <div class="row g-4 @(_busy ? "opacity-50" : "")" aria-busy="@(_busy ? "true" : "false")">
             @foreach (var exam in _exams)
             {
                 <div class="col-md-6 col-xl-4">
@@ -57,6 +86,14 @@
                                     </div>
                                 </div>
                             </div>
+                            @if (exam.AbandonedCount > 0)
+                            {
+                                @* Empezaron y nadie las envió; se marcan solas pasado el plazo y la gracia. *@
+                                <div class="small text-muted mb-3" title="Sesiones que empezaron y nadie envió">
+                                    <i class="bi bi-person-x me-1"></i>
+                                    <strong>@exam.AbandonedCount</strong> @(exam.AbandonedCount == 1 ? "abandonada" : "abandonadas")
+                                </div>
+                            }
                             <div class="d-flex gap-2">
                                 <button class="btn btn-sm btn-primary flex-grow-1"
                                         @onclick="() => SendExam(exam.Id)">
@@ -65,7 +102,10 @@
                                 <a href="/admin/pruebas/@exam.Id" class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-pencil"></i>
                                 </a>
-                                <a href="/admin/results?examId=@exam.Id" class="btn btn-sm btn-outline-secondary">
+                                @* Los resultados de ESTA prueba: la ruta anterior pasaba un parámetro que el
+                                   listado global ignora, y abría todos los resultados. *@
+                                <a href="/admin/results/prueba/@exam.Id" class="btn btn-sm btn-outline-secondary"
+                                   title="Resultados de esta prueba" aria-label="Resultados de esta prueba">
                                     <i class="bi bi-bar-chart"></i>
                                 </a>
                                 <button class="btn btn-sm btn-outline-danger"
@@ -78,13 +118,15 @@
                 </div>
             }
         </div>
-        @if (!_exams.Any())
+        @if (!_exams.Any() && string.IsNullOrWhiteSpace(_search))
         {
             <div class="text-center text-muted py-5">
                 <i class="bi bi-journal-x fs-1"></i>
                 <p class="mt-2">No hay pruebas creadas aún.</p>
             </div>
         }
+
+        <Pager State="_page" Noun="pruebas" Sizes="CardSizes" OnPage="GoToPageAsync" OnPageSize="SetPageSizeAsync" />
     }
 </div>
 
@@ -143,7 +185,7 @@
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Expiración (horas)</label>
-                                <input type="number" class="form-control" @bind="_expirationHours" min="1" max="168" />
+                                <input type="number" class="form-control" @bind="_expirationHours" min="@TechEval.Application.ExamLimits.MinExpirationHours" max="@TechEval.Application.ExamLimits.MaxExpirationHours" />
                             </div>
                         }
                     }
@@ -260,26 +302,54 @@
                             {
                                 <!-- Entrada CSV -->
                                 <div class="mb-2 text-muted small">
-                                    Una línea por candidato con formato: <code>Nombre,Email</code>
+                                    Una línea por candidato: <code>Nombre;Email</code> (también vale coma o tabulador, y se ignora una primera línea de encabezado)
                                 </div>
                                 <textarea class="form-control font-monospace mb-2" rows="6"
                                           @bind="_csvInput"
-                                          placeholder="Juan García,juan@empresa.com&#10;Ana López,ana@empresa.com&#10;Pedro Ruiz,pedro@empresa.com"></textarea>
+                                          placeholder="Juan García;juan@empresa.com&#10;Ana López;ana@empresa.com&#10;Pedro Ruiz;pedro@empresa.com"></textarea>
                                 <button class="btn btn-sm btn-outline-secondary mb-3" @onclick="ParseCsv">
                                     <i class="bi bi-arrow-repeat me-1"></i> Importar
                                 </button>
-                                @if (_bulkCandidates.Any())
+                                @if (_csvReport is { } report)
                                 {
-                                    <div class="alert alert-info py-2 small">
-                                        <i class="bi bi-people me-1"></i>
-                                        <strong>@_bulkCandidates.Count</strong> candidatos importados correctamente.
-                                    </div>
+                                    @* Siempre se dice qué pasó: «0 importados» sin explicación era lo que hacía un CSV
+                                       separado por punto y coma. *@
+                                    @if (_bulkCandidates.Any())
+                                    {
+                                        <div class="alert alert-info py-2 small mb-2" role="status">
+                                            <i class="bi bi-people me-1"></i>
+                                            <strong>@_bulkCandidates.Count</strong>
+                                            @(_bulkCandidates.Count == 1 ? "candidato importado" : "candidatos importados").
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="alert alert-warning py-2 small mb-2" role="status">
+                                            <i class="bi bi-exclamation-triangle me-1"></i>
+                                            <strong>No se importó ningún candidato.</strong>
+                                            Escribe una línea por candidato con el nombre y el correo separados por
+                                            <code>;</code>, coma o tabulador, por ejemplo <code>Ana López;ana@empresa.com</code>.
+                                        </div>
+                                    }
+                                    @if (report.Issues.Count > 0)
+                                    {
+                                        <div class="alert alert-warning py-2 small" role="alert">
+                                            <strong>@report.Issues.Count
+                                                @(report.Issues.Count == 1 ? "línea ignorada" : "líneas ignoradas"):</strong>
+                                            <ul class="mb-0 ps-3">
+                                                @foreach (var issue in report.Issues)
+                                                {
+                                                    <li>Línea @issue.Line: @issue.Reason</li>
+                                                }
+                                            </ul>
+                                        </div>
+                                    }
                                 }
                             }
 
                             <div class="mb-1">
                                 <label class="form-label">Expiración (horas)</label>
-                                <input type="number" class="form-control" @bind="_expirationHours" min="1" max="168" />
+                                <input type="number" class="form-control" @bind="_expirationHours" min="@TechEval.Application.ExamLimits.MinExpirationHours" max="@TechEval.Application.ExamLimits.MaxExpirationHours" />
                             </div>
                         }
                     }
@@ -314,7 +384,55 @@
 
 @code {
     private List<ExamSummaryDto> _exams = new();
-    private bool _loading = true;
+    private bool _firstLoad = true, _busy, _loadFailed;
+
+    // Búsqueda, orden y página se conservan al abrir una prueba y volver.
+    private const string StateKey = "exams";
+    private string _search = string.Empty;
+    private readonly SortState _sort = new();
+    // Tarjetas en filas de 3: los tamaños son múltiplos de 3.
+    private static readonly int[] CardSizes = { 6, 12, 24, 48 };
+    private readonly PageState _page = new() { PageSize = 12 };
+    private readonly ListLoader _loader = new();
+    private sealed record Saved(string Search, SortState Sort, int Page, int PageSize);
+
+    // El selector junta columna y dirección en un solo valor: «title», «title-desc»…
+    private string SortValue => _sort.Key is null ? "" : _sort.Descending ? _sort.Key + "-desc" : _sort.Key;
+
+    private async Task OnSortChange(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "";
+        _sort.Descending = value.EndsWith("-desc");
+        _sort.Key = value.Length == 0 ? null : value.Replace("-desc", "");
+        _page.Reset();
+        await LoadAsync();
+    }
+
+    private Task OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? string.Empty;
+        _page.Reset();
+        _ = _loader.DebounceAsync(LoadAsync);
+        return Task.CompletedTask;
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page.Page = page;
+        await LoadAsync();
+    }
+
+    private async Task SetPageSizeAsync(int size)
+    {
+        _page.SetPageSize(size);
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        Lists.Set(StateKey, new Saved(_search, _sort.Clone(), _page.Page, _page.PageSize));
+        _loader.Dispose();
+    }
 
     // Estado individual
     private int? _sendingExamId;
@@ -337,8 +455,44 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
-        _exams = await Api.GetExamsAsync() ?? new();
-        _loading = false;
+
+        if (Lists.Get<Saved>(StateKey) is { } saved)
+        {
+            _search = saved.Search;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+            _page.Page = saved.Page; _page.PageSize = saved.PageSize;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+
+        // Si la página guardada ya no existe, o se vació al dar de baja la última tarjeta, se pide la última.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var again = false;
+            var query = _page.ToQuery(_search, _sort);
+            var applied = await _loader.LoadAsync(() => Api.GetExamsPageAsync(query), r =>
+            {
+                _loadFailed = r is null;
+                if (r is null) return;
+
+                var beyond = _page.IsBeyondEnd(r);
+                _page.Apply(r);
+                if (beyond) { _page.GoToLast(); again = true; return; }
+                _exams = r.Items.ToList();
+            });
+
+            if (!applied) return;
+            if (!again) break;
+        }
+
+        _firstLoad = false;
+        _busy = false;
+        StateHasChanged();
     }
 
     private void SendExam(int id)
@@ -350,6 +504,7 @@
         _isBulkMode = false;
         _bulkInputMode = "manual";
         _bulkCandidates = new();
+        _csvReport = null;
         _newBulkName = _newBulkEmail = _csvInput = string.Empty;
         _bulkResult = null;
     }
@@ -363,12 +518,14 @@
         { _sendError = "Nombre y email son obligatorios."; return; }
 
         _sendLoading = true;
-        var token = await Api.SendExamAsync(new SendExamDto(
+        var (token, _, error) = await Api.SendExamAsync(new SendExamDto(
             _sendingExamId!.Value, _candidateName, _candidateEmail, _expirationHours));
         _sendLoading = false;
 
+        // El motivo es el del servidor (prueba desactivada, correo inválido...). El texto de
+        // la configuración del correo queda para cuando no hay otro.
         if (token is not null) _sendSuccess = true;
-        else _sendError = "Error al enviar la prueba. Verifica la configuración de email.";
+        else _sendError = error ?? "No se pudo enviar la prueba. Verifica la configuración de email.";
     }
 
     private void AddBulkCandidate()
@@ -379,21 +536,14 @@
         _newBulkName = _newBulkEmail = string.Empty;
     }
 
+    private TechEval.Application.CsvParseResult? _csvReport;
+
     private void ParseCsv()
     {
-        _bulkCandidates.Clear();
-        var lines = _csvInput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var line in lines)
-        {
-            var parts = line.Split(',', 2);
-            if (parts.Length == 2)
-            {
-                var name = parts[0].Trim().Trim('"');
-                var email = parts[1].Trim().Trim('"');
-                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(email))
-                    _bulkCandidates.Add(new BulkCandidateDto(name, email));
-            }
-        }
+        // El analizador acepta ; tabulador o coma, ignora el encabezado y valida cada correo. El
+        // informe dice siempre cuántos entraron y por qué se ignoró el resto.
+        _csvReport = TechEval.Application.CandidateCsvParser.Parse(_csvInput);
+        _bulkCandidates = _csvReport.Candidates;
     }
 
     private async Task ConfirmBulkSendAsync()
@@ -403,17 +553,20 @@
         { _sendError = "Añade al menos un candidato antes de enviar."; return; }
 
         _sendLoading = true;
-        _bulkResult = await Api.SendExamBulkAsync(new BulkSendExamDto(
+        var (result, _, error) = await Api.SendExamBulkAsync(new BulkSendExamDto(
             _sendingExamId!.Value, _bulkCandidates, _expirationHours));
         _sendLoading = false;
 
-        if (_bulkResult is null)
-            _sendError = "Error al conectar con la API. Verifica la configuración.";
+        _bulkResult = result;
+        if (result is null)
+            _sendError = error ?? "No se pudo conectar con la API. Verifica la configuración.";
     }
 
     private async Task DeleteAsync(int id)
     {
+        // Dar de baja la desactiva. Se recarga la página en vez de quitar la tarjeta: sigue en el
+        // listado, marcada como inactiva, y el total y las páginas se mantienen verdaderos.
         if (await Api.DeleteExamAsync(id))
-            _exams.RemoveAll(e => e.Id == id);
+            await LoadAsync();
     }
 }

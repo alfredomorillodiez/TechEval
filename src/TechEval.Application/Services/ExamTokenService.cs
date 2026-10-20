@@ -25,6 +25,27 @@ public class ExamTimeExpiredException : ConflictException
     public ExamTimeExpiredException(string message) : base(message) { }
 }
 
+/// <summary>
+/// Se lanza cuando la sesión ya se envió y alguien intenta seguir escribiendo en ella: la API
+/// la traduce a 409. Sin ella, el autoguardado reescribía respuestas de una prueba con
+/// resultado hasta que pasaba el plazo.
+/// </summary>
+public class ExamAlreadySubmittedException : ConflictException
+{
+    public ExamAlreadySubmittedException(string message) : base(message) { }
+}
+
+/// <summary>
+/// Se lanza cuando la sesión se marcó como abandonada (plazo vencido hace más de la gracia y sin
+/// envío): la API la traduce a 409. No se puede reanudar ni escribir en ella.
+/// </summary>
+public class ExamAbandonedException : ConflictException
+{
+    public const string DefaultMessage = "La prueba se cerró por inactividad.";
+
+    public ExamAbandonedException() : base(DefaultMessage) { }
+}
+
 public interface IExamTokenService
 {
     Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default);
@@ -69,10 +90,52 @@ public class ExamTokenService : IExamTokenService
         _tokenService = tokenService;
     }
 
+    /// <summary>
+    /// Datos de una invitación. Sin esto se creaba el token (y se intentaba el correo) con un
+    /// correo inventado o una expiración de 0 horas, que daba un enlace ya caducado.
+    /// </summary>
+    internal static void ValidateInvitation(string? name, string? email, int expirationHours)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ValidationException("El nombre del candidato es obligatorio.");
+        if (!IsValidEmail(email))
+            throw new ValidationException($"El correo «{email}» no es válido.");
+        ValidateExpiration(expirationHours);
+    }
+
+    private static void ValidateExpiration(int hours)
+    {
+        if (ExamLimits.ExpirationProblem(hours) is { } problem)
+            throw new ValidationException(problem);
+    }
+
+    /// <summary>
+    /// Formato de correo razonable: una dirección sola (no «Nombre &lt;x@y.com&gt;»), con
+    /// dominio que tenga un punto. No prueba que el buzón exista.
+    /// </summary>
+    internal static bool IsValidEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return false;
+        var text = email.Trim();
+        if (!System.Net.Mail.MailAddress.TryCreate(text, out var address)) return false;
+        return address.Address == text && address.Host.Contains('.');
+    }
+
+    /// <summary>Una prueba desactivada sale de circulación: no admite invitaciones nuevas.</summary>
+    private static void EnsureExamAcceptsInvitations(Exam exam)
+    {
+        if (!exam.IsActive)
+            throw new ConflictException(
+                $"La prueba «{exam.Title}» está desactivada y no admite invitaciones.");
+    }
+
     public async Task<string> SendExamAsync(SendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
+        ValidateInvitation(dto.CandidateName, dto.CandidateEmail, dto.ExpirationHours);
+
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
             ?? throw new NotFoundException("Prueba no encontrada.");
+        EnsureExamAcceptsInvitations(exam);
 
         await EnsureInvitableAsync(dto.CandidateEmail, ct);
 
@@ -100,8 +163,26 @@ public class ExamTokenService : IExamTokenService
 
     public async Task<BulkSendResultDto> SendExamBulkAsync(BulkSendExamDto dto, string baseUrl, CancellationToken ct = default)
     {
+        // Todo se comprueba antes de crear ningún token: un alta masiva a medias es peor que
+        // ninguna. El fallo de correo de un candidato, que sí es por candidato, no cambia.
+        if (dto.Candidates is null || dto.Candidates.Count == 0)
+            throw new ValidationException("La lista de candidatos no puede estar vacía.");
+        if (dto.Candidates.Count > ExamLimits.MaxBulkCandidates)
+            throw new ValidationException(
+                $"Un envío masivo admite hasta {ExamLimits.MaxBulkCandidates} candidatos.");
+        ValidateExpiration(dto.ExpirationHours);
+        for (var i = 0; i < dto.Candidates.Count; i++)
+        {
+            try { ValidateInvitation(dto.Candidates[i].Name, dto.Candidates[i].Email, dto.ExpirationHours); }
+            catch (ValidationException ex)
+            {
+                throw new ValidationException($"Candidato {i + 1}: {ex.Message}");
+            }
+        }
+
         var exam = await _examRepo.GetByIdAsync(dto.ExamId, ct)
             ?? throw new NotFoundException("Prueba no encontrada.");
+        EnsureExamAcceptsInvitations(exam);
 
         var results = new List<BulkSendItemResultDto>();
 
@@ -152,8 +233,22 @@ public class ExamTokenService : IExamTokenService
 
         // El estado de la sesión manda sobre el del token. Un token usado con la sesión
         // todavía abierta es el caso normal de quien recarga la página, y debe poder volver.
+        // Una abandonada no es una completada: el candidato no envió nada, y lo que le sirve es
+        // saber que tiene que pedir otra invitación.
+        if (examToken.ExamSession is { Status: SessionStatus.Abandoned })
+            return new ExamTokenValidationDto(false,
+                "Esta prueba se cerró por inactividad. Pide una invitación nueva a quien te la envió.",
+                null, null, null, null);
+
         if (IsSessionFinished(examToken))
             return new ExamTokenValidationDto(false, "Esta prueba ya ha sido completada.", null, null, null, null);
+
+        // Una prueba desactivada retira también los enlaces que nadie ha abierto. La sesión ya
+        // abierta no se corta: quien empezó puede terminar.
+        if (!examToken.Exam.IsActive && !HasOpenSession(examToken))
+            return new ExamTokenValidationDto(false,
+                "Esta prueba ya no está disponible. Pide una invitación nueva a quien te la envió.",
+                null, null, null, null);
 
         // ExpiresAt es el plazo para EMPEZAR, no para terminar: una prueba ya abierta la
         // gobierna su tiempo límite, así que la expiración solo cierra la puerta de entrada.
@@ -174,12 +269,16 @@ public class ExamTokenService : IExamTokenService
 
         var authToken = _tokenService.GenerateJwtToken(user);
 
+        // Validar no crea la sesión: nace al pulsar «Comenzar prueba». El número de preguntas
+        // y el tiempo viajan aquí para que la bienvenida no tenga que pedirla antes.
         return new ExamTokenValidationDto(
             true, null,
             examToken.ExamSession?.Id,
             examToken.Exam.Title,
             examToken.CandidateName,
-            authToken);
+            authToken,
+            QuestionCount: examToken.Exam.ExamQuestions.Count,
+            TimeLimitMinutes: examToken.Exam.TimeLimitMinutes);
     }
 
     /// <summary>
@@ -206,11 +305,13 @@ public class ExamTokenService : IExamTokenService
         if (existing.Count > 0)
             return existing[0] is { Role: UserRole.Alumno, IsActive: true } alumno ? alumno : null;
 
-        var username = email.Split('@')[0];
         var user = new User
         {
             Email = email,
-            Username = username,
+            // Sin nombre de usuario a propósito: el alumno no entra con usuario y contraseña.
+            // Derivarlo de la parte local del email chocaba con el índice único, y la
+            // invitación de maria.lopez@hotmail.com no se abría si existía la de gmail.com.
+            Username = null,
             Name = name,
             // Sin contraseña utilizable a propósito. Derivarla del email convertía un dato
             // que circula en cualquier proceso de selección en la llave del portal del
@@ -233,7 +334,7 @@ public class ExamTokenService : IExamTokenService
         if (HasOpenSession(examToken))
             return BuildSessionInfo(examToken);
 
-        if (!examToken.CanStart) return null;
+        if (!examToken.CanStart || !examToken.Exam.IsActive) return null;
 
         examToken.IsUsed = true;
         examToken.UsedAt = DateTime.UtcNow;
@@ -243,7 +344,12 @@ public class ExamTokenService : IExamTokenService
         var session = new ExamSession
         {
             ExamTokenId = examToken.Id,
-            ShuffleSeed = RandomNumberGenerator.GetInt32(int.MaxValue)
+            ShuffleSeed = RandomNumberGenerator.GetInt32(int.MaxValue),
+            // Las condiciones con que empieza. Se fijan aquí y solo aquí: la reanudación devuelve
+            // la sesión existente antes de llegar a esta línea. Editar la prueba después no las
+            // cambia, y el plazo y el veredicto salen de estos valores.
+            TimeLimitMinutesSnapshot = examToken.Exam.TimeLimitMinutes,
+            PassingScoreSnapshot = examToken.Exam.PassingScorePercentage
         };
         await _sessionRepo.AddAsync(session, ct);
         await _tokenRepo.UpdateAsync(examToken, ct);
@@ -260,23 +366,33 @@ public class ExamTokenService : IExamTokenService
 
         EnsureOwnedBy(token, userId);
 
+        // Una abandonada se cierra con su propio mensaje: «ya se ha enviado» sería falso.
+        if (token.ExamSession is { Status: SessionStatus.Abandoned })
+            throw new ExamAbandonedException();
+
+        // Una prueba enviada ya no cambia. Se mira el resultado además del estado, como hace
+        // el envío: los dos se escriben juntos, pero un fallo antiguo pudo dejarlos a medias.
+        // Va antes que el plazo y la longitud: una sesión cerrada no admite nada.
+        if (token.ExamSession is { Status: not SessionStatus.InProgress }
+            || (await _resultRepo.FindAsync(r => r.ExamSessionId == sessionId, ct)).Count > 0)
+            throw new ExamAlreadySubmittedException("La prueba ya se ha enviado.");
+
         // Guardar fuera de plazo es lo que hace posible congelar el temporizador del
         // navegador y seguir trabajando. El envío tardío sí se acepta, pero vacío.
         if (IsPastDeadline(token))
             throw new ExamTimeExpiredException("El tiempo de la prueba ha terminado.");
 
-        var existing = await _answerRepo.FindAsync(
-            a => a.ExamSessionId == sessionId && a.QuestionId == dto.QuestionId, ct);
+        EnsureOpenAnswerFits(dto);
 
-        if (existing.Any())
+        var existing = await FindAnswerAsync(sessionId, dto.QuestionId, ct);
+
+        if (existing is not null)
         {
-            var answer = existing.First();
-            answer.SelectedAnswerId = dto.SelectedAnswerId;
-            answer.OpenAnswer = dto.OpenAnswer;
-            answer.AnsweredAt = DateTime.UtcNow;
-            await _answerRepo.UpdateAsync(answer, ct);
+            await OverwriteDraftAsync(existing, dto, ct);
+            return;
         }
-        else
+
+        try
         {
             await _answerRepo.AddAsync(new UserAnswer
             {
@@ -286,6 +402,29 @@ public class ExamTokenService : IExamTokenService
                 OpenAnswer = dto.OpenAnswer
             }, ct);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Dos autoguardados de la misma pregunta que coinciden leen «no hay fila» y los
+            // dos insertan; el índice único deja pasar al primero. Si la fila existe ahora,
+            // era eso, y esta petición pasa a ser una corrección. Si no existe, el fallo era
+            // otro y se relanza sin tocar: no se oculta una base de datos caída.
+            var winner = await FindAnswerAsync(sessionId, dto.QuestionId, ct);
+            if (winner is null) throw;
+
+            await OverwriteDraftAsync(winner, dto, ct);
+        }
+    }
+
+    private async Task<UserAnswer?> FindAnswerAsync(int sessionId, int questionId, CancellationToken ct)
+        => (await _answerRepo.FindAsync(
+            a => a.ExamSessionId == sessionId && a.QuestionId == questionId, ct)).FirstOrDefault();
+
+    private async Task OverwriteDraftAsync(UserAnswer answer, SubmitAnswerDto dto, CancellationToken ct)
+    {
+        answer.SelectedAnswerId = dto.SelectedAnswerId;
+        answer.OpenAnswer = dto.OpenAnswer;
+        answer.AnsweredAt = DateTime.UtcNow;
+        await _answerRepo.UpdateAsync(answer, ct);
     }
 
     public async Task<ExamSubmissionReceiptDto> SubmitExamAsync(
@@ -320,6 +459,16 @@ public class ExamTokenService : IExamTokenService
         if (yaEnviado.Count > 0)
             return BuildReceipt(yaEnviado[0], exam.Title);
 
+        // Sin resultado y abandonada: no hay nada que cerrar. El 409 le dice al candidato qué hacer.
+        if (session.Status == SessionStatus.Abandoned)
+            throw new ExamAbandonedException();
+
+        // Antes de abrir la transacción, para no escribir nada. Fuera de plazo el cuerpo se
+        // descarta, así que su longitud no importa: rechazarlo dejaría la prueba sin cerrar.
+        if (!fueraDePlazo)
+            foreach (var answer in dto.Answers)
+                EnsureOpenAnswerFits(answer);
+
         // El estado lo decide la composición del examen, no lo que responda el candidato:
         // así es predecible desde que se monta la prueba y un humano siempre valida
         // una prueba con abiertas, incluso si el candidato no escribió nada.
@@ -346,7 +495,7 @@ public class ExamTokenService : IExamTokenService
 
             pct = totalPoints > 0 ? Math.Round((decimal)obtained / totalPoints * 100, 2) : 0;
             passed = status == Domain.Enums.ExamResultStatus.Reviewed
-                ? pct >= exam.PassingScorePercentage
+                ? pct >= session.PassingScoreFor(exam)
                 : null;
 
             result = new ExamResult
@@ -375,17 +524,36 @@ public class ExamTokenService : IExamTokenService
         if (status == Domain.Enums.ExamResultStatus.PendingReview)
         {
             // Acuse sin cifras: el resultado definitivo se envía al cerrar la corrección.
-            await _emailService.SendExamPendingReviewAsync(
-                examToken.CandidateEmail, examToken.CandidateName, exam.Title, ct);
+            await TryNotifyAsync(() => _emailService.SendExamPendingReviewAsync(
+                examToken.CandidateEmail, examToken.CandidateName, exam.Title, ct));
 
             return BuildReceipt(result, exam.Title);
         }
 
-        await _emailService.SendExamResultAsync(
+        await TryNotifyAsync(() => _emailService.SendExamResultAsync(
             examToken.CandidateEmail, examToken.CandidateName,
-            exam.Title, pct, passed!.Value, ct);
+            exam.Title, pct, passed!.Value, ct));
 
         return BuildReceipt(result, exam.Title);
+    }
+
+    /// <summary>
+    /// Envía un correo que viene después de un envío ya confirmado, sin dejar que su fallo
+    /// llegue al candidato. Antes un Graph caído devolvía 500 con la prueba ya guardada, y el
+    /// segundo envío, que es idempotente, no repetía el correo: el aviso no salía nunca.
+    /// GraphEmailService ya registra el fallo en el log antes de relanzarlo, como en la
+    /// corrección (ReviewWorkflow). La cancelación sí se deja pasar: no hay a quién responder.
+    /// </summary>
+    private static async Task TryNotifyAsync(Func<Task> send)
+    {
+        try
+        {
+            await send();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Silenciado a propósito: el resultado ya está persistido y es el que manda.
+        }
     }
 
     /// <summary>
@@ -533,11 +701,24 @@ public class ExamTokenService : IExamTokenService
     /// <summary>El plazo del examen, medido por el reloj del servidor y con su margen.</summary>
     private static bool IsPastDeadline(ExamToken token, int? timeLimitMinutes = null)
     {
-        var minutos = timeLimitMinutes ?? token.Exam?.TimeLimitMinutes ?? 0;
+        // El tiempo guardado al empezar manda sobre el argumento y sobre el de la prueba: editar la
+        // prueba con candidatos en curso no puede cambiarles el plazo.
+        var minutos = token.ExamSession?.TimeLimitMinutesSnapshot ?? timeLimitMinutes ?? token.Exam?.TimeLimitMinutes ?? 0;
         if (token.ExamSession is null || minutos <= 0) return false;
 
         var limite = token.ExamSession.StartedAt.AddMinutes(minutos).Add(GraciaDePlazo);
         return DateTime.UtcNow > limite;
+    }
+
+    /// <summary>
+    /// Rechaza una respuesta abierta que no cabe en su columna. Sin esto llegaba a la base de
+    /// datos y salía como un 500: el autoguardado fallaba sin aviso y el envío se revertía.
+    /// </summary>
+    private static void EnsureOpenAnswerFits(SubmitAnswerDto answer)
+    {
+        if (answer.OpenAnswer is { Length: > UserAnswer.OpenAnswerMaxLength })
+            throw new ValidationException(
+                $"La respuesta abierta no puede superar los {UserAnswer.OpenAnswerMaxLength} caracteres.");
     }
 
     /// <summary>
@@ -554,7 +735,7 @@ public class ExamTokenService : IExamTokenService
             token.Exam.Title,
             token.CandidateName,
             token.CandidateEmail,
-            token.Exam.TimeLimitMinutes,
+            token.ExamSession.TimeLimitFor(token.Exam),
             token.ExamSession.StartedAt,
             RemainingSecondsOf(token),
             SessionOrder.Questions(token.Exam.ExamQuestions, seed).Select((eq, i) => new SessionQuestionDto(
@@ -575,7 +756,7 @@ public class ExamTokenService : IExamTokenService
     /// </summary>
     private static int RemainingSecondsOf(ExamToken token)
     {
-        var deadline = token.ExamSession!.StartedAt.AddMinutes(token.Exam.TimeLimitMinutes);
+        var deadline = token.ExamSession!.StartedAt.AddMinutes(token.ExamSession.TimeLimitFor(token.Exam));
         var remaining = (deadline - DateTime.UtcNow).TotalSeconds;
         return remaining <= 0 ? 0 : (int)Math.Floor(remaining);
     }

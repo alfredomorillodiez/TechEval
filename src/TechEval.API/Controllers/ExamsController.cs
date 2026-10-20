@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using TechEval.Application.DTOs;
 using TechEval.Application.Services;
+using TechEval.Domain.Common;
 
 namespace TechEval.API.Controllers;
 
@@ -28,9 +29,18 @@ public class ExamsController : ControllerBase
         _configuration = configuration;
     }
 
+    /// <summary>Una página de pruebas, con sus recuentos</summary>
     [HttpGet]
-    public async Task<IActionResult> GetAll(CancellationToken ct)
-        => Ok(await _examService.GetAllAsync(ct));
+    [ProducesResponseType(typeof(PagedResult<ExamSummaryDto>), 200)]
+    public async Task<IActionResult> GetAll(
+        [FromQuery] PageQuery paging, [FromQuery] bool? active, CancellationToken ct)
+        => Ok(await _examService.GetPagedAsync(new ExamFilter(active), paging, ct));
+
+    /// <summary>Identificador y título de todas las pruebas, para los desplegables</summary>
+    [HttpGet("options")]
+    [ProducesResponseType(typeof(IReadOnlyList<ExamOptionDto>), 200)]
+    public async Task<IActionResult> GetOptions(CancellationToken ct)
+        => Ok(await _examService.GetOptionsAsync(ct));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
@@ -83,9 +93,8 @@ public class ExamsController : ControllerBase
     [HttpPost("send-bulk")]
     public async Task<IActionResult> SendExamBulk([FromBody] BulkSendExamDto dto, CancellationToken ct)
     {
-        if (dto.Candidates is null || dto.Candidates.Count == 0)
-            return BadRequest("La lista de candidatos no puede estar vacía.");
-
+        // La validación (lista vacía, correos, expiración) es del servicio: así llega como
+        // ProblemDetails con su mensaje, igual que el resto de rechazos.
         var baseUrl = _configuration["FrontendBaseUrl"] ?? $"{Request.Scheme}://{Request.Host}";
         var result = await _tokenService.SendExamBulkAsync(dto, baseUrl, ct);
         return Ok(result);

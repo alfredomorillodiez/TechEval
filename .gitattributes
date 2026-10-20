@@ -1,0 +1,4 @@
+# Los guiones de shell que entran en las imágenes de Docker llevan siempre fin de línea LF. Con CRLF
+# (el valor por defecto de git en Windows), `#!/bin/sh` se lee como «/bin/sh\r» y el guion falla en
+# Alpine con «not found», sin decir que la causa es el fin de línea.
+*.sh text eol=lf

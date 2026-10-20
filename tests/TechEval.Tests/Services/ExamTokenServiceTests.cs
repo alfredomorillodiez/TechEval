@@ -137,6 +137,38 @@ public class ExamTokenServiceTests
     }
 
     [Fact]
+    public async Task Validate_TokenSinSesion_TraeLoQueMuestraLaBienvenida()
+    {
+        // La bienvenida se pinta con esto. Si tuviera que pedir la sesión para saberlo, el
+        // reloj empezaría a correr mientras el candidato lee.
+        ConfigurarToken(minutosExamen: 45);
+
+        var result = await _sut.ValidateTokenAsync("tok");
+
+        result.QuestionCount.Should().Be(2);
+        result.TimeLimitMinutes.Should().Be(45);
+    }
+
+    [Fact]
+    public async Task Validate_NoIniciaLaPrueba_NiConsumeElToken()
+    {
+        // Quien abre el enlace solo para verlo y vuelve horas después tiene que encontrar la
+        // prueba entera: validar no crea la sesión, que es la que lleva la hora de inicio.
+        var token = ConfigurarToken(minutosExamen: 60);
+
+        await _sut.ValidateTokenAsync("tok");
+        await _sut.ValidateTokenAsync("tok");
+
+        _sessionsCreadas.Should().BeEmpty();
+        token.IsUsed.Should().BeFalse();
+        token.UsedAt.Should().BeNull();
+
+        var session = await _sut.StartSessionAsync("tok");
+
+        session!.RemainingSeconds.Should().BeInRange(60 * 60 - 5, 60 * 60);
+    }
+
+    [Fact]
     public async Task Validate_TokenConSesionEnCurso_EsValidoYDevuelveLaSesion()
     {
         ConfigurarToken(usado: true, estadoSesion: SessionStatus.InProgress);
@@ -213,12 +245,41 @@ public class ExamTokenServiceTests
 
         creado.Should().NotBeNull();
         creado!.Email.Should().Be("ana@test.com");
-        creado.Username.Should().Be("ana");
+        creado.Username.Should().BeNull();
         creado.PasswordHash.Should().BeEmpty();
 
         // Y esa cuenta no deja entrar ni con la parte local de su email ni con nada.
         PasswordHasher.Verify("ana", creado.PasswordHash).IsValid.Should().BeFalse();
         PasswordHasher.Verify("ana@test.com", creado.PasswordHash).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Validate_DosCandidatosConLaMismaParteLocal_TienenCadaUnoSuCuenta()
+    {
+        // El nombre de usuario salía de la parte local del email, con índice único: la
+        // invitación de maria.lopez@hotmail.com daba 500 si ya existía la de gmail.com.
+        _userRepo.Setup(r => r.FindAsync(It.IsAny<Expression<Func<User, bool>>>(), default))
+            .ReturnsAsync(new List<User>());
+
+        var creados = new List<User>();
+        _userRepo.Setup(r => r.AddAsync(It.IsAny<User>(), default))
+            .ReturnsAsync((User u, CancellationToken _) => { u.Id = 10 + creados.Count; creados.Add(u); return u; });
+
+        foreach (var (clave, email) in new[] { ("gmail", "maria.lopez@gmail.com"), ("hotmail", "maria.lopez@hotmail.com") })
+        {
+            _tokenRepo.Setup(r => r.GetWithExamAndSessionAsync(clave, default)).ReturnsAsync(new ExamToken
+            {
+                Id = 1, Token = clave, ExamId = 7, Exam = ExamenDe(60),
+                CandidateName = "María López", CandidateEmail = email,
+                ExpiresAt = DateTime.UtcNow.AddHours(24)
+            });
+
+            (await _sut.ValidateTokenAsync(clave)).IsValid.Should().BeTrue();
+        }
+
+        creados.Select(u => u.Email).Should().Equal("maria.lopez@gmail.com", "maria.lopez@hotmail.com");
+        creados.Should().OnlyContain(u => u.Username == null,
+            "el índice único está filtrado a los no nulos, así que ninguna cuenta sin nombre choca con otra");
     }
 
     [Fact]
@@ -245,6 +306,57 @@ public class ExamTokenServiceTests
 
         result.IsValid.Should().BeFalse();
         result.Error.Should().Be("Token no válido.");
+    }
+
+    // ---------- Prueba desactivada ----------
+
+    [Fact]
+    public async Task Validate_PruebaDesactivadaSinSesion_RetiraElEnlace()
+    {
+        var token = ConfigurarToken();
+        token.Exam.IsActive = false;
+
+        var result = await _sut.ValidateTokenAsync("tok");
+
+        result.IsValid.Should().BeFalse();
+        result.Error.Should().Contain("ya no está disponible");
+        result.AuthToken.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Validate_PruebaDesactivadaConSesionEnCurso_DejaTerminar()
+    {
+        var token = ConfigurarToken(usado: true, estadoSesion: SessionStatus.InProgress);
+        token.Exam.IsActive = false;
+
+        var result = await _sut.ValidateTokenAsync("tok");
+
+        result.IsValid.Should().BeTrue();
+        result.SessionId.Should().Be(42);
+    }
+
+    [Fact]
+    public async Task Start_PruebaDesactivadaSinSesion_NoCreaSesion()
+    {
+        var token = ConfigurarToken();
+        token.Exam.IsActive = false;
+
+        var session = await _sut.StartSessionAsync("tok");
+
+        session.Should().BeNull();
+        _sessionsCreadas.Should().BeEmpty();
+        token.IsUsed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Start_PruebaDesactivadaConSesionEnCurso_Reanuda()
+    {
+        var token = ConfigurarToken(usado: true, estadoSesion: SessionStatus.InProgress);
+        token.Exam.IsActive = false;
+
+        var session = await _sut.StartSessionAsync("tok");
+
+        session!.SessionId.Should().Be(42);
     }
 
     // ---------- Inicio y reanudación ----------

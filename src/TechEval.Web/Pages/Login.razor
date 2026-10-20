@@ -68,10 +68,22 @@
         { _error = "Email y contraseña son obligatorios."; return; }
 
         _loading = true;
-        var result = await Api.LoginAsync(new LoginDto(_email, _password));
+        var (result, status, error) = await Api.LoginAsync(new LoginDto(_email, _password));
         _loading = false;
 
-        if (result is null) { _error = "Credenciales incorrectas."; return; }
+        if (result is null)
+        {
+            // Cada causa dice lo suyo. Un 429 que parecía «credenciales incorrectas» hacía
+            // reintentar a quien estaba bloqueado, y empeoraba justo el bloqueo.
+            _error = status switch
+            {
+                401 => "Credenciales incorrectas.",
+                429 => error ?? "Demasiados intentos. Espera un momento antes de volver a intentarlo.",
+                0 => "No se pudo conectar con el servidor. Comprueba tu conexión.",
+                _ => "El servidor no pudo atender la petición. Inténtalo de nuevo en unos minutos."
+            };
+            return;
+        }
 
         await Auth.LoginAsync(result.Token, result.Name, result.Role, result.Email);
         Nav.NavigateTo(Auth.Home);

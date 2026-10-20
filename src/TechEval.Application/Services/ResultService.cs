@@ -1,4 +1,5 @@
 using TechEval.Application.DTOs;
+using TechEval.Domain.Common;
 using TechEval.Domain.Entities;
 using TechEval.Domain.Enums;
 using TechEval.Domain.Interfaces.Repositories;
@@ -7,8 +8,11 @@ namespace TechEval.Application.Services;
 
 public interface IResultService
 {
-    Task<IReadOnlyList<ExamResultSummaryDto>> GetAllAsync(CancellationToken ct = default);
-    Task<IReadOnlyList<ExamResultSummaryDto>> GetByExamAsync(int examId, CancellationToken ct = default);
+    Task<PagedResult<ExamResultSummaryDto>> GetPagedAsync(
+        ResultFilter filter, PageQuery query, CancellationToken ct = default);
+
+    /// <summary>Cifras de todos los resultados o de los de una prueba. NotFound si la prueba no existe.</summary>
+    Task<ResultStatsDto> GetStatsAsync(int? examId, CancellationToken ct = default);
     Task<ExamResultDto?> GetDetailAsync(int id, CancellationToken ct = default);
     Task<DashboardStatsDto> GetDashboardStatsAsync(CancellationToken ct = default);
 }
@@ -29,16 +33,25 @@ public class ResultService : IResultService
         _questionRepo = questionRepo;
     }
 
-    public async Task<IReadOnlyList<ExamResultSummaryDto>> GetAllAsync(CancellationToken ct = default)
-    {
-        var results = await _resultRepo.GetAllWithDetailsAsync(ct);
-        return results.Select(MapToSummary).ToList();
-    }
+    public async Task<PagedResult<ExamResultSummaryDto>> GetPagedAsync(
+        ResultFilter filter, PageQuery query, CancellationToken ct = default)
+        => (await _resultRepo.GetPagedAsync(filter, query, ct)).Map(MapToSummary);
 
-    public async Task<IReadOnlyList<ExamResultSummaryDto>> GetByExamAsync(int examId, CancellationToken ct = default)
+    public async Task<ResultStatsDto> GetStatsAsync(int? examId, CancellationToken ct = default)
     {
-        var results = await _resultRepo.GetByExamAsync(examId, ct);
-        return results.Select(MapToSummary).ToList();
+        string? title = null;
+        if (examId is { } id)
+        {
+            var exam = await _examRepo.GetByIdAsync(id, ct)
+                ?? throw new NotFoundException("Prueba no encontrada.");
+            title = exam.Title;
+        }
+
+        var s = await _resultRepo.GetStatsAsync(examId, ct);
+        var passRate = s.Reviewed > 0 ? (int)Math.Round((double)s.Passed / s.Reviewed * 100) : 0;
+        return new ResultStatsDto(
+            s.Total, s.Reviewed, s.Pending, s.Passed, passRate,
+            s.AverageScore, s.MaxScore, s.MinScore, s.Distribution, title);
     }
 
     private static ExamResultSummaryDto MapToSummary(ExamResult r) => new(

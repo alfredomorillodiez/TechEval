@@ -38,11 +38,11 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Tiempo límite (min)</label>
-                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="@TechEval.Application.ExamLimits.MinTimeLimitMinutes" max="@TechEval.Application.ExamLimits.MaxTimeLimitMinutes" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">% mínimo para aprobar</label>
-                        <input type="number" class="form-control" @bind="_passingScore" min="0" max="100" />
+                        <input type="number" class="form-control" @bind="_passingScore" min="@TechEval.Application.ExamLimits.MinPassingScore" max="@TechEval.Application.ExamLimits.MaxPassingScore" />
                     </div>
 
                     <hr />
@@ -111,6 +111,10 @@
                 {
                     <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
                 }
+                else if (_loadFailed)
+                {
+                    <LoadError What="las preguntas y las categorías" OnRetry="LoadAsync" />
+                }
                 else if (!_filtered.Any())
                 {
                     <div class="text-center text-muted py-5">
@@ -157,7 +161,7 @@
 @code {
     private string _title = string.Empty, _description = string.Empty, _error = string.Empty;
     private int _timeLimitMinutes = 60, _passingScore = 70;
-    private bool _loading = true, _saving;
+    private bool _loading = true, _saving, _loadFailed;
 
     private List<QuestionSummaryDto> _allQuestions = new();
     private List<QuestionSummaryDto> _filtered = new();
@@ -177,13 +181,25 @@
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
 
-        var (questions, categories) = (
-            await Api.GetQuestionsAsync(),
-            await Api.GetCategoriesAsync());
+        await LoadAsync();
+    }
 
-        _allQuestions = questions?.Where(q => q.IsActive).ToList() ?? new();
-        _categories = categories ?? new();
-        _filtered = _allQuestions;
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        // Todo el banco activo, pidiendo páginas de 100: la composición manual ofrece todas las preguntas.
+        var questions = await Api.GetAllQuestionsAsync(active: true);
+        var categories = await Api.GetCategoriesAsync();
+
+        // Sin las preguntas o sin las categorías no se puede armar la prueba, y una pantalla
+        // con «no hay preguntas» sería falsa.
+        _loadFailed = questions is null || categories is null;
+        if (!_loadFailed)
+        {
+            _allQuestions = questions!.Where(q => q.IsActive).ToList();
+            _categories = categories!;
+            _filtered = _allQuestions;
+        }
         _loading = false;
     }
 
@@ -205,17 +221,19 @@
     private async Task SaveAsync()
     {
         _error = string.Empty;
-        if (string.IsNullOrWhiteSpace(_title)) { _error = "El título es obligatorio."; return; }
+        // La misma comprobación y el mismo texto que el servidor: el aviso sale sin llamar a la API.
+        if (TechEval.Application.ExamLimits.ExamDataProblem(_title, _timeLimitMinutes, _passingScore) is { } problem)
+        { _error = problem; return; }
         if (_selectedIds.Count == 0) { _error = "Selecciona al menos una pregunta."; return; }
 
         _saving = true;
-        var result = await Api.CreateExamAsync(new CreateExamDto(
+        var (result, _, error) = await Api.CreateExamAsync(new CreateExamDto(
             _title, _description, _timeLimitMinutes, _passingScore,
             _selectedIds.ToList()));
         _saving = false;
 
         if (result is not null) Nav.NavigateTo($"/admin/pruebas/{result.Id}");
-        else _error = "Error al crear la prueba. Inténtalo de nuevo.";
+        else _error = error ?? "No se pudo crear la prueba. Inténtalo de nuevo.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

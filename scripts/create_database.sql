@@ -58,7 +58,7 @@ GO
 CREATE TABLE dbo.Users (
     Id           INT           NOT NULL IDENTITY(1,1),
     Email        NVARCHAR(200) NOT NULL,
-    Username     NVARCHAR(200) NULL,        -- alumnos: parte local del email (ej. alejandro.robles)
+    Username     NVARCHAR(200) NULL,        -- solo cuentas antiguas: ninguna cuenta nueva lo rellena; el login lo acepta en lugar del email
     PasswordHash NVARCHAR(MAX) NOT NULL,   -- PBKDF2 (formato de PasswordHasher); vacio = sin contrasena utilizable
     Name         NVARCHAR(200) NOT NULL,
     Role         INT           NOT NULL,   -- 1=Admin | 2=Evaluador | 3=Alumno
@@ -217,6 +217,10 @@ CREATE TABLE dbo.ExamSessions (
     Status      INT       NOT NULL CONSTRAINT DF_ExamSessions_Status DEFAULT 1,
     ShuffleSeed INT       NULL,       -- semilla del orden de la sesión; NULL = anterior al cambio
     IntegrityLimitReached BIT NOT NULL CONSTRAINT DF_ExamSessions_IntegrityLimitReached DEFAULT 0,
+    -- Las condiciones con que empezo el candidato. Editar la prueba despues no las cambia.
+    -- NULL = sesion anterior al cambio: usa el tiempo y la nota actuales de la prueba.
+    TimeLimitMinutesSnapshot INT NULL,
+    PassingScoreSnapshot     INT NULL,
 
     CONSTRAINT PK_ExamSessions PRIMARY KEY (Id),
     CONSTRAINT FK_ExamSessions_ExamTokens FOREIGN KEY (ExamTokenId)
@@ -258,6 +262,12 @@ CREATE TABLE dbo.UserAnswers (
     CONSTRAINT FK_UserAnswers_Answers FOREIGN KEY (SelectedAnswerId)
         REFERENCES dbo.Answers (Id) ON DELETE NO ACTION ON UPDATE NO ACTION
 );
+GO
+
+-- Una respuesta por pregunta y sesión: sin la unicidad, dos autoguardados que coincidían
+-- creaban dos filas y la corrección puntuaba la pregunta dos veces.
+CREATE UNIQUE INDEX IX_UserAnswers_ExamSessionId_QuestionId ON dbo.UserAnswers (ExamSessionId, QuestionId);
+CREATE INDEX IX_UserAnswers_QuestionId ON dbo.UserAnswers (QuestionId);
 GO
 
 -- ============================================================

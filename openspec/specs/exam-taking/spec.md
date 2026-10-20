@@ -8,11 +8,19 @@ TBD - created by archiving change exam-taking. Update Purpose after archive.
 ### Requirement: Validación pública de token de examen
 El sistema SHALL exponer un endpoint público (sin autenticación) que permita comprobar si un token de examen es válido antes de mostrar la interfaz de examen al candidato. La validez del token SHALL depender del estado de su sesión de examen, no del hecho de haberla creado: un token cuya sesión sigue en curso SHALL validar como correcto, y solo una sesión ya terminada SHALL cerrar el acceso.
 
+Una respuesta válida SHALL incluir el número de preguntas de la prueba y su tiempo límite en minutos, que es lo que el candidato ve antes de empezar. Validar SHALL NOT crear ninguna `ExamSession`, SHALL NOT marcar el token como usado y SHALL NOT poner en marcha el tiempo de la prueba: eso ocurre solo al iniciar la sesión.
+
 #### Scenario: Token válido
 - **GIVEN** un `ExamToken` existente que no ha expirado y que no tiene ninguna `ExamSession` asociada
 - **WHEN** el candidato solicita `GET /api/exam/validate/{token}`
-- **THEN** el sistema responde con `isValid = true`, el título del examen y el nombre del candidato asociado al token
+- **THEN** el sistema responde con `isValid = true`, el título del examen, el nombre del candidato asociado al token, el número de preguntas y el tiempo límite en minutos
 - **AND** el sistema no devuelve ningún identificador de sesión
+
+#### Scenario: Validar no inicia la prueba
+- **GIVEN** un `ExamToken` válido sin `ExamSession` asociada, para una prueba de 60 minutos
+- **WHEN** el candidato solicita `GET /api/exam/validate/{token}` dos veces, con horas de diferencia
+- **THEN** el sistema SHALL NOT crear ninguna `ExamSession` y el token sigue con `IsUsed = false`
+- **AND** cuando el candidato solicita después `POST /api/exam/start/{token}`, la sesión nueva tiene un tiempo restante de 60 minutos
 
 #### Scenario: Token con sesión en curso
 - **GIVEN** un `ExamToken` con una `ExamSession` asociada en estado `InProgress`
@@ -89,7 +97,7 @@ El sistema SHALL crear como máximo una `ExamSession` por cada `ExamToken`. Al i
 - **THEN** el sistema MUST rechazar la operación con un error 400 y el mensaje "Token inválido o expirado." sin crear ninguna `ExamSession`
 
 ### Requirement: Auto-guardado de respuestas individuales
-El sistema SHALL permitir guardar la respuesta de una pregunta concreta dentro de una sesión de examen en curso, de forma incremental, sin requerir el envío completo del examen. La fecha de respuesta SHALL registrarse siempre en tiempo universal coordinado (UTC), igual que el resto de marcas de tiempo del modelo.
+El sistema SHALL permitir guardar la respuesta de una pregunta concreta dentro de una sesión de examen en curso, de forma incremental, sin requerir el envío completo del examen. La fecha de respuesta SHALL registrarse siempre en tiempo universal coordinado (UTC), igual que el resto de marcas de tiempo del modelo. Una sesión que ya se ha enviado SHALL NOT admitir más respuestas.
 
 #### Scenario: Primera respuesta a una pregunta
 - **GIVEN** una `ExamSession` en progreso sin respuesta previa registrada para una pregunta determinada
@@ -105,6 +113,17 @@ El sistema SHALL permitir guardar la respuesta de una pregunta concreta dentro d
 - **GIVEN** un servidor cuyo huso horario local está adelantado respecto a UTC
 - **WHEN** un candidato responde a una pregunta dentro de una sesión iniciada momentos antes
 - **THEN** el sistema SHALL registrar `AnsweredAt` en UTC, de forma que nunca resulte anterior a `StartedAt` ni posterior al cierre de la sesión por efecto del huso horario
+
+#### Scenario: Respuesta a una sesión que ya se envió
+- **GIVEN** una `ExamSession` con `ExamResult` asociado, o que ya no está en estado `InProgress`, dentro del plazo de la prueba
+- **WHEN** su dueño envía `POST /api/exam/answer/{sessionId}`
+- **THEN** el sistema MUST responder `409 Conflict` con un mensaje que indique que la prueba ya se envió
+- **AND** el sistema SHALL NOT crear ni modificar ninguna `UserAnswer` de esa sesión
+
+#### Scenario: La propiedad manda sobre el estado de la sesión
+- **GIVEN** una `ExamSession` ya enviada que pertenece a otro candidato
+- **WHEN** un candidato autenticado envía `POST /api/exam/answer/{sessionId}`
+- **THEN** el sistema MUST responder `403 Forbidden`, no `409`
 
 ### Requirement: Envío final del examen
 El sistema SHALL permitir al candidato enviar el conjunto completo de respuestas de su sesión para marcarla como finalizada, dejando la corrección automática y el cálculo de puntuación a cargo de otra capacidad. El envío SHALL ser idempotente: una sesión que ya tiene resultado devuelve ese resultado en lugar de crear otro, sin recalcular la nota ni reenviar ninguna notificación.
@@ -350,3 +369,178 @@ La corrección automática SHALL identificar la opción elegida por su identific
 - **GIVEN** una `ExamSession` en curso que se creó antes de este cambio y no tiene valor aleatorio
 - **WHEN** el candidato reanuda la sesión
 - **THEN** el sistema presenta las preguntas y las opciones en el orden del examen, igual que al empezar
+
+### Requirement: Longitud máxima de la respuesta abierta
+El sistema SHALL aceptar respuestas abiertas de hasta 4000 caracteres, que es el tamaño con el que se guardan. Una respuesta abierta más larga SHALL rechazarse con `400 Bad Request` y un mensaje que indique el máximo, tanto en el auto-guardado como en el envío final dentro de plazo. El rechazo SHALL producirse antes de escribir nada: ninguna respuesta, ningún resultado y ningún cambio en el estado de la sesión.
+
+El envío final fuera de plazo SHALL NOT rechazarse por la longitud de lo que traiga, porque descarta ese contenido y puntúa lo que ya estaba guardado.
+
+#### Scenario: Respuesta abierta en el límite
+- **GIVEN** una `ExamSession` en progreso
+- **WHEN** el candidato envía `POST /api/exam/answer/{sessionId}` con una respuesta abierta de exactamente 4000 caracteres
+- **THEN** el sistema responde `200 OK` y guarda la respuesta completa, sin recortarla
+
+#### Scenario: Auto-guardado de una respuesta demasiado larga
+- **GIVEN** una `ExamSession` en progreso con una respuesta abierta ya guardada para una pregunta
+- **WHEN** el candidato envía `POST /api/exam/answer/{sessionId}` para esa pregunta con una respuesta de 4001 caracteres
+- **THEN** el sistema responde `400 Bad Request` con un mensaje que indica el máximo de 4000 caracteres
+- **AND** la respuesta guardada no cambia
+
+#### Scenario: Envío dentro de plazo con una respuesta demasiado larga
+- **GIVEN** una `ExamSession` en progreso, dentro de su tiempo límite
+- **WHEN** el candidato envía `POST /api/exam/submit` y una de las respuestas abiertas tiene 4001 caracteres
+- **THEN** el sistema responde `400 Bad Request` con un mensaje que indica el máximo de 4000 caracteres
+- **AND** el sistema SHALL NOT crear ningún `ExamResult` ni modificar ninguna `UserAnswer`
+- **AND** la sesión sigue en estado `InProgress`, así que el candidato puede acortar la respuesta y volver a enviar
+
+#### Scenario: Envío fuera de plazo con una respuesta demasiado larga
+- **GIVEN** una `ExamSession` cuyo tiempo límite ya venció, con respuestas guardadas en plazo
+- **WHEN** se solicita `POST /api/exam/submit` y el cuerpo trae una respuesta abierta de 4001 caracteres
+- **THEN** el sistema acepta el envío, descarta el contenido del cuerpo y puntúa las respuestas guardadas en plazo
+
+### Requirement: El fallo del correo no cambia la respuesta del envío
+El sistema SHALL devolver el acuse del resultado con `200 OK` cuando el envío de la prueba se ha confirmado, aunque falle el correo al candidato. El fallo SHALL NOT propagarse a quien llama. El resultado persistido es el que manda: el correo es una notificación posterior.
+
+#### Scenario: Correo caído al enviar una prueba de test
+- **GIVEN** una sesión en progreso de una prueba sin preguntas abiertas
+- **WHEN** el candidato envía la prueba y el servicio de correo lanza una excepción
+- **THEN** el sistema responde `200 OK` con el acuse del resultado, con su puntuación y su veredicto
+- **AND** el `ExamResult` y la sesión cerrada siguen persistidos
+
+#### Scenario: Correo caído al enviar una prueba con preguntas abiertas
+- **GIVEN** una sesión en progreso de una prueba con preguntas abiertas
+- **WHEN** el candidato envía la prueba y el servicio de correo lanza una excepción
+- **THEN** el sistema responde `200 OK` con el acuse pendiente, sin cifras
+- **AND** el `ExamResult` queda en estado `PendingReview`
+
+#### Scenario: La cancelación de la petición no se silencia
+- **GIVEN** un envío cuya petición HTTP el cliente cancela mientras se envía el correo
+- **WHEN** el servicio de correo lanza `OperationCanceledException`
+- **THEN** el sistema SHALL NOT tratarla como un fallo de correo capturado
+
+### Requirement: Una sola respuesta por pregunta y sesión
+El sistema SHALL guardar como máximo una `UserAnswer` por cada pareja `(ExamSessionId, QuestionId)`. La base de datos SHALL imponerlo con un índice único, y el autoguardado SHALL tolerar que otra petición inserte la misma respuesta a la vez. Una sesión con dos filas para la misma pregunta puntuaría dos veces esa pregunta, porque la corrección suma las `AwardedPoints` de todas las filas.
+
+#### Scenario: Dos autoguardados simultáneos de la misma pregunta
+- **GIVEN** una sesión en progreso sin respuesta para una pregunta
+- **WHEN** dos peticiones de autoguardado de esa pregunta coinciden y la segunda inserción falla porque la primera ya insertó
+- **THEN** el sistema SHALL releer la fila existente y actualizarla con el contenido de la segunda petición
+- **AND** la sesión queda con una sola `UserAnswer` para esa pregunta
+- **AND** la petición no responde `500`
+
+#### Scenario: El fallo de inserción no se debe a una carrera
+- **GIVEN** un autoguardado cuya inserción falla y que, al releer, no encuentra ninguna fila para esa pregunta
+- **WHEN** el sistema trata el fallo
+- **THEN** el sistema SHALL relanzar el fallo original, sin ocultarlo
+
+#### Scenario: La base rechaza una fila duplicada
+- **GIVEN** una sesión con una `UserAnswer` para una pregunta
+- **WHEN** se intenta insertar una segunda fila para la misma pareja `(ExamSessionId, QuestionId)`
+- **THEN** la base de datos SHALL rechazar la inserción por el índice único
+
+### Requirement: Las condiciones de la sesión se congelan al empezar
+Al crear una `ExamSession`, el sistema SHALL guardar en ella el tiempo límite y la nota de corte que la prueba tiene en ese momento. Desde entonces, el plazo, el tiempo restante, la ventana de gracia del envío y el tope de las salidas de la página SHALL calcularse con el tiempo guardado, y el veredicto, tanto al enviar una prueba sin abiertas como al cerrar la corrección de una con abiertas, SHALL calcularse con la nota guardada. Editar la prueba SHALL NOT cambiar las sesiones ya empezadas. Una sesión sin valores guardados (anterior a este cambio) SHALL usar los de la prueba.
+
+#### Scenario: Acortar el tiempo con candidatos en curso
+- **GIVEN** un candidato que empezó hace 20 minutos una prueba de 60, y después un administrador cambia el tiempo límite de la prueba a 30
+- **WHEN** el candidato pide su sesión o envía la prueba
+- **THEN** el tiempo restante es de 40 minutos, no de 10, y el envío se acepta en plazo
+
+#### Scenario: Alargar el tiempo con candidatos en curso
+- **GIVEN** un candidato que empezó hace 50 minutos una prueba de 60, y después un administrador cambia el tiempo a 120
+- **WHEN** el candidato pide su sesión
+- **THEN** el tiempo restante es de 10 minutos
+
+#### Scenario: Una sesión nueva usa el valor nuevo
+- **GIVEN** la prueba editada a 30 minutos
+- **WHEN** otro candidato empieza la prueba
+- **THEN** su sesión tiene 30 minutos
+
+#### Scenario: Cambiar la nota de corte entre dos envíos
+- **GIVEN** dos candidatos que empezaron una prueba de test con nota de corte 70, y después un administrador sube la nota a 80
+- **WHEN** ambos envían con un 75 %
+- **THEN** los dos reciben veredicto «aprobado», porque ambos empezaron con 70
+
+#### Scenario: Cambiar la nota de corte durante la corrección
+- **GIVEN** un resultado pendiente de corrección cuya sesión empezó con nota de corte 70, y después un administrador sube la nota a 80
+- **WHEN** el corrector cierra la corrección y el resultado queda en 75 %
+- **THEN** el veredicto es «aprobado»
+
+#### Scenario: Sesión anterior al cambio
+- **GIVEN** una sesión sin tiempo ni nota guardados
+- **WHEN** se calcula su plazo o su veredicto
+- **THEN** el sistema usa el tiempo límite y la nota de corte actuales de la prueba
+
+#### Scenario: Reanudar no cambia lo guardado
+- **GIVEN** una sesión en curso con sus valores guardados
+- **WHEN** el candidato la reanuda
+- **THEN** el sistema SHALL NOT volver a copiar los valores de la prueba
+
+### Requirement: Sesiones abandonadas
+El sistema SHALL marcar como `Abandoned` toda sesión `InProgress` sin `ExamResult` cuyo plazo (inicio más el tiempo límite guardado) venció hace más de `Sessions:AbandonAfterHours` horas, 24 por defecto. Un trabajo en segundo plano SHALL revisarlo cada `Sessions:SweepMinutes` minutos, 15 por defecto, y con `AbandonAfterHours` a 0 SHALL desactivarse. Una sesión abandonada SHALL conservar sus respuestas guardadas y SHALL NOT generar resultado. Una sesión que tiene resultado, o que sigue dentro del plazo o de la gracia, SHALL NOT marcarse.
+
+#### Scenario: Una sesión vencida hace más de la gracia
+- **GIVEN** una sesión `InProgress` sin resultado cuyo plazo venció hace 25 horas
+- **WHEN** el trabajo se ejecuta
+- **THEN** la sesión pasa a `Abandoned`
+- **AND** sus `UserAnswer` siguen guardadas y no se crea ningún `ExamResult`
+
+#### Scenario: Una sesión que todavía puede enviar
+- **GIVEN** una sesión `InProgress` cuyo plazo venció hace 2 horas
+- **WHEN** el trabajo se ejecuta
+- **THEN** la sesión sigue `InProgress`, y el candidato que vuelva puede enviarla
+
+#### Scenario: Una sesión en curso dentro de su plazo
+- **GIVEN** una sesión empezada hace 10 minutos de una prueba de 60
+- **WHEN** el trabajo se ejecuta
+- **THEN** la sesión no cambia
+
+#### Scenario: El tiempo guardado manda sobre el de la prueba
+- **GIVEN** una sesión empezada con 60 minutos, y después la prueba editada a 600
+- **WHEN** el trabajo calcula su plazo
+- **THEN** usa los 60 guardados
+
+#### Scenario: Una sesión con resultado no se marca
+- **GIVEN** una sesión `InProgress` con `ExamResult`, por un envío interrumpido, y plazo vencido hace una semana
+- **WHEN** el trabajo se ejecuta
+- **THEN** la sesión no pasa a `Abandoned`
+
+#### Scenario: El trabajo desactivado
+- **GIVEN** `Sessions:AbandonAfterHours` igual a 0
+- **WHEN** arranca la API
+- **THEN** el trabajo no marca ninguna sesión
+
+#### Scenario: Un fallo no tumba la API
+- **GIVEN** un fallo de base de datos durante una revisión
+- **WHEN** el trabajo lo captura
+- **THEN** lo registra en el log y repite la revisión en el siguiente intervalo
+
+### Requirement: Una sesión abandonada no se reanuda ni se escribe
+El sistema SHALL rechazar toda operación sobre una sesión `Abandoned`. La validación del enlace SHALL responder con un mensaje que diga que la prueba se cerró por inactividad y que hay que pedir una invitación nueva, distinto del de una prueba completada. El autoguardado y el envío SHALL responder `409 Conflict` con un mensaje que diga que la prueba se cerró por inactividad. La sesión SHALL NOT figurar entre las pruebas pendientes del alumno.
+
+#### Scenario: Abrir el enlace de una sesión abandonada
+- **GIVEN** una sesión `Abandoned`
+- **WHEN** el candidato solicita `GET /api/exam/validate/{token}`
+- **THEN** el sistema responde `isValid = false` con el mensaje de que la prueba se cerró por inactividad y de que pida una invitación nueva
+- **AND** el mensaje SHALL NOT decir que la prueba ya se completó
+
+#### Scenario: Autoguardar en una sesión abandonada
+- **GIVEN** una sesión `Abandoned`
+- **WHEN** su dueño envía `POST /api/exam/answer/{sessionId}`
+- **THEN** el sistema responde `409` con el mensaje de cierre por inactividad y no escribe nada
+
+#### Scenario: Enviar una sesión abandonada
+- **GIVEN** una sesión `Abandoned` sin resultado
+- **WHEN** su dueño envía `POST /api/exam/submit`
+- **THEN** el sistema responde `409` con el mensaje de cierre por inactividad
+- **AND** no crea ningún `ExamResult`
+
+#### Scenario: El portal del alumno
+- **GIVEN** un alumno con una sesión abandonada
+- **WHEN** consulta `GET /api/student/pending`
+- **THEN** esa prueba no aparece
+
+#### Scenario: Reinvitar tras un abandono
+- **GIVEN** un alumno con una sesión abandonada
+- **WHEN** un administrador le envía de nuevo la misma prueba
+- **THEN** el sistema crea una invitación nueva con su propia sesión al empezar

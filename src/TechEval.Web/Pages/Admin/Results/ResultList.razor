@@ -1,9 +1,13 @@
 @page "/admin/results"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
+@using TechEval.Domain.Common
 @using TechEval.Domain.Enums
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Resultados — TechEval</PageTitle>
 
@@ -13,19 +17,23 @@
         <h1 class="h3 mb-0">Historial global de resultados</h1>
     </div>
 
-    @if (_loading)
+    @if (_firstLoad)
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_stats is null)
+    {
+        <LoadError What="los resultados" OnRetry="LoadAllAsync" />
+    }
     else
     {
-        <!-- KPIs -->
+        <!-- KPIs: salen de todos los resultados, no cambian con los filtros -->
         <div class="row g-3 mb-4">
             <div class="col-6 col-md-3">
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body">
                         <p class="text-muted small mb-1">Total realizados</p>
-                        <p class="h3 fw-bold mb-0">@_all.Count</p>
+                        <p class="h3 fw-bold mb-0">@_stats.Total</p>
                     </div>
                 </div>
             </div>
@@ -33,8 +41,8 @@
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body">
                         <p class="text-muted small mb-1">Aprobados</p>
-                        <p class="h3 fw-bold text-success mb-0">@_passedCount</p>
-                        <p class="text-muted small mb-0">@_passRate% del total</p>
+                        <p class="h3 fw-bold text-success mb-0">@_stats.Passed</p>
+                        <p class="text-muted small mb-0">@_stats.PassRate% del total</p>
                     </div>
                 </div>
             </div>
@@ -42,7 +50,7 @@
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body">
                         <p class="text-muted small mb-1">Reprobados</p>
-                        <p class="h3 fw-bold text-danger mb-0">@(_reviewedCount - _passedCount)</p>
+                        <p class="h3 fw-bold text-danger mb-0">@(_stats.Reviewed - _stats.Passed)</p>
                     </div>
                 </div>
             </div>
@@ -50,20 +58,20 @@
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-body">
                         <p class="text-muted small mb-1">Nota media</p>
-                        <p class="h3 fw-bold mb-0">@_avgScore<span class="fs-6 fw-normal text-muted">%</span></p>
-                        <p class="text-muted small mb-0">sobre @_reviewedCount corregidos</p>
+                        <p class="h3 fw-bold mb-0">@_stats.AverageScore<span class="fs-6 fw-normal text-muted">%</span></p>
+                        <p class="text-muted small mb-0">sobre @_stats.Reviewed corregidos</p>
                     </div>
                 </div>
             </div>
         </div>
 
-        @if (_pendingCount > 0)
+        @if (_stats.Pending > 0)
         {
             <div class="alert alert-warning d-flex align-items-center justify-content-between">
                 <div>
                     <i class="bi bi-pencil-square me-2"></i>
-                    <strong>@_pendingCount</strong>
-                    @(_pendingCount == 1 ? " prueba pendiente" : " pruebas pendientes") de corrección manual.
+                    <strong>@_stats.Pending</strong>
+                    @(_stats.Pending == 1 ? " prueba pendiente" : " pruebas pendientes") de corrección manual.
                     No se contabilizan en los indicadores de arriba.
                 </div>
                 <a href="/admin/results/pending" class="btn btn-warning btn-sm">Ir a la cola</a>
@@ -77,22 +85,21 @@
                     <div class="col-md-3">
                         <label class="form-label small fw-semibold mb-1">Candidato / Email</label>
                         <input class="form-control form-control-sm" placeholder="Buscar nombre o email..."
-                               value="@_fSearch"
-                               @oninput="e => { _fSearch = e.Value?.ToString() ?? string.Empty; ApplyFilter(); }" />
+                               value="@_fSearch" @oninput="OnSearchInput" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small fw-semibold mb-1">Prueba</label>
-                        <select class="form-select form-select-sm" @bind="_fExamTitle" @bind:after="ApplyFilter">
+                        <select class="form-select form-select-sm" @bind="_fExamId" @bind:after="OnFilterChanged">
                             <option value="">Todas las pruebas</option>
-                            @foreach (var t in _examTitles)
+                            @foreach (var o in _examOptions)
                             {
-                                <option value="@t">@t</option>
+                                <option value="@o.Id">@o.Title</option>
                             }
                         </select>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small fw-semibold mb-1">Resultado</label>
-                        <select class="form-select form-select-sm" @bind="_fPassed" @bind:after="ApplyFilter">
+                        <select class="form-select form-select-sm" @bind="_fPassed" @bind:after="OnFilterChanged">
                             <option value="">Todos</option>
                             <option value="true">Aprobado</option>
                             <option value="false">Reprobado</option>
@@ -102,213 +109,280 @@
                     <div class="col-6 col-md-2">
                         <label class="form-label small fw-semibold mb-1">Nota mínima (%)</label>
                         <input type="number" class="form-control form-control-sm" min="0" max="100"
-                               @bind="_fScoreMin" @bind:after="ApplyFilter" />
+                               @bind="_fScoreMin" @bind:after="OnFilterChanged" />
                     </div>
                     <div class="col-6 col-md-2">
                         <label class="form-label small fw-semibold mb-1">Nota máxima (%)</label>
                         <input type="number" class="form-control form-control-sm" min="0" max="100"
-                               @bind="_fScoreMax" @bind:after="ApplyFilter" />
+                               @bind="_fScoreMax" @bind:after="OnFilterChanged" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small fw-semibold mb-1">Fecha desde</label>
                         <input type="date" class="form-control form-control-sm"
-                               @bind="_fDateFrom" @bind:after="ApplyFilter" />
+                               @bind="_fDateFrom" @bind:after="OnFilterChanged" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small fw-semibold mb-1">Fecha hasta</label>
                         <input type="date" class="form-control form-control-sm"
-                               @bind="_fDateTo" @bind:after="ApplyFilter" />
+                               @bind="_fDateTo" @bind:after="OnFilterChanged" />
                     </div>
                     <div class="col-md-2 d-flex align-items-end">
                         <button class="btn btn-outline-secondary btn-sm w-100" @onclick="ClearFilters">
                             <i class="bi bi-x-circle me-1"></i>Limpiar
                         </button>
                     </div>
-                    <div class="col-md-4 d-flex align-items-end">
-                        <span class="text-muted small">
-                            Mostrando <strong>@_filtered.Count</strong> de @_all.Count resultados
-                        </span>
-                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Tabla -->
-        <div class="card border-0 shadow-sm">
-            <div class="card-body p-0">
-                @if (!_filtered.Any())
-                {
-                    <div class="text-center text-muted py-5">
-                        <i class="bi bi-funnel fs-1 d-block mb-2"></i>
-                        No hay resultados que coincidan con los filtros.
-                    </div>
-                }
-                else
-                {
-                    <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th class="ps-3">#</th>
-                                    <th>Candidato</th>
-                                    <th>Prueba</th>
-                                    <th style="min-width:160px;">Puntuación</th>
-                                    <th>Resultado</th>
-                                    <th>Fecha</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var (r, i) in _filtered.Select((r, i) => (r, i + 1)))
-                                {
+        @if (_rowsFailed)
+        {
+            <LoadError What="los resultados" OnRetry="LoadRowsAsync" />
+        }
+        else
+        {
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-0 @(_busy ? "opacity-50" : "")" aria-busy="@(_busy ? "true" : "false")">
+                    @if (!_rows.Any())
+                    {
+                        <div class="text-center text-muted py-5">
+                            <i class="bi bi-funnel fs-1 d-block mb-2"></i>
+                            No hay resultados que coincidan con los filtros.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
                                     <tr>
-                                        <td class="ps-3 text-muted small">@i</td>
-                                        <td>
-                                            <div class="fw-semibold">@r.CandidateName</div>
-                                            <div class="text-muted small">@r.CandidateEmail</div>
-                                        </td>
-                                        <td>
-                                            <a href="/admin/results/prueba/@r.ExamId"
-                                               class="text-decoration-none fw-semibold"
-                                               title="Ver estadísticas de esta prueba">
-                                                @r.ExamTitle
-                                                <i class="bi bi-box-arrow-up-right ms-1 small text-muted"></i>
-                                            </a>
-                                        </td>
-                                        <td>
-                                            @if (r.Status == ExamResultStatus.PendingReview)
-                                            {
-                                                <span class="text-muted small">Sin corregir</span>
-                                            }
-                                            else
-                                            {
-                                                <div class="d-flex align-items-center gap-2">
-                                                    <div class="progress flex-grow-1" style="height:6px;">
-                                                        <div class="progress-bar @(r.Passed == true ? "bg-success" : "bg-danger")"
-                                                             style="width:@r.ScorePercentage%"></div>
-                                                    </div>
-                                                    <span class="small fw-bold" style="min-width:3rem;">@r.ScorePercentage%</span>
-                                                </div>
-                                            }
-                                        </td>
-                                        <td>
-                                            @if (r.Status == ExamResultStatus.PendingReview)
-                                            {
-                                                <a href="/admin/results/pending" class="badge bg-secondary text-decoration-none">
-                                                    <i class="bi bi-hourglass-split me-1"></i> Pendiente de corrección
-                                                </a>
-                                            }
-                                            else
-                                            {
-                                                <span class="badge @(r.Passed == true ? "bg-success" : "bg-danger")">
-                                                    @(r.Passed == true ? "Aprobado" : "Reprobado")
-                                                </span>
-                                            }
-                                        </td>
-                                        <td class="text-muted small text-nowrap">
-                                            @r.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy")<br />
-                                            <span class="text-muted" style="font-size:.78rem;">
-                                                @r.CompletedAt.ToLocalTime().ToString("HH:mm")
-                                            </span>
-                                        </td>
-                                        <td class="text-end pe-3">
-                                            <a href="/admin/results/@r.Id" class="btn btn-sm btn-outline-primary">
-                                                Ver detalle
-                                            </a>
-                                        </td>
+                                        <th class="ps-3">#</th>
+                                        <SortHeader Key="candidate" State="_sort" OnSort="SortBy">Candidato</SortHeader>
+                                        <SortHeader Key="exam" State="_sort" OnSort="SortBy">Prueba</SortHeader>
+                                        <SortHeader Key="score" State="_sort" OnSort="SortBy" Style="min-width:160px;">Puntuación</SortHeader>
+                                        <SortHeader Key="outcome" State="_sort" OnSort="SortBy">Resultado</SortHeader>
+                                        <SortHeader Key="date" State="_sort" OnSort="SortBy">Fecha</SortHeader>
+                                        <th></th>
                                     </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-                }
+                                </thead>
+                                <tbody>
+                                    @foreach (var (r, i) in _rows.Select((r, i) => (r, _page.FirstRow + i)))
+                                    {
+                                        <tr>
+                                            <td class="ps-3 text-muted small">@i</td>
+                                            <td>
+                                                <div class="fw-semibold">@r.CandidateName</div>
+                                                <div class="text-muted small">@r.CandidateEmail</div>
+                                            </td>
+                                            <td>
+                                                <a href="/admin/results/prueba/@r.ExamId"
+                                                   class="text-decoration-none fw-semibold"
+                                                   title="Ver estadísticas de esta prueba">
+                                                    @r.ExamTitle
+                                                    <i class="bi bi-box-arrow-up-right ms-1 small text-muted"></i>
+                                                </a>
+                                            </td>
+                                            <td>
+                                                @if (r.Status == ExamResultStatus.PendingReview)
+                                                {
+                                                    <span class="text-muted small">Sin corregir</span>
+                                                }
+                                                else
+                                                {
+                                                    <div class="d-flex align-items-center gap-2">
+                                                        <div class="progress flex-grow-1" style="height:6px;">
+                                                            <div class="progress-bar @(r.Passed == true ? "bg-success" : "bg-danger")"
+                                                                 style="width:@r.ScorePercentage%"></div>
+                                                        </div>
+                                                        <span class="small fw-bold" style="min-width:3rem;">@r.ScorePercentage%</span>
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (r.Status == ExamResultStatus.PendingReview)
+                                                {
+                                                    <a href="/admin/results/pending" class="badge bg-secondary text-decoration-none">
+                                                        <i class="bi bi-hourglass-split me-1"></i> Pendiente de corrección
+                                                    </a>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge @(r.Passed == true ? "bg-success" : "bg-danger")">
+                                                        @(r.Passed == true ? "Aprobado" : "Reprobado")
+                                                    </span>
+                                                }
+                                            </td>
+                                            <td class="text-muted small text-nowrap">
+                                                @r.CompletedAt.ToLocalTime().ToString("dd/MM/yyyy")<br />
+                                                <span class="text-muted" style="font-size:.78rem;">
+                                                    @r.CompletedAt.ToLocalTime().ToString("HH:mm")
+                                                </span>
+                                            </td>
+                                            <td class="text-end pe-3">
+                                                <a href="/admin/results/@r.Id" class="btn btn-sm btn-outline-primary">
+                                                    Ver detalle
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
             </div>
-        </div>
+
+            <Pager State="_page" Noun="resultados" OnPage="GoToPageAsync" OnPageSize="SetPageSizeAsync" />
+        }
     }
 </div>
 
 @code {
-    private List<ExamResultSummaryDto> _all = new();
-    private List<ExamResultSummaryDto> _filtered = new();
-    private List<string> _examTitles = new();
-    private bool _loading = true;
+    private ResultStatsDto? _stats;
+    private List<ExamResultSummaryDto> _rows = new();
+    private List<ExamOptionDto> _examOptions = new();
+    private bool _firstLoad = true, _busy, _rowsFailed;
 
     // Filtros
     private string _fSearch = string.Empty;
-    private string _fExamTitle = string.Empty;
+    private int? _fExamId;
     private string _fPassed = string.Empty;
     private int? _fScoreMin;
     private int? _fScoreMax;
     private DateTime? _fDateFrom;
     private DateTime? _fDateTo;
 
-    // KPIs
-    private int _passedCount;
-    private int _reviewedCount;
-    private int _pendingCount;
-    private int _passRate;
-    private decimal _avgScore;
+    // Filtros, orden y página se conservan al abrir un detalle y volver.
+    private const string StateKey = "results";
+    private readonly SortState _sort = new();
+    private readonly PageState _page = new();
+    private readonly ListLoader _loader = new();
+
+    private sealed record Saved(
+        string Search, int? ExamId, string Passed, int? Min, int? Max,
+        DateTime? From, DateTime? To, SortState Sort, int Page, int PageSize);
+
+    public void Dispose()
+    {
+        Lists.Set(StateKey, new Saved(
+            _fSearch, _fExamId, _fPassed, _fScoreMin, _fScoreMax, _fDateFrom, _fDateTo,
+            _sort.Clone(), _page.Page, _page.PageSize));
+        _loader.Dispose();
+    }
 
     protected override async Task OnInitializedAsync()
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
 
-        _all = await Api.GetResultsAsync() ?? new();
-        _examTitles = _all.Select(r => r.ExamTitle).Distinct().OrderBy(t => t).ToList();
+        if (Lists.Get<Saved>(StateKey) is { } saved)
+        {
+            _fSearch = saved.Search; _fExamId = saved.ExamId; _fPassed = saved.Passed;
+            _fScoreMin = saved.Min; _fScoreMax = saved.Max; _fDateFrom = saved.From; _fDateTo = saved.To;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+            _page.Page = saved.Page; _page.PageSize = saved.PageSize;
+        }
 
-        ComputeKpis();
-        _filtered = _all.ToList();
-        _loading = false;
+        await LoadAllAsync();
     }
 
-    private bool MatchesOutcome(ExamResultSummaryDto r) => _fPassed switch
+    // Unos resultados que no cargan no son cero resultados: con la API caída, las cifras
+    // decían «0 resultados» como si no se hubiera enviado ninguna prueba.
+    private async Task LoadAllAsync()
     {
-        "" or null => true,
-        "pending" => r.Status == ExamResultStatus.PendingReview,
-        "true" => r.Status == ExamResultStatus.Reviewed && r.Passed == true,
-        "false" => r.Status == ExamResultStatus.Reviewed && r.Passed == false,
-        _ => true
+        _firstLoad = true;
+        var options = Api.GetExamOptionsAsync();
+        var stats = Api.GetResultStatsAsync();
+        await LoadRowsAsync();
+        _stats = await stats;
+        _examOptions = await options ?? new();
+        _firstLoad = false;
+    }
+
+    private async Task LoadRowsAsync()
+    {
+        _busy = true;
+        var (from, to) = DayRange.ToUtc(_fDateFrom, _fDateTo, TimeZoneInfo.Local);
+        var filter = new ResultFilter(_fExamId, OutcomeValue(), _fScoreMin, _fScoreMax, from, to);
+
+        // Si la página guardada ya no existe, se pide la última una sola vez.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var again = false;
+            var query = _page.ToQuery(_fSearch, _sort);
+            var applied = await _loader.LoadAsync(() => Api.GetResultsPageAsync(query, filter), r =>
+            {
+                _rowsFailed = r is null;
+                if (r is null) return;
+
+                var beyond = _page.IsBeyondEnd(r);
+                _page.Apply(r);
+                if (beyond) { _page.GoToLast(); again = true; return; }
+                _rows = r.Items.ToList();
+            });
+
+            // Una respuesta vieja la sustituye la de la carga más reciente, que ya apaga el estado.
+            if (!applied) return;
+            if (!again) break;
+        }
+
+        _busy = false;
+        StateHasChanged();
+    }
+
+    private string? OutcomeValue() => _fPassed switch
+    {
+        "true" => "passed",
+        "false" => "failed",
+        "pending" => "pending",
+        _ => null
     };
 
-    private void ComputeKpis()
+    // Buscar, filtrar u ordenar vuelve a la primera página.
+    private async Task OnFilterChanged()
     {
-        // Solo sobre lo corregido: un pendiente lleva puntuación parcial y falsearía
-        // tanto la media como la proporción de aprobados.
-        var reviewed = _all.Where(r => r.Status == ExamResultStatus.Reviewed).ToList();
-        _reviewedCount = reviewed.Count;
-        _pendingCount = _all.Count - reviewed.Count;
-        _passedCount = reviewed.Count(r => r.Passed == true);
-        _passRate = reviewed.Count > 0 ? (int)Math.Round((double)_passedCount / reviewed.Count * 100) : 0;
-        _avgScore = reviewed.Count > 0 ? Math.Round(reviewed.Average(r => r.ScorePercentage), 1) : 0;
+        _page.Reset();
+        await LoadRowsAsync();
     }
 
-    private void ApplyFilter()
+    private Task OnSearchInput(ChangeEventArgs e)
     {
-        _filtered = _all.Where(r =>
-            (string.IsNullOrEmpty(_fSearch) ||
-                r.CandidateName.Contains(_fSearch, StringComparison.OrdinalIgnoreCase) ||
-                r.CandidateEmail.Contains(_fSearch, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrEmpty(_fExamTitle) || r.ExamTitle == _fExamTitle) &&
-            MatchesOutcome(r) &&
-            // Los pendientes no tienen nota definitiva que comparar: quedan fuera
-            // en cuanto se filtra por rango de nota.
-            (_fScoreMin is null || (r.Status == ExamResultStatus.Reviewed && r.ScorePercentage >= _fScoreMin)) &&
-            (_fScoreMax is null || (r.Status == ExamResultStatus.Reviewed && r.ScorePercentage <= _fScoreMax)) &&
-            (_fDateFrom is null || r.CompletedAt.ToLocalTime().Date >= _fDateFrom.Value.Date) &&
-            (_fDateTo is null || r.CompletedAt.ToLocalTime().Date <= _fDateTo.Value.Date)
-        ).ToList();
+        _fSearch = e.Value?.ToString() ?? string.Empty;
+        _page.Reset();
+        _ = _loader.DebounceAsync(LoadRowsAsync);
+        return Task.CompletedTask;
     }
 
-    private void ClearFilters()
+    private async Task SortBy(string key)
+    {
+        _sort.Toggle(key);
+        _page.Reset();
+        await LoadRowsAsync();
+    }
+
+    private async Task GoToPageAsync(int page)
+    {
+        _page.Page = page;
+        await LoadRowsAsync();
+    }
+
+    private async Task SetPageSizeAsync(int size)
+    {
+        _page.SetPageSize(size);
+        await LoadRowsAsync();
+    }
+
+    private async Task ClearFilters()
     {
         _fSearch = string.Empty;
-        _fExamTitle = string.Empty;
+        _fExamId = null;
         _fPassed = string.Empty;
         _fScoreMin = null;
         _fScoreMax = null;
         _fDateFrom = null;
         _fDateTo = null;
-        _filtered = _all.ToList();
+        _page.Reset();
+        await LoadRowsAsync();
     }
 }

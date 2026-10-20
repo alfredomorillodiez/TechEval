@@ -1,0 +1,19 @@
+@* Aviso de que un listado no se pudo cargar. Va en lugar del mensaje de «vacío»: una lista que
+   falla no está vacía, y decir que lo está (o que «todo está corregido») es afirmar un estado
+   del sistema que no se ha podido comprobar. *@
+<div class="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-2" role="alert">
+    <div>
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        No se pudo cargar @What. Comprueba la conexión e inténtalo de nuevo.
+    </div>
+    <button class="btn btn-sm btn-warning" @onclick="OnRetry">
+        <i class="bi bi-arrow-clockwise me-1"></i> Reintentar
+    </button>
+</div>
+
+@code {
+    /// <summary>Lo que no se cargó, en minúsculas y con artículo: «las correcciones pendientes».</summary>
+    [Parameter, EditorRequired] public string What { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public EventCallback OnRetry { get; set; }
+}

@@ -1,8 +1,11 @@
 @page "/admin/results/pending"
+@implements IDisposable
+@using TechEval.Application
 @using TechEval.Application.DTOs
 @inject ApiService Api
 @inject NavigationManager Nav
 @inject AuthStateService Auth
+@inject ListState Lists
 
 <PageTitle>Correcciones pendientes — TechEval</PageTitle>
 
@@ -22,6 +25,10 @@
     {
         <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
     }
+    else if (_loadFailed)
+    {
+        <LoadError What="las correcciones pendientes" OnRetry="LoadAsync" />
+    }
     else if (_pending.Count == 0)
     {
         <div class="card border-0 shadow-sm">
@@ -37,24 +44,34 @@
     else
     {
         <p class="text-muted small mb-3">
-            Ordenadas por antigüedad: arriba las que llevan más tiempo esperando.
+            Por defecto, ordenadas por antigüedad: arriba las que llevan más tiempo esperando.
         </p>
+        <div class="row g-2 mb-3 align-items-center">
+            <div class="col-md-6">
+                <input class="form-control" type="search" placeholder="Buscar por candidato, correo o prueba…"
+                       aria-label="Buscar correcciones pendientes" value="@_search"
+                       @oninput="e => _search = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="col-md-auto text-muted small">
+                Mostrando <strong>@Displayed.Count</strong> de @_pending.Count
+            </div>
+        </div>
         <div class="card border-0 shadow-sm">
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-hover mb-0 align-middle">
                         <thead class="table-light">
                             <tr>
-                                <th class="ps-3">Candidato</th>
-                                <th>Prueba</th>
-                                <th>Enviada</th>
-                                <th>Esperando</th>
-                                <th>Por corregir</th>
+                                <SortHeader Key="candidate" State="_sort" OnSort="SortBy" Class="ps-3">Candidato</SortHeader>
+                                <SortHeader Key="exam" State="_sort" OnSort="SortBy">Prueba</SortHeader>
+                                <SortHeader Key="sent" State="_sort" OnSort="SortBy">Enviada</SortHeader>
+                                <SortHeader Key="waiting" State="_sort" OnSort="SortBy">Esperando</SortHeader>
+                                <SortHeader Key="open" State="_sort" OnSort="SortBy">Por corregir</SortHeader>
                                 <th class="text-end pe-3"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var p in _pending)
+                            @foreach (var p in Displayed)
                             {
                                 <tr>
                                     <td class="ps-3">
@@ -111,8 +128,35 @@
 </div>
 
 @code {
-    private bool _loading = true;
+    private bool _loading = true, _loadFailed;
     private List<PendingReviewSummaryDto> _pending = new();
+
+    // Búsqueda y orden se conservan al abrir una corrección y volver. Sin orden elegido, el de la API (antigüedad).
+    private const string StateKey = "pending-reviews";
+    private string _search = string.Empty;
+    private readonly SortState _sort = new();
+    private sealed record Saved(string Search, SortState Sort);
+
+    private static readonly IReadOnlyDictionary<string, Func<PendingReviewSummaryDto, object?>> Columns =
+        new Dictionary<string, Func<PendingReviewSummaryDto, object?>>
+        {
+            ["candidate"] = p => p.CandidateName,
+            ["exam"] = p => p.ExamTitle,
+            ["sent"] = p => p.CompletedAt,
+            ["waiting"] = p => p.DaysWaiting,
+            ["open"] = p => p.OpenAnswerCount
+        };
+
+    private List<PendingReviewSummaryDto> Displayed => ListSort.Apply(
+            _pending.Where(p => string.IsNullOrWhiteSpace(_search)
+                || p.CandidateName.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                || p.CandidateEmail.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)
+                || p.ExamTitle.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)),
+            _sort, Columns).ToList();
+
+    private void SortBy(string key) => _sort.Toggle(key);
+
+    public void Dispose() => Lists.Set(StateKey, new Saved(_search, _sort.Clone()));
     private int? _confirmRelease;
 
     // Quien tenía la reserva, si sigue en la pantalla, recibe un 409 al enviar solo si otra
@@ -121,7 +165,18 @@
     {
         _confirmRelease = null;
         await Api.ReleaseReviewReservationAsync(resultId);
-        _pending = await Api.GetPendingReviewsAsync() ?? new();
+        await LoadAsync();
+    }
+
+    // Una cola que no carga no está vacía: con la API caída, esta pantalla decía que todas
+    // las pruebas con abiertas estaban corregidas.
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var pending = await Api.GetPendingReviewsAsync();
+        _loadFailed = pending is null;
+        if (pending is not null) _pending = pending;
+        _loading = false;
     }
 
     protected override async Task OnInitializedAsync()
@@ -133,8 +188,13 @@
             return;
         }
 
-        _pending = await Api.GetPendingReviewsAsync() ?? new();
-        _loading = false;
+        if (Lists.Get<Saved>(StateKey) is { } saved)
+        {
+            _search = saved.Search;
+            _sort.Key = saved.Sort.Key; _sort.Descending = saved.Sort.Descending;
+        }
+
+        await LoadAsync();
     }
 
     private static string WaitClass(int days) => days switch

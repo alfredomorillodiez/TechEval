@@ -3,14 +3,25 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TechEval.Application.DTOs;
+using TechEval.Domain.Common;
 using TechEval.Domain.Enums;
 
 namespace TechEval.Web.Services;
+
+/// <summary>Resultado de guardar una respuesta. Ver `ApiService.SaveAnswerAsync`.</summary>
+public enum SaveOutcome { Saved, Rejected, Failed }
+
+/// <summary>Resultado de renovar una reserva. Ver `ApiService.RenewReviewReservationAsync`.</summary>
+public enum ReservationRenewal { Renewed, Lost, Unreachable }
 
 public class ApiService
 {
     private readonly HttpClient _http;
     private readonly ILogger<ApiService> _logger;
+
+    // Lo que ve la persona cuando la petición no llegó (código 0). El texto de la excepción
+    // es del navegador («Failed to fetch») y no dice nada útil.
+    private const string NetworkError = "No se pudo conectar con el servidor. Comprueba tu conexión.";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -32,55 +43,70 @@ public class ApiService
         => _http.DefaultRequestHeaders.Authorization = null;
 
     // Auth
-    public Task<AuthResultDto?> LoginAsync(LoginDto dto)
-        => PostAsync<LoginDto, AuthResultDto>("api/auth/login", dto);
+    /// <summary>
+    /// Con el código y el mensaje: un 401 (credenciales incorrectas) no es lo mismo que un 429
+    /// (demasiados intentos), un fallo de red (código 0) o un error del servidor.
+    /// </summary>
+    public Task<(AuthResultDto? Result, int StatusCode, string? Error)> LoginAsync(LoginDto dto)
+        => SendAsync<AuthResultDto>(HttpMethod.Post, "api/auth/login", dto);
 
     // Categories
-    public Task<List<CategoryDto>?> GetCategoriesAsync()
-        => GetAsync<List<CategoryDto>>("api/categories");
+    /// <summary>Por defecto solo las activas; la pantalla de categorías y el filtro de preguntas piden todas.</summary>
+    public Task<List<CategoryDto>?> GetCategoriesAsync(bool includeInactive = false)
+        => GetAsync<List<CategoryDto>>(includeInactive ? "api/categories?includeInactive=true" : "api/categories");
 
-    public Task<CategoryDto?> CreateCategoryAsync(CreateCategoryDto dto)
-        => PostAsync<CreateCategoryDto, CategoryDto>("api/categories", dto);
+    // Con el código y el mensaje: un nombre repetido (409) o inválido (400) se explica en el diálogo.
+    public Task<(CategoryDto? Result, int StatusCode, string? Error)> CreateCategoryAsync(CreateCategoryDto dto)
+        => SendAsync<CategoryDto>(HttpMethod.Post, "api/categories", dto);
 
-    public Task<CategoryDto?> UpdateCategoryAsync(int id, UpdateCategoryDto dto)
-        => PutAsync<UpdateCategoryDto, CategoryDto>($"api/categories/{id}", dto);
+    public Task<(CategoryDto? Result, int StatusCode, string? Error)> UpdateCategoryAsync(int id, UpdateCategoryDto dto)
+        => SendAsync<CategoryDto>(HttpMethod.Put, $"api/categories/{id}", dto);
 
     public Task<bool> DeleteCategoryAsync(int id)
         => DeleteAsync($"api/categories/{id}");
 
     // Questions
-    public Task<List<QuestionSummaryDto>?> GetQuestionsAsync(
-        int? categoryId = null, DifficultyLevel? difficulty = null, QuestionType? type = null)
-    {
-        var q = new List<string>();
-        if (categoryId.HasValue) q.Add($"categoryId={categoryId}");
-        if (difficulty.HasValue) q.Add($"difficulty={difficulty}");
-        if (type.HasValue) q.Add($"type={type}");
-        var qs = q.Any() ? "?" + string.Join("&", q) : "";
-        return GetAsync<List<QuestionSummaryDto>>($"api/questions{qs}");
-    }
+    public Task<PagedResult<QuestionSummaryDto>?> GetQuestionsPageAsync(PageQuery page, QuestionFilter filter)
+        => GetAsync<PagedResult<QuestionSummaryDto>>("api/questions" + Qs(page,
+            ("categoryId", filter.CategoryId), ("difficulty", filter.Difficulty),
+            ("type", filter.Type), ("active", filter.Active)));
+
+    /// <summary>
+    /// Todo el banco, pidiendo páginas de 100. Para la composición manual de una prueba, que
+    /// necesita ofrecerlas todas. Null si alguna página falla: una lista incompleta engañaría.
+    /// </summary>
+    public Task<List<QuestionSummaryDto>?> GetAllQuestionsAsync(bool? active = null)
+        => GetAllPagesAsync(p => GetQuestionsPageAsync(p, new QuestionFilter(Active: active)));
 
     public Task<QuestionDto?> GetQuestionAsync(int id)
         => GetAsync<QuestionDto>($"api/questions/{id}");
 
-    public Task<QuestionDto?> CreateQuestionAsync(CreateQuestionDto dto)
-        => PostAsync<CreateQuestionDto, QuestionDto>("api/questions", dto);
+    // Con el código y el mensaje: el formulario tiene que decir por qué falla un alta o una
+    // edición, y un 409 (la pregunta ya tiene respuestas) no es un fallo de red.
+    public Task<(QuestionDto? Result, int StatusCode, string? Error)> CreateQuestionAsync(CreateQuestionDto dto)
+        => SendAsync<QuestionDto>(HttpMethod.Post, "api/questions", dto);
 
-    public Task<QuestionDto?> UpdateQuestionAsync(int id, UpdateQuestionDto dto)
-        => PutAsync<UpdateQuestionDto, QuestionDto>($"api/questions/{id}", dto);
+    public Task<(QuestionDto? Result, int StatusCode, string? Error)> UpdateQuestionAsync(int id, UpdateQuestionDto dto)
+        => SendAsync<QuestionDto>(HttpMethod.Put, $"api/questions/{id}", dto);
 
     public Task<bool> DeleteQuestionAsync(int id)
         => DeleteAsync($"api/questions/{id}");
 
     // Exams
-    public Task<List<ExamSummaryDto>?> GetExamsAsync()
-        => GetAsync<List<ExamSummaryDto>>("api/exams");
+    public Task<PagedResult<ExamSummaryDto>?> GetExamsPageAsync(PageQuery page, bool? active = null)
+        => GetAsync<PagedResult<ExamSummaryDto>>("api/exams" + Qs(page, ("active", active)));
+
+    /// <summary>Identificador y título de todas las pruebas, para los desplegables.</summary>
+    public Task<List<ExamOptionDto>?> GetExamOptionsAsync()
+        => GetAsync<List<ExamOptionDto>>("api/exams/options");
 
     public Task<ExamDto?> GetExamAsync(int id)
         => GetAsync<ExamDto>($"api/exams/{id}");
 
-    public Task<ExamDto?> CreateExamAsync(CreateExamDto dto)
-        => PostAsync<CreateExamDto, ExamDto>("api/exams", dto);
+    // Con el código y el mensaje: una prueba rechazada por validación (0 minutos, sin preguntas)
+    // tiene que decir qué falla, no «Error al crear la prueba».
+    public Task<(ExamDto? Result, int StatusCode, string? Error)> CreateExamAsync(CreateExamDto dto)
+        => SendAsync<ExamDto>(HttpMethod.Post, "api/exams", dto);
 
     /// <summary>Con el código y el mensaje: un reparto rechazado dice qué nivel no alcanza.</summary>
     public Task<(ExamDto? Result, int StatusCode, string? Error)> GenerateExamAsync(GenerateExamDto dto)
@@ -93,33 +119,43 @@ public class ApiService
         return GetAsync<List<LevelCountDto>>($"api/questions/availability{qs}");
     }
 
-    public Task<ExamDto?> UpdateExamAsync(int id, UpdateExamDto dto)
-        => PutAsync<UpdateExamDto, ExamDto>($"api/exams/{id}", dto);
+    public Task<(ExamDto? Result, int StatusCode, string? Error)> UpdateExamAsync(int id, UpdateExamDto dto)
+        => SendAsync<ExamDto>(HttpMethod.Put, $"api/exams/{id}", dto);
 
     public Task<bool> DeleteExamAsync(int id)
         => DeleteAsync($"api/exams/{id}");
 
-    public async Task<string?> SendExamAsync(SendExamDto dto)
+    private sealed record SendTokenResponse(string Token);
+
+    /// <summary>
+    /// Con el código y el mensaje: un envío rechazado (prueba desactivada, correo inválido) tiene
+    /// que decir por qué, y no «verifica la configuración de email».
+    /// </summary>
+    public async Task<(string? Token, int StatusCode, string? Error)> SendExamAsync(SendExamDto dto)
     {
-        var response = await _http.PostAsJsonAsync("api/exams/send", dto, JsonOptions);
-        if (!response.IsSuccessStatusCode) return null;
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("token").GetString();
+        var (result, status, error) = await SendAsync<SendTokenResponse>(HttpMethod.Post, "api/exams/send", dto);
+        return (result?.Token, status, error);
     }
 
-    public async Task<BulkSendResultDto?> SendExamBulkAsync(BulkSendExamDto dto)
-    {
-        var response = await _http.PostAsJsonAsync("api/exams/send-bulk", dto, JsonOptions);
-        if (!response.IsSuccessStatusCode) return null;
-        return await response.Content.ReadFromJsonAsync<BulkSendResultDto>(JsonOptions);
-    }
+    public Task<(BulkSendResultDto? Result, int StatusCode, string? Error)> SendExamBulkAsync(BulkSendExamDto dto)
+        => SendAsync<BulkSendResultDto>(HttpMethod.Post, "api/exams/send-bulk", dto);
 
     // Results
-    public Task<List<ExamResultSummaryDto>?> GetResultsAsync()
-        => GetAsync<List<ExamResultSummaryDto>>("api/results");
+    public Task<PagedResult<ExamResultSummaryDto>?> GetResultsPageAsync(PageQuery page, ResultFilter filter)
+        => GetAsync<PagedResult<ExamResultSummaryDto>>("api/results" + Qs(page,
+            ("examId", filter.ExamId), ("outcome", filter.Outcome),
+            ("scoreMin", filter.ScoreMin), ("scoreMax", filter.ScoreMax),
+            ("from", filter.From), ("to", filter.To)));
 
-    public Task<List<ExamResultSummaryDto>?> GetResultsByExamAsync(int examId)
-        => GetAsync<List<ExamResultSummaryDto>>($"api/results/exam/{examId}");
+    public Task<PagedResult<ExamResultSummaryDto>?> GetResultsByExamPageAsync(
+        int examId, PageQuery page, ResultFilter filter)
+        => GetAsync<PagedResult<ExamResultSummaryDto>>($"api/results/exam/{examId}" + Qs(page,
+            ("outcome", filter.Outcome), ("scoreMin", filter.ScoreMin), ("scoreMax", filter.ScoreMax),
+            ("from", filter.From), ("to", filter.To)));
+
+    /// <summary>Cifras de todos los resultados o de los de una prueba. No dependen de ningún filtro.</summary>
+    public Task<ResultStatsDto?> GetResultStatsAsync(int? examId = null)
+        => GetAsync<ResultStatsDto>("api/results/stats" + Qs(null, ("examId", examId)));
 
     public Task<ExamResultDto?> GetResultDetailAsync(int id)
         => GetAsync<ExamResultDto>($"api/results/{id}");
@@ -141,9 +177,29 @@ public class ApiService
     public Task<ExamSessionInfoDto?> StartSessionAsync(string token)
         => PostAsync<object, ExamSessionInfoDto>($"api/exam/start/{token}", new { });
 
-    public async Task SaveAnswerAsync(int sessionId, SubmitAnswerDto dto)
+    /// <summary>
+    /// Guarda una respuesta y dice qué pasó, para que la pantalla pueda mostrarlo. Nunca lanza:
+    /// un fallo de red no debe romper la prueba. Un rechazo que un reintento no cambia (400,
+    /// 403, 409) es `Rejected`; todo lo demás (red, 429, 5xx) es `Failed` y se reintenta.
+    /// </summary>
+    public async Task<SaveOutcome> SaveAnswerAsync(int sessionId, SubmitAnswerDto dto)
     {
-        await _http.PostAsJsonAsync($"api/exam/answer/{sessionId}", dto, JsonOptions);
+        try
+        {
+            var response = await _http.PostAsJsonAsync($"api/exam/answer/{sessionId}", dto, JsonOptions);
+            if (response.IsSuccessStatusCode) return SaveOutcome.Saved;
+
+            return response.StatusCode is System.Net.HttpStatusCode.BadRequest
+                    or System.Net.HttpStatusCode.Forbidden
+                    or System.Net.HttpStatusCode.Conflict
+                ? SaveOutcome.Rejected
+                : SaveOutcome.Failed;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "No se pudo guardar una respuesta; se reintentará.");
+            return SaveOutcome.Failed;
+        }
     }
 
     /// <summary>
@@ -172,8 +228,12 @@ public class ApiService
     public Task<IntegrityReportDto?> GetIntegrityReportAsync(int resultId)
         => GetAsync<IntegrityReportDto>($"api/results/{resultId}/integrity");
 
-    public Task<ExamSubmissionReceiptDto?> SubmitExamAsync(SubmitExamDto dto)
-        => PostAsync<SubmitExamDto, ExamSubmissionReceiptDto>("api/exam/submit", dto);
+    /// <summary>
+    /// Con el código y el mensaje: un envío rechazado (por ejemplo, una respuesta demasiado
+    /// larga) tiene que decir por qué, y un fallo de red no puede parecer un envío hecho.
+    /// </summary>
+    public Task<(ExamSubmissionReceiptDto? Result, int StatusCode, string? Error)> SubmitExamAsync(SubmitExamDto dto)
+        => SendAsync<ExamSubmissionReceiptDto>(HttpMethod.Post, "api/exam/submit", dto);
 
     // Corrección manual de preguntas abiertas
     public Task<List<PendingReviewSummaryDto>?> GetPendingReviewsAsync()
@@ -186,8 +246,19 @@ public class ApiService
     public Task<(PendingReviewDetailDto? Result, int StatusCode, string? Error)> GetReviewDetailAsync(int resultId)
         => SendAsync<PendingReviewDetailDto>(HttpMethod.Get, $"api/review/{resultId}", null);
 
-    public async Task<bool> RenewReviewReservationAsync(int resultId)
-        => (await SendAsync<object>(HttpMethod.Post, $"api/review/{resultId}/reservation", null)).StatusCode == 200;
+    public async Task<ReservationRenewal> RenewReviewReservationAsync(int resultId)
+        => ToRenewal((await SendAsync<object>(HttpMethod.Post, $"api/review/{resultId}/reservation", null)).StatusCode);
+
+    /// <summary>
+    /// Una reserva perdida (otra persona la tiene, o el resultado ya no está) no es lo mismo que
+    /// una renovación que no llegó: la primera cierra el formulario, la segunda no puede tocarlo.
+    /// </summary>
+    private static ReservationRenewal ToRenewal(int status) => status switch
+    {
+        200 => ReservationRenewal.Renewed,
+        403 or 404 or 409 => ReservationRenewal.Lost,
+        _ => ReservationRenewal.Unreachable
+    };
 
     public async Task<bool> ReleaseReviewReservationAsync(int resultId)
         => (await SendAsync<object>(HttpMethod.Delete, $"api/review/{resultId}/reservation", null)).StatusCode == 204;
@@ -199,8 +270,8 @@ public class ApiService
     public Task<(EvaluatorReviewDetailDto? Result, int StatusCode, string? Error)> GetEvaluationDetailAsync(int resultId)
         => SendAsync<EvaluatorReviewDetailDto>(HttpMethod.Get, $"api/evaluation/{resultId}", null);
 
-    public async Task<bool> RenewEvaluationReservationAsync(int resultId)
-        => (await SendAsync<ReservationDto>(HttpMethod.Post, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 200;
+    public async Task<ReservationRenewal> RenewEvaluationReservationAsync(int resultId)
+        => ToRenewal((await SendAsync<ReservationDto>(HttpMethod.Post, $"api/evaluation/{resultId}/reservation", null)).StatusCode);
 
     public async Task<bool> ReleaseEvaluationReservationAsync(int resultId)
         => (await SendAsync<object>(HttpMethod.Delete, $"api/evaluation/{resultId}/reservation", null)).StatusCode == 204;
@@ -251,19 +322,70 @@ public class ApiService
         catch (Exception ex)
         {
             _logger.LogError(ex, "POST api/review/{Id} failed", resultId);
-            return (null, 0, ex.Message);
+            return (null, 0, NetworkError);
         }
     }
 
     // Users
-    public Task<List<UserDto>?> GetUsersAsync(UserRole? role = null, bool? active = null, string? search = null)
+    public Task<PagedResult<UserDto>?> GetUsersPageAsync(PageQuery page, UserRole? role = null, bool? active = null)
+        => GetAsync<PagedResult<UserDto>>("api/users" + Qs(page, ("role", role), ("active", active)));
+
+    /// <summary>Todos los usuarios que cumplen el filtro, pidiendo páginas de 100. Null si alguna falla.</summary>
+    public Task<List<UserDto>?> GetAllUsersAsync(UserRole? role = null, bool? active = null)
+        => GetAllPagesAsync(p => GetUsersPageAsync(p, role, active));
+
+    // ---- Listados paginados ----
+
+    /// <summary>
+    /// Recorre las páginas de 100 hasta agotar el total y devuelve todas las filas. Null si alguna
+    /// página falla: una lista incompleta se tomaría por la entera.
+    /// </summary>
+    public async Task<List<T>?> GetAllPagesAsync<T>(Func<PageQuery, Task<PagedResult<T>?>> fetch)
     {
-        var q = new List<string>();
-        if (role.HasValue) q.Add($"role={role}");
-        if (active.HasValue) q.Add($"active={active.Value.ToString().ToLowerInvariant()}");
-        if (!string.IsNullOrWhiteSpace(search)) q.Add($"q={Uri.EscapeDataString(search.Trim())}");
-        var qs = q.Any() ? "?" + string.Join("&", q) : "";
-        return GetAsync<List<UserDto>>($"api/users{qs}");
+        var all = new List<T>();
+        for (var page = 1; ; page++)
+        {
+            var result = await fetch(new PageQuery { Page = page, PageSize = PageQuery.MaxPageSize });
+            if (result is null) return null;
+
+            all.AddRange(result.Items);
+            // Se para también con la página vacía: si el total sube mientras se recorre, no da vueltas.
+            if (result.Items.Count == 0 || all.Count >= result.Total) return all;
+        }
+    }
+
+    /// <summary>
+    /// La cadena de consulta de un listado: página, tamaño, texto y orden, más los filtros. Lo que
+    /// es nulo o está en blanco no se envía. Las fechas van en UTC, en formato ISO.
+    /// </summary>
+    private static string Qs(PageQuery? page, params (string Key, object? Value)[] filters)
+    {
+        var parts = new List<string>();
+
+        void Add(string key, object? value)
+        {
+            var text = value switch
+            {
+                null => null,
+                bool b => b ? "true" : "false",
+                DateTime d => DateTime.SpecifyKind(d, DateTimeKind.Utc).ToString("O"),
+                Enum e => e.ToString(),
+                _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)
+            };
+            if (!string.IsNullOrWhiteSpace(text)) parts.Add($"{key}={Uri.EscapeDataString(text)}");
+        }
+
+        if (page is not null)
+        {
+            Add("page", page.Page);
+            Add("pageSize", page.PageSize);
+            Add("q", page.Text);
+            Add("sort", page.SortKey);
+            if (page.Desc) Add("desc", true);
+        }
+        foreach (var (key, value) in filters) Add(key, value);
+
+        return parts.Count == 0 ? "" : "?" + string.Join("&", parts);
     }
 
     public Task<(UserActionResultDto? Result, int StatusCode, string? Error)> CreateUserAsync(CreateUserDto dto)
@@ -318,7 +440,7 @@ public class ApiService
         catch (Exception ex)
         {
             _logger.LogError(ex, "{Method} {Url} failed", method, url);
-            return (default, 0, ex.Message);
+            return (default, 0, NetworkError);
         }
     }
 

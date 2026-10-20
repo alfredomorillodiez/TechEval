@@ -92,7 +92,7 @@ public class ExamIntegrityService : IExamIntegrityService
             return;
         }
 
-        var maxAwaySeconds = Math.Max(0, token.Exam.TimeLimitMinutes) * 60;
+        var maxAwaySeconds = Math.Max(0, session.TimeLimitFor(token.Exam)) * 60;
 
         await _eventRepo.AddAsync(new ExamIntegrityEvent
         {

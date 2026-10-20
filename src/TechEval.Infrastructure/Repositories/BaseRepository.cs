@@ -29,7 +29,18 @@ public class BaseRepository<T> : IRepository<T> where T : class
     public virtual async Task<T> AddAsync(T entity, CancellationToken ct = default)
     {
         await DbSet.AddAsync(entity, ct);
-        await Context.SaveChangesAsync(ct);
+        try
+        {
+            await Context.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // La entidad que no se pudo insertar no debe quedar rastreada: el contexto es uno
+            // por petición, y el siguiente SaveChanges (por ejemplo, el de una actualización
+            // tras una carrera de inserción) intentaría insertarla de nuevo y fallaría igual.
+            Context.Entry(entity).State = EntityState.Detached;
+            throw;
+        }
         return entity;
     }
 
@@ -43,6 +54,19 @@ public class BaseRepository<T> : IRepository<T> where T : class
     {
         DbSet.Remove(entity);
         await Context.SaveChangesAsync(ct);
+    }
+
+    public virtual async Task<(IReadOnlyList<T> Items, int Total)> GetPageAsync(
+        Expression<Func<T, bool>>? filter,
+        Func<IQueryable<T>, IOrderedQueryable<T>> order,
+        int skip, int take, CancellationToken ct = default)
+    {
+        IQueryable<T> query = DbSet.AsNoTracking();
+        if (filter is not null) query = query.Where(filter);
+
+        var total = await query.CountAsync(ct);
+        var items = await order(query).Skip(skip).Take(take).ToListAsync(ct);
+        return (items, total);
     }
 
     public virtual async Task<int> CountAsync(

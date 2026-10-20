@@ -13,4 +13,10 @@ public interface IExamTokenRepository : IRepository<ExamToken>
     /// lectura el dueño (`UserId`) y el plazo (`StartedAt` más `TimeLimitMinutes`).
     /// </summary>
     Task<ExamToken?> GetBySessionIdAsync(int sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Tokens con una sesión en curso, con su prueba y su resultado cargados. Son pocas filas, así que
+    /// quien llama calcula el plazo en memoria. Lo usa el trabajo que marca las sesiones abandonadas.
+    /// </summary>
+    Task<IReadOnlyList<ExamToken>> GetInProgressAsync(CancellationToken ct = default);
 }

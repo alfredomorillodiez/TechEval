@@ -27,7 +27,8 @@
     }
     else if (_exam is null)
     {
-        <div class="alert alert-warning">No se encontró la prueba.</div>
+        @* La API no distingue aquí un 404 de una caída: los dos llegan como nulo. *@
+        <LoadError What="la prueba (puede que ya no exista)" OnRetry="LoadAsync" />
     }
     else
     {
@@ -71,11 +72,19 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold">Tiempo límite (min)</label>
-                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="10" max="240" />
+                        <input type="number" class="form-control" @bind="_timeLimitMinutes" min="@TechEval.Application.ExamLimits.MinTimeLimitMinutes" max="@TechEval.Application.ExamLimits.MaxTimeLimitMinutes" />
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-semibold">% mínimo para aprobar</label>
-                        <input type="number" class="form-control" @bind="_passingScore" min="0" max="100" />
+                        <input type="number" class="form-control" @bind="_passingScore" min="@TechEval.Application.ExamLimits.MinPassingScore" max="@TechEval.Application.ExamLimits.MaxPassingScore" />
+                    </div>
+                    <div class="col-12">
+                        @* El tiempo y la nota se congelan en cada sesión al empezar: editar aquí no los cambia
+                           para quien ya está haciendo la prueba. *@
+                        <div class="form-text mt-0">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Los cambios de tiempo y de nota no afectan a las pruebas ya empezadas, solo a las que empiecen después.
+                        </div>
                     </div>
                     <div class="col-md-6 d-flex align-items-end">
                         <div class="d-flex gap-4 pb-2 text-muted">
@@ -93,7 +102,12 @@
                 <h5 class="mb-0">Evaluadores <span class="badge bg-secondary ms-1">@_evaluators.Count</span></h5>
             </div>
             <div class="card-body">
-                @if (HasOpenQuestions && _evaluators.Count == 0)
+                @if (_evaluatorsFailed)
+                {
+                    @* Sin esto, una caída decía «ningún evaluador» y «no hay evaluadores activos». *@
+                    <LoadError What="los evaluadores" OnRetry="LoadEvaluatorsAsync" />
+                }
+                @if (!_evaluatorsFailed && HasOpenQuestions && _evaluators.Count == 0)
                 {
                     <div class="alert alert-warning py-2">
                         <i class="bi bi-exclamation-triangle me-1"></i>
@@ -124,7 +138,11 @@
                     </ul>
                 }
                 @{ var candidates = _availableEvaluators.Where(u => _evaluators.All(e => e.UserId != u.Id)).ToList(); }
-                @if (candidates.Count > 0)
+                @if (_evaluatorsFailed)
+                {
+                    @* Ya avisado arriba: no se ofrece un desplegable de datos que no se cargaron. *@
+                }
+                else if (candidates.Count > 0)
                 {
                     <div class="d-flex gap-2" style="max-width:480px;">
                         <select class="form-select form-select-sm" @bind="_selectedEvaluatorId">
@@ -236,7 +254,7 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Expiración (horas)</label>
-                            <input type="number" class="form-control" @bind="_expirationHours" min="1" max="168" />
+                            <input type="number" class="form-control" @bind="_expirationHours" min="@TechEval.Application.ExamLimits.MinExpirationHours" max="@TechEval.Application.ExamLimits.MaxExpirationHours" />
                         </div>
                     }
                 </div>
@@ -283,14 +301,29 @@
     {
         await Auth.InitializeAsync();
         if (!Auth.IsAdmin) { Nav.NavigateTo(Auth.Home); return; }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
         _exam = await Api.GetExamAsync(Id);
         if (_exam is not null)
         {
             PopulateFields(_exam);
-            _evaluators = await Api.GetExamEvaluatorsAsync(Id) ?? new();
-            _availableEvaluators = await Api.GetUsersAsync(UserRole.Evaluador, active: true) ?? new();
+            await LoadEvaluatorsAsync();
         }
         _loading = false;
+    }
+
+    private async Task LoadEvaluatorsAsync()
+    {
+        var assigned = await Api.GetExamEvaluatorsAsync(Id);
+        // Todos los evaluadores activos, pidiendo páginas de 100: el desplegable los ofrece todos.
+        var available = await Api.GetAllUsersAsync(UserRole.Evaluador, active: true);
+        _evaluatorsFailed = assigned is null || available is null;
+        if (assigned is not null) _evaluators = assigned;
+        if (available is not null) _availableEvaluators = available;
     }
 
     // ---- Evaluadores ----------------------------------------------------------------------
@@ -298,7 +331,7 @@
     private List<ExamEvaluatorDto> _evaluators = new();
     private List<UserDto> _availableEvaluators = new();
     private int _selectedEvaluatorId;
-    private bool _evaluatorBusy;
+    private bool _evaluatorBusy, _evaluatorsFailed;
     private string? _evaluatorError;
 
     private bool HasOpenQuestions => _exam?.Questions.Any(q => q.QuestionType == QuestionType.OpenEnded) ?? false;
@@ -335,9 +368,11 @@
     {
         _saveError = string.Empty;
         _saveSuccess = false;
-        if (string.IsNullOrWhiteSpace(_title)) { _saveError = "El título es obligatorio."; return; }
+        // La misma comprobación y el mismo texto que el servidor: el aviso sale sin llamar a la API.
+        if (TechEval.Application.ExamLimits.ExamDataProblem(_title, _timeLimitMinutes, _passingScore) is { } problem)
+        { _saveError = problem; return; }
         _saving = true;
-        var updated = await Api.UpdateExamAsync(Id, new UpdateExamDto(
+        var (updated, _, updateError) = await Api.UpdateExamAsync(Id, new UpdateExamDto(
             _title, _description, _timeLimitMinutes, _passingScore, _isActive));
         _saving = false;
         if (updated is not null)
@@ -348,7 +383,7 @@
         }
         else
         {
-            _saveError = "No se pudieron guardar los cambios.";
+            _saveError = updateError ?? "No se pudieron guardar los cambios.";
         }
     }
 
@@ -366,11 +401,11 @@
         if (string.IsNullOrWhiteSpace(_candidateName) || string.IsNullOrWhiteSpace(_candidateEmail))
         { _sendError = "Nombre y email son obligatorios."; return; }
         _sendLoading = true;
-        var token = await Api.SendExamAsync(new SendExamDto(
+        var (token, _, error) = await Api.SendExamAsync(new SendExamDto(
             _sendingExamId!.Value, _candidateName, _candidateEmail, _expirationHours));
         _sendLoading = false;
         if (token is not null) _sendSuccess = true;
-        else _sendError = "Error al enviar la prueba. Verifica la configuración de email.";
+        else _sendError = error ?? "No se pudo enviar la prueba. Verifica la configuración de email.";
     }
 
     private static string DifficultyClass(DifficultyLevel d) => d switch

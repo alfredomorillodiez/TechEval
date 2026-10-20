@@ -5,6 +5,10 @@
 
 # dotenv files
 .env
+# Los respaldos que crean los guiones de rotación (.env.20261009-101500.bak) llevan los secretos
+# anteriores, justo los que hay que dar por comprometidos. Solo se versiona el de ejemplo.
+.env.*
+!.env.example
 
 # User-specific files
 *.rsuser
